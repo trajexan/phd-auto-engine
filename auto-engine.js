@@ -1,4 +1,4 @@
-/* phd auto-engine e40 — pull via GET /api/auto-engine */
+/* phd auto-engine e41 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e40";
+  var AUTO_ENGINE_VERSION = "e41";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -581,6 +581,15 @@
        */
       __publicField(this, "mineStrive", null);
       /**
+       * e41 (amvmtvh85ykc): consecutive mineStrive soft-blocks with no ore gain —
+       * ≥3 → mineBlockUntil cool-down so rock ping-pong cannot starve for hours.
+       */
+      __publicField(this, "mineFailStreak", 0);
+      /** e41: runTicks until new mine gather allowed after thrash soft-block. */
+      __publicField(this, "mineBlockUntil", 0);
+      /** e41: last seen oreCount — reset fail streak on ore gain. */
+      __publicField(this, "lastOreCount", -1);
+      /**
        * e24: persist walk-to-stairs (food fat / farm ceiling / kit stairs) until depth change
        * or soft-block. Prevents standing forever with stale "food fat → advance" after a
        * failed walkTo / door thrash / F2→F1 bounce.
@@ -696,6 +705,9 @@
         this.hatchetRethinks = 0;
         this.bagFullFails = 0;
         this.forgeBlockUntil = 0;
+        this.mineFailStreak = 0;
+        this.mineBlockUntil = 0;
+        this.lastOreCount = -1;
         this.anvilStrive = null;
         this.mineStrive = null;
         this.stairsStrive = null;
@@ -992,7 +1004,10 @@
         const styleDone = w.hasStyleWeapon;
         const kitBuilt = metalDone || styleDone;
         const forgePathOpen = w.oreCount > 0 || hasPick && w.anvilNearby || !hasPick && w.coins >= TOOL;
-        if (needHealPrep && (kitBuilt || !forgePathOpen)) {
+        const shortOreNoAnvil = hasHatchet && w.oreCount > 0 && w.oreCount < ORE_WEP && !w.anvilNearby;
+        const mineCool = this.runTicks < this.mineBlockUntil;
+        const skipNewMine = mineCool || needHealPrep && shortOreNoAnvil;
+        if (needHealPrep && (kitBuilt || !forgePathOpen || shortOreNoAnvil)) {
           this.clearAnvilStrive();
           if (this.resumeMineStrive(host, w, stance)) return;
           if (this.bagFullActive()) {
@@ -1108,7 +1123,7 @@
           const lootUrge = this.traits.greed * 0.5 + this.traits.goldChase * 0.35 + (stance.hungry ? 0.25 : 0);
           if (w.bagFree > 0 && lootUrge + this.rnd() * 0.3 > 0.35 && this.tryWalkLoot(host, w, stance, "loot drop")) return;
         }
-        if (!this.anvilStrive && !this.stylePivot && !styleDone && hasPick && !metalDone && orePlan > 0 && w.oreCount < orePlan && w.gather) {
+        if (!skipNewMine && !this.anvilStrive && !this.stylePivot && !styleDone && hasPick && !metalDone && orePlan > 0 && w.oreCount < orePlan && w.gather) {
           if (this.tryGather(host, w, stance, "mine ore")) return;
         }
         if (!this.stylePivot && !styleDone && hasPick && !hasHatchet && (w.oreCount >= ORE_HATCHET || w.coins >= TOOL || w.oreCount >= orePlan)) {
@@ -1129,12 +1144,12 @@
             this.cool = 2;
             return;
           }
-          if (!this.anvilStrive && w.gather && w.oreCount < orePlan && this.tryGather(host, w, stance, "mine ore")) return;
+          if (!skipNewMine && !this.anvilStrive && w.gather && w.oreCount < orePlan && this.tryGather(host, w, stance, "mine ore")) return;
           if (this.walkHub(host, w, stance, "hub for hatchet")) return;
         }
         if (!this.stylePivot && !styleDone && hasHatchet && !metalDone) {
           if (!w.hasMetalWeapon) {
-            if (!this.anvilStrive && w.oreCount < ORE_WEP && hasPick && w.gather) {
+            if (!skipNewMine && !this.anvilStrive && w.oreCount < ORE_WEP && hasPick && w.gather) {
               if (this.tryGather(host, w, stance, "mine ore")) return;
             }
             if (w.oreCount >= ORE_WEP) {
@@ -1151,7 +1166,7 @@
               return;
             }
           } else if (!w.hasArmour) {
-            if (!this.anvilStrive && w.oreCount < ORE_ARMOUR && hasPick && w.gather) {
+            if (!skipNewMine && !this.anvilStrive && w.oreCount < ORE_ARMOUR && hasPick && w.gather) {
               if (this.tryGather(host, w, stance, "mine ore")) return;
             }
             if (w.oreCount >= ORE_ARMOUR) {
@@ -1657,6 +1672,10 @@
         this.peakHealThisFloor = w.healReserve;
         this.pondRethinks = 0;
       }
+      if (this.lastOreCount >= 0 && w.oreCount > this.lastOreCount) {
+        this.mineFailStreak = 0;
+      }
+      this.lastOreCount = w.oreCount;
       const fp = w.progressFp || "";
       if (!fp) return;
       if (fp !== this.progressFp) {
@@ -2738,6 +2757,7 @@
         return false;
       }
       if (w.oreCount > s.oreAtStart) {
+        this.mineFailStreak = 0;
         this.clearMineStrive();
         return false;
       }
@@ -2747,8 +2767,14 @@
       }
       const aged = this.runTicks - s.started;
       if (aged >= 160) {
+        this.mineFailStreak++;
         this.noteAction("mine strive soft-block");
         this.clearMineStrive();
+        if (this.mineFailStreak >= 3) {
+          this.mineFailStreak = 0;
+          this.mineBlockUntil = this.runTicks + 280;
+          this.noteAction("mine thrash soft-block");
+        }
         return false;
       }
       const press = w.foes.some(
