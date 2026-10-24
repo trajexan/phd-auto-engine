@@ -1,4 +1,4 @@
-/* phd auto-engine e35 — pull via GET /api/auto-engine */
+/* phd auto-engine e36 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e35";
+  var AUTO_ENGINE_VERSION = "e36";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -565,6 +565,7 @@
       /**
        * Gather failed "too full" recently — prefer sell/shop over mine/chop until cleared.
        * Cleared when bagFree > 0 and sell path not needed.
+       * e36: too-full sets +600 (was TILE_BLOCK_TICKS=200) + force-sell; farm-food gated while active.
        */
       __publicField(this, "bagFullUntil", 0);
       /** forgeWieldedOnce failed (need ore / mats) — soft-block forge+ until runTicks. */
@@ -609,6 +610,11 @@
       __publicField(this, "lastFoodFarm", null);
       /** e35: consecutive failed pickaxe buys while melee-pressed. */
       __publicField(this, "shopFireFails", 0);
+      /**
+       * e36: consecutive stuck-rethinks while find-pond / farm-food / enroute pond / regen
+       * with food=0+heal=0 — ≥3 → soft-block gather + fight/XP break (pond thrash hang).
+       */
+      __publicField(this, "pondRethinks", 0);
       /** Peak healReserve this floor — detect food fall from fat stock. */
       __publicField(this, "peakHealThisFloor", 0);
       /** Elite/threat kite↔anvil thrash counter; patience → fight past / explore. */
@@ -672,6 +678,8 @@
         this.lootStandHits = 0;
         this.rodCoinMines = 0;
         this.bagFullUntil = 0;
+        this.shopFireFails = 0;
+        this.pondRethinks = 0;
         this.forgeBlockUntil = 0;
         this.anvilStrive = null;
         this.mineStrive = null;
@@ -822,6 +830,8 @@
           } else if (earlyForgeFirst) {
           } else if (this.resumeMineStrive(host, w, stance)) {
             return;
+          } else if (this.bagFullActive()) {
+            if (this.tryBagFullRelief(host, w, stance)) return;
           } else if (w.pondKnown && w.gather && this.tryGather(host, w, stance, "farm food")) {
             this.rememberFoodFarm(w);
             return;
@@ -915,7 +925,6 @@
             return;
           }
           this.shopFireFails = (this.shopFireFails || 0) + 1;
-          // e35: after 2 failed buys under melee, kite away — do not thrash acquire/wait
           if (this.shopFireFails >= 2) {
             this.toolBlock.set("pickaxe", this.runTicks + 40);
             this.shopFireFails = 0;
@@ -968,7 +977,9 @@
         if (needHealPrep && (kitBuilt || !forgePathOpen)) {
           this.clearAnvilStrive();
           if (this.resumeMineStrive(host, w, stance)) return;
-          if (w.pondKnown && w.gather && this.tryGather(host, w, stance, "farm food")) {
+          if (this.bagFullActive()) {
+            if (this.tryBagFullRelief(host, w, stance)) return;
+          } else if (w.pondKnown && w.gather && this.tryGather(host, w, stance, "farm food")) {
             this.rememberFoodFarm(w);
             return;
           }
@@ -990,11 +1001,16 @@
               return;
             }
           }
-          if (hasRod && w.pondKnown && w.gather && this.tryGather(host, w, stance, "fish for food")) {
+          if (!this.bagFullActive() && hasRod && w.pondKnown && w.gather && this.tryGather(host, w, stance, "fish for food")) {
             this.rememberFoodFarm(w);
             return;
           }
           if (!imminent && this.tryWalkLoot(host, w, stance, "loot for food")) return;
+          if (this.bagFullActive()) {
+            this.setStatus(host, w, stance, "sell for loot space");
+            this.cool = 2;
+            return;
+          }
           if (w.explore) {
             host.clearEngage();
             host.walkTo(w.explore.x, w.explore.y);
@@ -1218,10 +1234,12 @@
             this.cool = 4;
             return;
           }
-          if (hasRod && w.pondKnown && w.gather && !foeNear && (w.hasFire || w.rawFish < 2)) {
+          if (this.bagFullActive() && needHeal) {
+            if (this.tryBagFullRelief(host, w, stance)) return;
+          } else if (hasRod && w.pondKnown && w.gather && !foeNear && (w.hasFire || w.rawFish < 2)) {
             if (this.tryGather(host, w, stance, "fish for food")) return;
           }
-          if (hasRod && !w.pondKnown && needHeal && !foeNear) {
+          if (!this.bagFullActive() && hasRod && !w.pondKnown && needHeal && !foeNear) {
             if (!imminent && this.tryWalkLoot(host, w, stance, "loot for food")) return;
             if (w.explore) {
               host.clearEngage();
@@ -1476,7 +1494,9 @@
         const criticalHeal = stance.ratio <= 0.35;
         if (lane === "food" || lane === "gear" && criticalHeal || lane === "resource") {
           const foodLane = lane === "food" || lane === "gear" && criticalHeal;
-          if (foodLane && !w.pondKnown) {
+          if (foodLane && this.bagFullActive()) {
+            if (this.tryBagFullRelief(host, w, stance)) return;
+          } else if (foodLane && !w.pondKnown) {
             if (w.explore) {
               host.clearEngage();
               host.walkTo(w.explore.x, w.explore.y);
@@ -1505,7 +1525,9 @@
         return;
       }
       if (!earlyBare && w.healReserve <= 0 && w.gather && !this.farmCeiling()) {
-        if (host.hasTool("rod")) {
+        if (this.bagFullActive()) {
+          if (this.tryBagFullRelief(host, w, stance)) return;
+        } else if (host.hasTool("rod")) {
           if (w.pondKnown && this.tryGather(host, w, stance, "farm food")) return;
         } else if (this.tryGather(host, w, stance, "farm resources")) return;
       }
@@ -1612,7 +1634,10 @@
      */
     /** e18: heal/food/gear/ore fingerprint changed → reset farm-ceiling timer. */
     trackProgress(w) {
-      if (w.healReserve > this.peakHealThisFloor) this.peakHealThisFloor = w.healReserve;
+      if (w.healReserve > this.peakHealThisFloor) {
+        this.peakHealThisFloor = w.healReserve;
+        this.pondRethinks = 0;
+      }
       const fp = w.progressFp || "";
       if (!fp) return;
       if (fp !== this.progressFp) {
@@ -1624,6 +1649,7 @@
     rememberFoodFarm(w) {
       if (!w.gather || !w.pondKnown) return;
       this.lastFoodFarm = { depth: w.depth, x: w.gather.x, y: w.gather.y };
+      this.pondRethinks = 0;
     }
     /** Explicit improve (forge+ / equip drop) — also resets farm ceiling. */
     noteImprove() {
@@ -1794,7 +1820,6 @@
           this.rememberFoodFarm(w);
           return true;
         }
-        // e35: pond gone / gather fail at remembered tile — drop so stuck rethink cannot loop
         this.noteAction("food fell \u2014 drop dead farm");
         this.lastFoodFarm = null;
         return false;
@@ -1877,6 +1902,23 @@
       return true;
     }
     /**
+     * e36: while bagFullUntil active, sell/fletch before farm-food / find-pond.
+     * True = action issued. When bagFull and false, caller must skip explore-for-pond / food gather this tick.
+     */
+    tryBagFullRelief(host, w, stance) {
+      if (this.runTicks >= this.bagFullUntil) return false;
+      if (this.tryCraftWoodForValue(host, w, stance, "fletch sell")) return true;
+      if (host.sellUnusedOnce() || host.sellOreKeep(0) || host.sellMatsForCoins(30)) {
+        this.setStatus(host, w, stance, "sell for loot space");
+        this.cool = 3;
+        return true;
+      }
+      return false;
+    }
+    bagFullActive() {
+      return this.runTicks < this.bagFullUntil;
+    }
+    /**
      * Gather with fail-adapt + same-target stuck (earlier than floor hang).
      * False = fall through to explore / wander / other lane.
      */
@@ -1937,8 +1979,13 @@
         this.noteAction(`gather fail \u2014 ${reason}`);
         host.log(`AUTO: gather fail \u2014 ${reason}`);
         if (tooFull) {
-          this.bagFullUntil = this.runTicks + TILE_BLOCK_TICKS;
+          this.bagFullUntil = this.runTicks + 600;
           this.sameTargetHits = SAME_TARGET_MAX;
+          if (host.sellUnusedOnce() || host.sellOreKeep(0) || host.sellMatsForCoins(30)) {
+            this.setStatus(host, w, stance, "sell for loot space");
+            this.cool = 3;
+            return true;
+          }
           return false;
         }
         if (unreachable) {
@@ -2322,10 +2369,11 @@
     }
     /**
      * e25 / Darren t1196–98: stuck when gear + food + exp + useful approach are
-     * all quiet for IDLE_STUCK_TICKS (~7.2s). Useful approach = Chebyshev to the
+     * all quiet for IDLE_STUCK_TICKS (~7.2s @ e34). Useful approach = Chebyshev to the
      * current desire target decreases (or adj). Door open/close thrash and
      * anvil-orbit walks change tiles but not approach → still stuck.
-     * Combat (foe dist≤2) and active mineStrive/anvilStrive reset (e34). e35: food-fell desire + clear lastFoodFarm on rethink. Then soft-block + rethink.
+     * Combat (foe dist≤2) and active mineStrive/anvilStrive reset (e34).
+     * e35: food-fell desire + clear lastFoodFarm on rethink. Then soft-block + rethink.
      */
     stuckGearFpOf(w) {
       const parts = (w.progressFp || "").split("|");
@@ -2355,6 +2403,9 @@
       }
       if (/pond|fish|farm food|hoard food|enroute pond/i.test(st) && w.gather) {
         return { key: `gather:${w.gather.x},${w.gather.y}`, x: w.gather.x, y: w.gather.y };
+      }
+      if (/find pond/i.test(st) && !w.gather && w.explore) {
+        return { key: `explore:${w.explore.x},${w.explore.y}`, x: w.explore.x, y: w.explore.y };
       }
       if (/loot|chest/i.test(st) && w.loot) {
         return { key: `loot:${w.loot.x},${w.loot.y}`, x: w.loot.x, y: w.loot.y };
@@ -2414,6 +2465,7 @@
         this.stuckFoodFp = foodFp;
         this.stuckXpFp = xpFp;
         this.stuckTicks = 0;
+        if (foodProg) this.pondRethinks = 0;
         if (usefulApproach || gearProg || foodProg || expProg || combatBusy || striveBusy) {
           this.stuckRecentTiles = [];
         }
@@ -2460,6 +2512,23 @@
       this.lootWalkKey = "";
       this.lootWalkHits = 0;
       this.lootStandHits = 0;
+      const stRethink = (this.lastStatus || "").toLowerCase();
+      const pondSpin = /find pond|farm food|enroute pond|regen to hub/i.test(stRethink) && w.food === 0 && w.healReserve === 0;
+      if (pondSpin) this.pondRethinks++;
+      if (this.pondRethinks >= 3) {
+        this.pondRethinks = 0;
+        this.laneBias = "gear";
+        this.noteAction("pond thrash \u2014 fight/XP");
+        host.log("AUTO: pond thrash \u2014 break to fight/XP");
+        if (w.explore) {
+          host.walkTo(w.explore.x, w.explore.y);
+        } else if (w.wander) {
+          host.walkTo(w.wander.x, w.wander.y);
+        }
+        this.setStatus(host, w, stance, "pond thrash \u2014 fight/XP");
+        this.cool = 3;
+        return;
+      }
       this.noteAction(thrashing ? "stuck rethink (thrash)" : "stuck rethink (gear+food+exp+approach flat)");
       host.log(thrashing ? "AUTO: stuck thrash (no approach) \u2014 rethink" : "AUTO: stuck (no gear/food/exp/approach) \u2014 rethink");
       this.setStatus(host, w, stance, "stuck rethink");
