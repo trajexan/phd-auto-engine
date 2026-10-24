@@ -1,4 +1,4 @@
-/* phd auto-engine e36 — pull via GET /api/auto-engine */
+/* phd auto-engine e37 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e36";
+  var AUTO_ENGINE_VERSION = "e37";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -615,6 +615,16 @@
        * with food=0+heal=0 — ≥3 → soft-block gather + fight/XP break (pond thrash hang).
        */
       __publicField(this, "pondRethinks", 0);
+      /**
+       * e37: consecutive stuck-rethinks while hub/forge/shop/wait hatchet without hatchet —
+       * ≥3 → soft-block hatchet strive + explore/mine (hub-hatchet thrash hang).
+       */
+      __publicField(this, "hatchetRethinks", 0);
+      /**
+       * e37: consecutive bagFull relief ticks where sell/fletch returned false while bag still tight —
+       * ≥3 → clear bagFullUntil and move on (sell-hang when bag is raw-fish/seeds only).
+       */
+      __publicField(this, "bagFullFails", 0);
       /** Peak healReserve this floor — detect food fall from fat stock. */
       __publicField(this, "peakHealThisFloor", 0);
       /** Elite/threat kite↔anvil thrash counter; patience → fight past / explore. */
@@ -661,7 +671,10 @@
       this.watchHang(host, w);
       if (this.hangReported) return;
       const stance = foodStance(w.healReserve, w.floorHealNeed, this.traits);
-      if (w.bagFree > 0 && this.runTicks >= this.bagFullUntil) this.bagFullUntil = 0;
+      if (w.bagFree > 0 && this.runTicks >= this.bagFullUntil) {
+        this.bagFullUntil = 0;
+        this.bagFullFails = 0;
+      }
       this.trackProgress(w);
       this.maybeRethinkIdle(host, w, stance);
       if (w.depth !== this.lastDepth) {
@@ -680,6 +693,8 @@
         this.bagFullUntil = 0;
         this.shopFireFails = 0;
         this.pondRethinks = 0;
+        this.hatchetRethinks = 0;
+        this.bagFullFails = 0;
         this.forgeBlockUntil = 0;
         this.anvilStrive = null;
         this.mineStrive = null;
@@ -1907,11 +1922,42 @@
      */
     tryBagFullRelief(host, w, stance) {
       if (this.runTicks >= this.bagFullUntil) return false;
-      if (this.tryCraftWoodForValue(host, w, stance, "fletch sell")) return true;
+      if (this.tryCraftWoodForValue(host, w, stance, "fletch sell")) {
+        this.bagFullFails = 0;
+        return true;
+      }
       if (host.sellUnusedOnce() || host.sellOreKeep(0) || host.sellMatsForCoins(30)) {
+        this.bagFullFails = 0;
         this.setStatus(host, w, stance, "sell for loot space");
         this.cool = 3;
         return true;
+      }
+      this.bagFullFails++;
+      if (this.bagFullFails >= 3) {
+        this.bagFullFails = 0;
+        this.bagFullUntil = 0;
+        this.noteAction("bag stuck \u2014 move on");
+        host.log("AUTO: bag full relief failed \u2014 move on");
+        if (w.kitReady && w.stairs && w.stairsLit && w.stairsOpen && !this.isGatherTileBlocked(w.stairs.x, w.stairs.y)) {
+          this.markStairsStrive("bag stuck \u2192 stairs", w);
+          host.clearEngage();
+          host.walkTo(w.stairs.x, w.stairs.y);
+          this.setStatus(host, w, stance, "bag stuck \u2192 stairs");
+          this.cool = 3;
+          return true;
+        }
+        if (w.explore) {
+          host.walkTo(w.explore.x, w.explore.y);
+          this.setStatus(host, w, stance, "bag stuck \u2014 explore");
+          this.cool = 3;
+          return true;
+        }
+        if (w.wander) {
+          host.walkTo(w.wander.x, w.wander.y);
+          this.setStatus(host, w, stance, "bag stuck \u2014 wander");
+          this.cool = 3;
+          return true;
+        }
       }
       return false;
     }
@@ -2397,6 +2443,9 @@
       if (/anvil|forge|smith|hatchet|craft gem/i.test(st) && w.hub) {
         return { key: `anvil:${w.hub.x},${w.hub.y}`, x: w.hub.x, y: w.hub.y };
       }
+      if (/sell for loot|fletch sell|bag stuck/i.test(st) && w.hub) {
+        return { key: `hub:${w.hub.x},${w.hub.y}`, x: w.hub.x, y: w.hub.y };
+      }
       if (/food fell/i.test(st) && this.lastFoodFarm && this.lastFoodFarm.depth === w.depth) {
         const s = this.lastFoodFarm;
         return { key: `foodfell:${s.x},${s.y}`, x: s.x, y: s.y };
@@ -2441,7 +2490,9 @@
           this.stuckRecentTiles = [];
           usefulApproach = true;
         } else if (dist <= 1) {
-          usefulApproach = true;
+          const stPark = (this.lastStatus || "").toLowerCase();
+          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel/i.test(stPark);
+          usefulApproach = !parked;
         } else if (tile !== this.stuckTile) {
           this.stuckRecentTiles.push(tile);
           if (this.stuckRecentTiles.length > STUCK_TILE_RING) this.stuckRecentTiles.shift();
@@ -2526,6 +2577,25 @@
           host.walkTo(w.wander.x, w.wander.y);
         }
         this.setStatus(host, w, stance, "pond thrash \u2014 fight/XP");
+        this.cool = 3;
+        return;
+      }
+      const hatchetSpin = /hub for hatchet|forge hatchet|shop for hatchet|wait anvil hatchet/i.test(stRethink) && !host.hasTool("hatchet");
+      if (hatchetSpin) this.hatchetRethinks++;
+      else this.hatchetRethinks = 0;
+      if (this.hatchetRethinks >= 3) {
+        this.hatchetRethinks = 0;
+        this.clearAnvilStrive();
+        this.toolBlock.set("hatchet", this.runTicks + TOOL_BLOCK_TICKS);
+        this.laneBias = "gear";
+        this.noteAction("hatchet thrash \u2014 explore/mine");
+        host.log("AUTO: hatchet thrash \u2014 break to explore/mine");
+        if (w.gather && host.hasTool("pickaxe") && w.bagFree > 0 && this.tryGather(host, w, stance, "mine ore")) {
+          return;
+        }
+        if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+        else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        this.setStatus(host, w, stance, "hatchet thrash \u2014 explore");
         this.cool = 3;
         return;
       }
