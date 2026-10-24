@@ -1,4 +1,4 @@
-/* phd auto-engine e41 — pull via GET /api/auto-engine */
+/* phd auto-engine e42 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e41";
+  var AUTO_ENGINE_VERSION = "e42";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -590,6 +590,15 @@
       /** e41: last seen oreCount — reset fail streak on ore gain. */
       __publicField(this, "lastOreCount", -1);
       /**
+       * e42 (amvmuuuou8tg): openChestOnce keeps returning true while kite interrupts —
+       * ≥4 no coin/bag gain → chestBlockUntil so chest↔kite orbit cannot starve.
+       */
+      __publicField(this, "chestFailStreak", 0);
+      /** e42: runTicks until new chest open allowed after thrash soft-block. */
+      __publicField(this, "chestBlockUntil", 0);
+      /** e42: last coins+bag fingerprint — reset fail streak on loot gain. */
+      __publicField(this, "chestProgKey", "");
+      /**
        * e24: persist walk-to-stairs (food fat / farm ceiling / kit stairs) until depth change
        * or soft-block. Prevents standing forever with stale "food fat → advance" after a
        * failed walkTo / door thrash / F2→F1 bounce.
@@ -708,6 +717,9 @@
         this.mineFailStreak = 0;
         this.mineBlockUntil = 0;
         this.lastOreCount = -1;
+        this.chestFailStreak = 0;
+        this.chestBlockUntil = 0;
+        this.chestProgKey = "";
         this.anvilStrive = null;
         this.mineStrive = null;
         this.stairsStrive = null;
@@ -919,9 +931,7 @@
         this.cool = 3;
         return;
       }
-      if (!imminent && w.bagFree > 0 && host.openChestOnce()) {
-        this.setStatus(host, w, stance, "open chest");
-        this.cool = 1;
+      if (!imminent && this.tryOpenChestOnce(host, w, stance, { needBag: true, cool: 1 })) {
         return;
       }
       {
@@ -1414,9 +1424,7 @@
         this.cool = 1;
         return;
       }
-      if (!imminent && host.openChestOnce()) {
-        this.setStatus(host, w, stance, "open chest");
-        this.cool = 2;
+      if (!imminent && this.tryOpenChestOnce(host, w, stance, { needBag: false, cool: 2 })) {
         return;
       }
       if (!imminent && this.tryCraftWoodForValue(host, w, stance, "fletch sell")) return;
@@ -2516,7 +2524,7 @@
           usefulApproach = true;
         } else if (dist <= 1) {
           const stPark = (this.lastStatus || "").toLowerCase();
-          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food/i.test(stPark);
+          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest/i.test(stPark);
           if (desire.key.startsWith("gather:") && !gatherBusy) {
             usefulApproach = false;
           } else {
@@ -2826,6 +2834,34 @@
       };
     }
     /**
+     * e42 (amvmuuuou8tg): open chest with thrash soft-block.
+     * openChestOnce returns true on walk OR open; kite interrupts so status stays
+     * "open chest" forever with no coin/bag gain. Count streak; ≥4 → cool-down.
+     * Soft-block falls through (false) — do NOT keep status open chest.
+     */
+    tryOpenChestOnce(host, w, stance, opts) {
+      if (this.runTicks < this.chestBlockUntil) return false;
+      if (opts.needBag && w.bagFree <= 0) return false;
+      if (!host.openChestOnce()) return false;
+      const fp = `c${w.coins}|bf${w.bagFree}|f${w.food}|h${w.healReserve}`;
+      if (this.chestProgKey !== "" && fp === this.chestProgKey) {
+        this.chestFailStreak++;
+        if (this.chestFailStreak >= 4) {
+          this.chestFailStreak = 0;
+          this.chestBlockUntil = this.runTicks + 160;
+          this.noteAction("chest thrash soft-block");
+          host.log("AUTO: chest thrash soft-block \u2014 skip open");
+          return false;
+        }
+      } else {
+        this.chestFailStreak = 0;
+        this.chestProgKey = fp;
+      }
+      this.setStatus(host, w, stance, "open chest");
+      this.cool = opts.cool;
+      return true;
+    }
+    /**
      * e23: keep forging/smithing at anvil until done or soft-block (no progress / too long).
      * True if an action was issued this tick.
      */
@@ -2851,7 +2887,10 @@
         s.standHits = 0;
       }
       const aged = this.runTicks - s.started;
-      if (s.standHits >= 18 || aged >= 220) {
+      const emptyHeal = w.food <= 0 && w.healReserve <= 0;
+      const standLim = emptyHeal ? 12 : 18;
+      const ageLim = emptyHeal ? 120 : 220;
+      if (s.standHits >= standLim || aged >= ageLim) {
         this.noteAction(`anvil strive soft-block (${s.label})`);
         host.log(`AUTO: anvil unreachable (${s.label}) \u2014 soft-block`);
         this.forgeBlockUntil = this.runTicks + 200;
