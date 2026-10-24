@@ -1,4 +1,4 @@
-/* phd auto-engine e37 — pull via GET /api/auto-engine */
+/* phd auto-engine e38 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e37";
+  var AUTO_ENGINE_VERSION = "e38";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1820,6 +1820,7 @@
     tryFoodFellFallback(host, w, stance) {
       const emptyHealNoRod = w.healReserve <= 0 && w.food <= 0 && !host.hasTool("rod");
       if (emptyHealNoRod) return false;
+      if (w.bagFree <= 0 || this.runTicks < this.bagFullUntil) return false;
       const spot = this.lastFoodFarm;
       if (!spot) return false;
       if (spot.depth === w.depth) {
@@ -1936,6 +1937,7 @@
       if (this.bagFullFails >= 3) {
         this.bagFullFails = 0;
         this.bagFullUntil = 0;
+        this.lastFoodFarm = null;
         this.noteAction("bag stuck \u2014 move on");
         host.log("AUTO: bag full relief failed \u2014 move on");
         if (w.kitReady && w.stairs && w.stairsLit && w.stairsOpen && !this.isGatherTileBlocked(w.stairs.x, w.stairs.y)) {
@@ -2491,7 +2493,7 @@
           usefulApproach = true;
         } else if (dist <= 1) {
           const stPark = (this.lastStatus || "").toLowerCase();
-          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel/i.test(stPark);
+          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|food fat|farm ceiling → next floor|stairs soft-block/i.test(stPark);
           usefulApproach = !parked;
         } else if (tile !== this.stuckTile) {
           this.stuckRecentTiles.push(tile);
@@ -2670,8 +2672,19 @@
         return false;
       }
       if (w.tile.x === s.sx && w.tile.y === s.sy) {
-        this.clearStairsStrive();
-        return false;
+        s.standHits++;
+        if (s.standHits >= 10) {
+          this.noteGatherFail(s.sx, s.sy);
+          this.noteAction(`stairs no-descend soft-block (${s.label})`);
+          host.log(`AUTO: on stairs but no descend (${s.label}) \u2014 soft-block`);
+          host.clearWalk();
+          this.clearStairsStrive();
+          this.setStatus(host, w, stance, "stairs soft-block");
+          this.cool = 1;
+          return false;
+        }
+        this.cool = 1;
+        return true;
       }
       if (w.tile.x === s.standX && w.tile.y === s.standY) s.standHits++;
       else {
