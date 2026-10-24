@@ -1,4 +1,4 @@
-/* phd auto-engine e33 — pull via GET /api/auto-engine */
+/* phd auto-engine e34 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e33";
+  var AUTO_ENGINE_VERSION = "e34";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -392,7 +392,7 @@
   }
   var SAME_TARGET_MAX = 3;
   var TILE_BLOCK_TICKS = 200;
-  var IDLE_STUCK_TICKS = 24;
+  var IDLE_STUCK_TICKS = 48;
   var STUCK_TILE_RING = 12;
   var TOOL_BLOCK_TICKS = 400;
   var PROGRESS_STALL_TICKS = 60;
@@ -906,12 +906,12 @@
             return;
           }
         } else {
-          if (this.stepAway(host, w, stance, "kite to shop")) return;
           if (host.acquireTool("pickaxe")) {
             this.setStatus(host, w, stance, "shop under fire");
             this.cool = 2;
             return;
           }
+          if (this.stepAway(host, w, stance, "kite to shop")) return;
           host.clearEngage();
           host.clearWalk();
           this.setStatus(host, w, stance, "wait for shop");
@@ -2304,10 +2304,10 @@
     }
     /**
      * e25 / Darren t1196–98: stuck when gear + food + exp + useful approach are
-     * all quiet for IDLE_STUCK_TICKS (~3.6s). Useful approach = Chebyshev to the
+     * all quiet for IDLE_STUCK_TICKS (~7.2s @ e34). Useful approach = Chebyshev to the
      * current desire target decreases (or adj). Door open/close thrash and
      * anvil-orbit walks change tiles but not approach → still stuck.
-     * Combat (foe dist≤2) resets. Then soft-block target + rethink.
+     * Combat (foe dist≤2) and active mineStrive/anvilStrive reset (e34). Then soft-block + rethink.
      */
     stuckGearFpOf(w) {
       const parts = (w.progressFp || "").split("|");
@@ -2345,6 +2345,7 @@
     maybeRethinkIdle(host, w, stance) {
       const combatBusy = w.foes.some((f) => f.alive && f.lit && f.dist <= 2);
       const gatherBusy = this.sameTargetHits > 0 && this.cool > 0 && !!w.gather;
+      const striveBusy = !!this.mineStrive || !!this.anvilStrive;
       const tile = `${w.tile.x},${w.tile.y}`;
       const gearFp = this.stuckGearFpOf(w);
       const foodFp = this.stuckFoodFpOf(w);
@@ -2385,13 +2386,13 @@
         this.stuckTicks = 0;
         return;
       }
-      if (combatBusy || gatherBusy || usefulApproach || gearProg || foodProg || expProg) {
+      if (combatBusy || gatherBusy || striveBusy || usefulApproach || gearProg || foodProg || expProg) {
         this.stuckTile = tile;
         this.stuckGearFp = gearFp;
         this.stuckFoodFp = foodFp;
         this.stuckXpFp = xpFp;
         this.stuckTicks = 0;
-        if (usefulApproach || gearProg || foodProg || expProg || combatBusy) {
+        if (usefulApproach || gearProg || foodProg || expProg || combatBusy || striveBusy) {
           this.stuckRecentTiles = [];
         }
         return;
