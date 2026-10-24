@@ -1,4 +1,4 @@
-/* phd auto-engine e38 — pull via GET /api/auto-engine */
+/* phd auto-engine e39 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e38";
+  var AUTO_ENGINE_VERSION = "e39";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -753,7 +753,11 @@
           return;
         }
       }
-      if (this.tryFunnel1v1(host, w, stance)) return;
+      {
+        const noFood2 = w.food <= 0 && w.healReserve <= 0;
+        const meleePress2 = w.foes.filter((f) => f.alive && f.lit && f.dist <= 2).length >= 2;
+        if ((!noFood2 || meleePress2) && this.tryFunnel1v1(host, w, stance)) return;
+      }
       for (const ev of AUTOPLAY_COMBAT_EVENTS) {
         if (this.fired.has(ev.id)) continue;
         if (!matches(ev, w, stance)) continue;
@@ -1435,10 +1439,11 @@
       );
       const bareStarter = earlyBare && !w.hasMetalWeapon;
       const unready = needPick || !w.kitReady || noFood;
-      const canChase = !!threat && !needPick && !(unready && (threat.danger === "deadly" || threat.danger === "threat")) && (w.kitReady && w.healReserve > 0 ? threat.dist <= 2 || threat.danger === "prey" : w.kitReady ? threat.danger === "prey" || threat.danger === "even" && hpPct >= 0.75 && threat.dist <= 2 || !noFood && threat.dist <= 2 && threat.danger !== "deadly" : (
+      let canChase = !!threat && !needPick && !(unready && (threat.danger === "deadly" || threat.danger === "threat")) && (w.kitReady && w.healReserve > 0 ? threat.dist <= 2 || threat.danger === "prey" : w.kitReady ? threat.danger === "prey" || threat.danger === "even" && hpPct >= 0.75 && threat.dist <= 2 || !noFood && threat.dist <= 2 && threat.danger !== "deadly" : (
         // !kitReady: prey only in melee; without pickaxe don't wander-chase for coins.
         threat.danger === "prey" && hpPct >= 0.7 && threat.dist <= (host.hasTool("pickaxe") ? 2 : 1)
       )) && !(hurtBare && threat.dist > 2 && (threat.elite || threat.alpha || threat.gold)) && !(noFood && (threat.danger === "threat" || threat.danger === "deadly") && threat.dist > 1);
+      if (noFood) canChase = false;
       if (threat && canChase) {
         if (this.tryFunnel1v1(host, w, stance)) return;
         if (!w.hasStyleWeapon && threat.dist <= 2 && threat.danger !== "prey" && this.stepAway(host, w, stance, "melee kite")) return;
