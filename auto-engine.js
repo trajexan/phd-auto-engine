@@ -1,4 +1,4 @@
-/* phd auto-engine e34 — pull via GET /api/auto-engine */
+/* phd auto-engine e35 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e34";
+  var AUTO_ENGINE_VERSION = "e35";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -607,6 +607,8 @@
       __publicField(this, "lastImproveTick", 0);
       /** Last successful food-farm tile (depth + xy) — food fell → walk back (e18). */
       __publicField(this, "lastFoodFarm", null);
+      /** e35: consecutive failed pickaxe buys while melee-pressed. */
+      __publicField(this, "shopFireFails", 0);
       /** Peak healReserve this floor — detect food fall from fat stock. */
       __publicField(this, "peakHealThisFloor", 0);
       /** Elite/threat kite↔anvil thrash counter; patience → fight past / explore. */
@@ -907,8 +909,21 @@
           }
         } else {
           if (host.acquireTool("pickaxe")) {
+            this.shopFireFails = 0;
             this.setStatus(host, w, stance, "shop under fire");
             this.cool = 2;
+            return;
+          }
+          this.shopFireFails = (this.shopFireFails || 0) + 1;
+          // e35: after 2 failed buys under melee, kite away — do not thrash acquire/wait
+          if (this.shopFireFails >= 2) {
+            this.toolBlock.set("pickaxe", this.runTicks + 40);
+            this.shopFireFails = 0;
+            if (this.stepAway(host, w, stance, "kite shop fail")) return;
+            host.clearEngage();
+            host.clearWalk();
+            this.setStatus(host, w, stance, "kite shop fail");
+            this.cool = 3;
             return;
           }
           if (this.stepAway(host, w, stance, "kite to shop")) return;
@@ -1779,6 +1794,9 @@
           this.rememberFoodFarm(w);
           return true;
         }
+        // e35: pond gone / gather fail at remembered tile — drop so stuck rethink cannot loop
+        this.noteAction("food fell \u2014 drop dead farm");
+        this.lastFoodFarm = null;
         return false;
       }
       if (spot.depth < w.depth && w.upStairs && this.runTicks >= this.foodRetreatCoolUntil) {
@@ -2304,10 +2322,10 @@
     }
     /**
      * e25 / Darren t1196–98: stuck when gear + food + exp + useful approach are
-     * all quiet for IDLE_STUCK_TICKS (~7.2s @ e34). Useful approach = Chebyshev to the
+     * all quiet for IDLE_STUCK_TICKS (~7.2s). Useful approach = Chebyshev to the
      * current desire target decreases (or adj). Door open/close thrash and
      * anvil-orbit walks change tiles but not approach → still stuck.
-     * Combat (foe dist≤2) and active mineStrive/anvilStrive reset (e34). Then soft-block + rethink.
+     * Combat (foe dist≤2) and active mineStrive/anvilStrive reset (e34). e35: food-fell desire + clear lastFoodFarm on rethink. Then soft-block + rethink.
      */
     stuckGearFpOf(w) {
       const parts = (w.progressFp || "").split("|");
@@ -2330,6 +2348,10 @@
       }
       if (/anvil|forge|smith|hatchet|craft gem/i.test(st) && w.hub) {
         return { key: `anvil:${w.hub.x},${w.hub.y}`, x: w.hub.x, y: w.hub.y };
+      }
+      if (/food fell/i.test(st) && this.lastFoodFarm && this.lastFoodFarm.depth === w.depth) {
+        const s = this.lastFoodFarm;
+        return { key: `foodfell:${s.x},${s.y}`, x: s.x, y: s.y };
       }
       if (/pond|fish|farm food|hoard food|enroute pond/i.test(st) && w.gather) {
         return { key: `gather:${w.gather.x},${w.gather.y}`, x: w.gather.x, y: w.gather.y };
@@ -2422,6 +2444,12 @@
       if (this.mineStrive) {
         this.noteAction("stuck rethink \u2014 drop mine");
         this.clearMineStrive();
+      }
+      if (this.lastFoodFarm) {
+        const s = this.lastFoodFarm;
+        this.noteGatherFail(s.x, s.y);
+        this.noteAction("stuck rethink \u2014 drop last food farm");
+        this.lastFoodFarm = null;
       }
       if (w.gather) this.noteGatherFail(w.gather.x, w.gather.y);
       if (w.loot) this.noteGatherFail(w.loot.x, w.loot.y);
