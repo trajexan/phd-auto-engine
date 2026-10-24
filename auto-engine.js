@@ -1,4 +1,4 @@
-/* phd auto-engine e39 — pull via GET /api/auto-engine */
+/* phd auto-engine e40 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e39";
+  var AUTO_ENGINE_VERSION = "e40";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -755,8 +755,7 @@
       }
       {
         const noFood2 = w.food <= 0 && w.healReserve <= 0;
-        const meleePress2 = w.foes.filter((f) => f.alive && f.lit && f.dist <= 2).length >= 2;
-        if ((!noFood2 || meleePress2) && this.tryFunnel1v1(host, w, stance)) return;
+        if (!noFood2 && this.tryFunnel1v1(host, w, stance)) return;
       }
       for (const ev of AUTOPLAY_COMBAT_EVENTS) {
         if (this.fired.has(ev.id)) continue;
@@ -1458,7 +1457,7 @@
       }
       if (threat && !canChase) {
         if (w.hasStyleWeapon && threat.danger !== "deadly" && threat.dist <= 8) {
-          if (this.tryFunnel1v1(host, w, stance)) return;
+          if (!noFood && this.tryFunnel1v1(host, w, stance)) return;
           if (threat.dist <= 2) {
             host.engage(threat);
             if (this.stepAway(host, w, stance, "style kite")) return;
@@ -1472,7 +1471,7 @@
         host.clearEngage();
         if (noFood || threat.danger === "deadly" || threat.danger === "threat" || !w.hasStyleWeapon && threat.dist <= 2) {
           if (threat.dist <= 2) {
-            if (this.tryFunnel1v1(host, w, stance)) return;
+            if (!noFood && this.tryFunnel1v1(host, w, stance)) return;
             if (this.stepAway(host, w, stance, "kiting toward hub")) return;
             if (unready || bareStarter) {
               const prey = w.foes.filter((f) => f.alive && f.lit && f.danger === "prey" && f.dist <= 1 && hpPct >= 0.7).sort((a, b) => a.dist - b.dist)[0];
@@ -2498,8 +2497,12 @@
           usefulApproach = true;
         } else if (dist <= 1) {
           const stPark = (this.lastStatus || "").toLowerCase();
-          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|food fat|farm ceiling → next floor|stairs soft-block/i.test(stPark);
-          usefulApproach = !parked;
+          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food/i.test(stPark);
+          if (desire.key.startsWith("gather:") && !gatherBusy) {
+            usefulApproach = false;
+          } else {
+            usefulApproach = !parked;
+          }
         } else if (tile !== this.stuckTile) {
           this.stuckRecentTiles.push(tile);
           if (this.stuckRecentTiles.length > STUCK_TILE_RING) this.stuckRecentTiles.shift();
