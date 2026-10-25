@@ -1,4 +1,4 @@
-/* phd auto-engine e45 — pull via GET /api/auto-engine */
+/* phd auto-engine e46 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e45";
+  var AUTO_ENGINE_VERSION = "e46";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -649,6 +649,11 @@
        */
       __publicField(this, "pondRethinks", 0);
       /**
+       * e46: consecutive stuck-rethink soft-blocks of lastFoodFarm (R2/R3 hang sameTile /
+       * soft-block food farm → farm food again). ≥2 → drop register + explore/fight break.
+       */
+      __publicField(this, "foodFarmSoftBlocks", 0);
+      /**
        * e37/e43: consecutive stuck-rethinks while hub/forge/shop/wait/explore hatchet
        * without hatchet — ≥3 → soft-block hatchet strive + clear stylePivot + mine/food.
        */
@@ -726,6 +731,7 @@
         this.bagFullUntil = 0;
         this.shopFireFails = 0;
         this.pondRethinks = 0;
+        this.foodFarmSoftBlocks = 0;
         this.hatchetRethinks = 0;
         this.bagFullFails = 0;
         this.forgeBlockUntil = 0;
@@ -1716,6 +1722,7 @@
       if (w.healReserve > this.peakHealThisFloor) {
         this.peakHealThisFloor = w.healReserve;
         this.pondRethinks = 0;
+        this.foodFarmSoftBlocks = 0;
       }
       if (this.lastOreCount >= 0 && w.oreCount > this.lastOreCount) {
         this.mineFailStreak = 0;
@@ -1736,6 +1743,7 @@
       const moved = !prev || prev.depth !== next.depth || prev.x !== next.x || prev.y !== next.y;
       this.lastFoodFarm = next;
       this.pondRethinks = 0;
+      this.foodFarmSoftBlocks = 0;
       if (moved) this.noteAction(`food farm @F${next.depth} (${next.x},${next.y})`);
     }
     /** e44: remember tree tile when chopping cook fuel (fallback if gather drifts to pond). */
@@ -1925,6 +1933,11 @@
       if (w.bagFree <= 0 || this.runTicks < this.bagFullUntil) return false;
       const spot = this.lastFoodFarm;
       if (!spot) return false;
+      if (spot.depth === w.depth && this.isGatherTileBlocked(spot.x, spot.y)) {
+        this.noteAction("food fell \u2014 drop soft-blocked farm");
+        this.lastFoodFarm = null;
+        return false;
+      }
       if (spot.depth === w.depth) {
         const here = w.tile.x === spot.x && w.tile.y === spot.y;
         if (!here) {
@@ -2683,6 +2696,25 @@
         const s = this.lastFoodFarm;
         this.noteGatherFail(s.x, s.y);
         this.noteAction(`stuck rethink \u2014 soft-block food farm F${s.depth} (${s.x},${s.y})`);
+        this.foodFarmSoftBlocks++;
+        if (this.foodFarmSoftBlocks >= 2) {
+          this.foodFarmSoftBlocks = 0;
+          this.lastFoodFarm = null;
+          this.laneBias = "gear";
+          this.noteAction("food farm thrash \u2014 drop last farm");
+          host.log("AUTO: food farm thrash \u2014 break to explore/fight");
+          if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+          else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+          this.setStatus(host, w, stance, "food farm thrash \u2014 explore");
+          this.cool = 3;
+          if (this.lastTree) {
+            const t = this.lastTree;
+            this.noteGatherFail(t.x, t.y);
+            this.noteAction(`stuck rethink \u2014 drop last tree F${t.depth} (${t.x},${t.y})`);
+            this.lastTree = null;
+          }
+          return;
+        }
       }
       if (this.lastTree) {
         const t = this.lastTree;
@@ -2708,6 +2740,7 @@
         if (this.lastFoodFarm) {
           this.noteAction("pond thrash \u2014 drop last food farm");
           this.lastFoodFarm = null;
+          this.foodFarmSoftBlocks = 0;
         }
         this.noteAction("pond thrash \u2014 fight/XP");
         host.log("AUTO: pond thrash \u2014 break to fight/XP");
