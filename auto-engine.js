@@ -1,4 +1,4 @@
-/* phd auto-engine e51 — pull via GET /api/auto-engine */
+/* phd auto-engine e52 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e51";
+  var AUTO_ENGINE_VERSION = "e52";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -848,6 +848,16 @@
         return;
       }
       if (this.stairsStrive && this.resumeStairsStrive(host, w, stance)) return;
+      {
+        const pressed = w.foes.some((f) => f.alive && f.lit && f.dist <= 2);
+        const fed = w.healReserve > 0 || w.food >= 2;
+        const geared = w.hasMetalWeapon || w.hasStyleWeapon || w.hasArmour || host.hasTool("rod");
+        if (!pressed && fed && geared && host.runecraftOnce()) {
+          this.setStatus(host, w, stance, "runecraft");
+          this.cool = 4;
+          return;
+        }
+      }
       host.equipUp();
       if (w.unspentPoints > 0) host.spendPoints();
       if (stance.hungry || w.healReserve <= 0) {
