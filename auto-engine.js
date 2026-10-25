@@ -1,4 +1,4 @@
-/* phd auto-engine e52 — pull via GET /api/auto-engine */
+/* phd auto-engine e53 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e52";
+  var AUTO_ENGINE_VERSION = "e53";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2774,6 +2774,12 @@
       this.stuckTile = tile;
       this.stuckTicks += thrashing ? 2 : 1;
       if (this.stuckTicks < IDLE_STUCK_TICKS) return;
+      const keepStairs = this.stairsStrive && /ceiling thrash|farm ceiling|food fat/i.test(this.stairsStrive.label) && (w.healReserve > 0 || w.food > 0) && w.kitReady && w.descendSafe;
+      if (keepStairs) {
+        this.stuckTicks = 0;
+        this.noteAction("stuck rethink \u2014 keep ceiling stairs");
+        return;
+      }
       this.stuckTicks = 0;
       this.stuckApproachBest = 9999;
       this.stuckDesireKey = "";
@@ -2884,11 +2890,10 @@
         this.cool = 3;
         return;
       }
-      const ceilingSpin = /farm ceiling/i.test(stRethink) && w.kitReady && (w.healReserve > 0 || w.food > 0);
-      if (ceilingSpin) this.ceilingRethinks++;
+      const ceilingSpin = /farm ceiling|ceiling thrash/i.test(stRethink) && w.kitReady && (w.healReserve > 0 || w.food > 0);
+      if (ceilingSpin) this.ceilingRethinks = Math.min(8, this.ceilingRethinks + 1);
       else this.ceilingRethinks = 0;
       if (this.ceilingRethinks >= 4) {
-        this.ceilingRethinks = 0;
         this.noteAction("ceiling thrash \u2014 stairs");
         host.log("AUTO: farm ceiling thrash \u2014 break to stairs");
         if (this.stairsUsable(w) && w.descendSafe) {
