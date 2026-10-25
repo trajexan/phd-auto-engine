@@ -1,4 +1,4 @@
-/* phd auto-engine e44 — pull via GET /api/auto-engine */
+/* phd auto-engine e45 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e44";
+  var AUTO_ENGINE_VERSION = "e45";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -878,6 +878,9 @@
           if (w.rawFish > 0 && !w.hasFire && host.lightFireOnce()) {
             this.setStatus(host, w, stance, "cook fuel");
             this.cool = 3;
+            return;
+          }
+          if (w.rawFish > 0 && !w.hasFire && !w.hasLogs && host.hasTool("hatchet") && this.bagFullActive() && this.tryBagFullRelief(host, w, stance)) {
             return;
           }
           if (w.rawFish > 0 && !w.hasFire && !w.hasLogs && host.hasTool("hatchet") && this.tryChopForCookFuel(host, w, stance)) {
@@ -1759,6 +1762,9 @@
           this.cool = 3;
           return true;
         }
+        this.noteAction(`chop fail \u2014 drop last tree F${tree.depth} (${tree.x},${tree.y})`);
+        this.noteGatherFail(tree.x, tree.y);
+        this.lastTree = null;
       }
       return false;
     }
@@ -2677,6 +2683,12 @@
         const s = this.lastFoodFarm;
         this.noteGatherFail(s.x, s.y);
         this.noteAction(`stuck rethink \u2014 soft-block food farm F${s.depth} (${s.x},${s.y})`);
+      }
+      if (this.lastTree) {
+        const t = this.lastTree;
+        this.noteGatherFail(t.x, t.y);
+        this.noteAction(`stuck rethink \u2014 drop last tree F${t.depth} (${t.x},${t.y})`);
+        this.lastTree = null;
       }
       if (w.gather) this.noteGatherFail(w.gather.x, w.gather.y);
       if (w.loot) this.noteGatherFail(w.loot.x, w.loot.y);
