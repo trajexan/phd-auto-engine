@@ -1,4 +1,4 @@
-/* phd auto-engine e43 — pull via GET /api/auto-engine */
+/* phd auto-engine e44 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,39 +356,49 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e43";
+  var AUTO_ENGINE_VERSION = "e44";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
   var HANG_SAME_TILE_TICKS = 400;
   var HANG_SKILLS_FLAT_TICKS = 900;
   var HANG_SAME_FLOOR_TICKS = 3600;
-  function foodStance(healReserve, floorHealNeed, traits) {
+  function foodStance(healReserve, floorHealNeed, traits, foodCount = 0) {
     const need = Math.max(8, floorHealNeed);
-    const mult = 0.45 + traits.foodCaution * 0.75 + traits.patience * 0.25 - traits.risk * 0.4;
-    const safetyLevel = Math.max(need * 0.35, Math.min(need * 1.8, need * mult));
+    const mult = 0.65 + traits.foodCaution * 0.7 + traits.patience * 0.3 - traits.risk * 0.25;
+    const safetyLevel = Math.max(need * 0.55, Math.min(need * 1.8, need * mult));
+    const minFood = Math.max(
+      2,
+      Math.min(
+        8,
+        Math.round(2 + traits.foodCaution * 3.5 + traits.patience * 1.5 - traits.risk * 1.2)
+      )
+    );
     const ratio = healReserve / need;
-    const hungry = healReserve < safetyLevel;
-    const stocked = healReserve >= safetyLevel;
+    const healHungry = healReserve < safetyLevel;
+    const piecesHungry = foodCount < minFood;
+    const healRich = healReserve >= safetyLevel * 1.5;
+    const hungry = healHungry || piecesHungry && !healRich;
+    const stocked = !hungry && healReserve >= safetyLevel && (foodCount >= minFood || healRich);
     let caution = traits.foodCaution;
     let bravery = (traits.risk + traits.aggression + traits.greed) / 3;
     const n = Math.round(healReserve);
     const nd = Math.round(need);
     const sf = Math.round(safetyLevel);
-    let label = `heal ${n}/${nd} (safe ${sf})`;
+    let label = `heal ${n}/${nd} (safe ${sf} food ${foodCount}/${minFood})`;
     if (hungry) {
       caution = clamp01(caution + 0.35);
       bravery = clamp01(bravery * 0.45);
-      label = `low heal ${n}/${nd} (safe ${sf})`;
+      label = piecesHungry && !healHungry ? `low food ${foodCount}/${minFood} (heal ${n}/${nd} safe ${sf})` : `low heal ${n}/${nd} (safe ${sf} food ${foodCount}/${minFood})`;
     } else if (stocked && ratio >= 1.2) {
       caution = clamp01(caution * 0.55);
       bravery = clamp01(bravery + 0.25);
-      label = `heal rich ${n}/${nd} (safe ${sf})`;
+      label = `heal rich ${n}/${nd} (safe ${sf} food ${foodCount}/${minFood})`;
     } else if (stocked) {
       caution = clamp01(caution * 0.7);
       bravery = clamp01(bravery + 0.1);
     }
-    return { hungry, stocked, caution, bravery, label, ratio, safetyLevel };
+    return { hungry, stocked, caution, bravery, label, ratio, safetyLevel, minFood };
   }
   var SAME_TARGET_MAX = 3;
   var TILE_BLOCK_TICKS = 200;
@@ -626,6 +636,11 @@
       __publicField(this, "lastImproveTick", 0);
       /** Last successful food-farm tile (depth + xy) — food fell → walk back (e18). */
       __publicField(this, "lastFoodFarm", null);
+      /**
+       * e44: last tree chop tile (cook-fuel fallback when raw waits and bag has no logs).
+       * Remembered across floors like lastFoodFarm; not cleared on every stuck rethink.
+       */
+      __publicField(this, "lastTree", null);
       /** e35: consecutive failed pickaxe buys while melee-pressed. */
       __publicField(this, "shopFireFails", 0);
       /**
@@ -688,7 +703,7 @@
       this.lastTileY = (_d = (_c = w.tile) == null ? void 0 : _c.y) != null ? _d : this.lastTileY;
       this.watchHang(host, w);
       if (this.hangReported) return;
-      const stance = foodStance(w.healReserve, w.floorHealNeed, this.traits);
+      const stance = foodStance(w.healReserve, w.floorHealNeed, this.traits, w.food);
       if (w.bagFree > 0 && this.runTicks >= this.bagFullUntil) {
         this.bagFullUntil = 0;
         this.bagFullFails = 0;
@@ -825,7 +840,7 @@
       {
         const hpPctR = w.maxHp > 0 ? w.hp / w.maxHp : 1;
         const foodCleaned = w.food <= 0 && w.healReserve <= 0;
-        const belowSafe = w.healReserve < stance.safetyLevel;
+        const belowSafe = w.healReserve < stance.safetyLevel || w.food < stance.minFood && w.healReserve < stance.safetyLevel * 1.5;
         const unsafeNear = hpPctR < 0.45 || w.foes.some(
           (f) => f.alive && f.lit && f.dist <= 8 && (f.elite || f.alpha || f.gold || f.danger === "threat" || f.danger === "deadly")
         );
@@ -853,10 +868,19 @@
           }
         }
         if (belowSafe && !imminentR && !this.hoarding) {
-          if (w.rawFish > 0 && w.hasFire) host.cookOnce();
+          if (w.rawFish > 0 && w.hasFire) {
+            host.cookOnce();
+            host.pickupLoot();
+            this.setStatus(host, w, stance, "cooking");
+            this.cool = 2;
+            return;
+          }
           if (w.rawFish > 0 && !w.hasFire && host.lightFireOnce()) {
             this.setStatus(host, w, stance, "cook fuel");
             this.cool = 3;
+            return;
+          }
+          if (w.rawFish > 0 && !w.hasFire && !w.hasLogs && host.hasTool("hatchet") && this.tryChopForCookFuel(host, w, stance)) {
             return;
           }
           const postKitFood = w.kitReady || w.hasMetalWeapon && w.hasArmour || w.hasStyleWeapon;
@@ -868,7 +892,7 @@
           }
           const earlyForgeFirst = w.depth <= 5 && !postKitFood && (w.oreCount > 0 || host.hasTool("pickaxe") && w.anvilNearby || !host.hasTool("pickaxe") && w.coins >= 30);
           if (postKitFood && !host.hasTool("rod")) {
-          } else if (postKitFood && this.farmCeiling()) {
+          } else if (postKitFood && this.farmCeiling() && w.food >= stance.minFood && w.rawFish <= 0) {
           } else if (earlyForgeFirst) {
           } else if (this.resumeMineStrive(host, w, stance)) {
             return;
@@ -1362,8 +1386,8 @@
             this.cool = 2;
             return;
           }
-          if (w.rawFish > 0 && hasHatchet && !foeNear && !w.hasLogs && !w.hasFire && w.gather) {
-            if (this.tryGather(host, w, stance, "chop for fire")) return;
+          if (w.rawFish > 0 && hasHatchet && !foeNear && !w.hasLogs && !w.hasFire) {
+            if (this.tryChopForCookFuel(host, w, stance)) return;
           }
         }
         if (w.kitReady && !w.stairsLit) {
@@ -1704,8 +1728,39 @@
     /** Remember gather tile when farming food successfully (for food-fell fallback). */
     rememberFoodFarm(w) {
       if (!w.gather || !w.pondKnown) return;
-      this.lastFoodFarm = { depth: w.depth, x: w.gather.x, y: w.gather.y };
+      const next = { depth: w.depth, x: w.gather.x, y: w.gather.y };
+      const prev = this.lastFoodFarm;
+      const moved = !prev || prev.depth !== next.depth || prev.x !== next.x || prev.y !== next.y;
+      this.lastFoodFarm = next;
       this.pondRethinks = 0;
+      if (moved) this.noteAction(`food farm @F${next.depth} (${next.x},${next.y})`);
+    }
+    /** e44: remember tree tile when chopping cook fuel (fallback if gather drifts to pond). */
+    rememberTree(w) {
+      if (!w.gather) return;
+      this.lastTree = { depth: w.depth, x: w.gather.x, y: w.gather.y };
+    }
+    /**
+     * e44: chop for cook fuel. Prefer current gather (host prefers tree when raw+no logs);
+     * else walk lastTree on this floor.
+     */
+    tryChopForCookFuel(host, w, stance) {
+      if (w.gather && this.tryGather(host, w, stance, "chop for fire")) {
+        this.rememberTree(w);
+        return true;
+      }
+      const tree = this.lastTree;
+      if (tree && tree.depth === w.depth) {
+        const here = w.tile.x === tree.x && w.tile.y === tree.y;
+        if (!here) {
+          host.clearEngage();
+          host.walkTo(tree.x, tree.y);
+          this.setStatus(host, w, stance, "chop for fire \u2192 last tree");
+          this.cool = 3;
+          return true;
+        }
+      }
+      return false;
     }
     /** Explicit improve (forge+ / equip drop) — also resets farm ceiling. */
     noteImprove() {
@@ -2291,6 +2346,29 @@
     runStats() {
       return { ticks: this.runTicks, ms: this.activeElapsedMs() };
     }
+    /** Last successful food-farm tile (depth + xy) — for LIVE STATS / SNAP. */
+    lastFoodFarmSpot() {
+      return this.lastFoodFarm ? { ...this.lastFoodFarm } : null;
+    }
+    /**
+     * Soft F1 style pivot: null undecided; true = chop→fletch bow/wand;
+     * false = keep melee smith / anvil hunt.
+     */
+    stylePivotState() {
+      return this.stylePivot;
+    }
+    /** Compact stuck / soft-block flags for LIVE STATS (read-only). */
+    liveDiag() {
+      return {
+        stuckTicks: this.stuckTicks,
+        stuckDesire: this.stuckDesireKey || "",
+        pondRethinks: this.pondRethinks,
+        hatchetRethinks: this.hatchetRethinks,
+        bagFull: this.runTicks < this.bagFullUntil,
+        mineBlocked: this.runTicks < this.mineBlockUntil,
+        chestBlocked: this.runTicks < this.chestBlockUntil
+      };
+    }
     /** Freeze active timer (PAUSE ALL / page hidden). Safe to call repeatedly. */
     pauseClock() {
       if (this.activeStartedAt) {
@@ -2598,8 +2676,7 @@
       if (this.lastFoodFarm) {
         const s = this.lastFoodFarm;
         this.noteGatherFail(s.x, s.y);
-        this.noteAction("stuck rethink \u2014 drop last food farm");
-        this.lastFoodFarm = null;
+        this.noteAction(`stuck rethink \u2014 soft-block food farm F${s.depth} (${s.x},${s.y})`);
       }
       if (w.gather) this.noteGatherFail(w.gather.x, w.gather.y);
       if (w.loot) this.noteGatherFail(w.loot.x, w.loot.y);
@@ -2616,6 +2693,10 @@
       if (this.pondRethinks >= 3) {
         this.pondRethinks = 0;
         this.laneBias = "gear";
+        if (this.lastFoodFarm) {
+          this.noteAction("pond thrash \u2014 drop last food farm");
+          this.lastFoodFarm = null;
+        }
         this.noteAction("pond thrash \u2014 fight/XP");
         host.log("AUTO: pond thrash \u2014 break to fight/XP");
         if (w.explore) {
