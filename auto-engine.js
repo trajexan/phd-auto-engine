@@ -1,4 +1,4 @@
-/* phd auto-engine e46 — pull via GET /api/auto-engine */
+/* phd auto-engine e47 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e46";
+  var AUTO_ENGINE_VERSION = "e47";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -644,10 +644,12 @@
       /** e35: consecutive failed pickaxe buys while melee-pressed. */
       __publicField(this, "shopFireFails", 0);
       /**
-       * e36: consecutive stuck-rethinks while find-pond / farm-food / enroute pond / regen
-       * with food=0+heal=0 — ≥3 → soft-block gather + fight/XP break (pond thrash hang).
+       * e36/e47: consecutive stuck-rethinks while find-pond / farm-food / enroute pond / regen
+       * (empty food+heal → ≥3; fed → ≥4) → soft-block gather + fight/XP break + cool gate.
        */
       __publicField(this, "pondRethinks", 0);
+      /** e47: runTicks until find-pond/farm-food desire allowed again after pond thrash break. */
+      __publicField(this, "pondBreakUntil", 0);
       /**
        * e46: consecutive stuck-rethink soft-blocks of lastFoodFarm (R2/R3 hang sameTile /
        * soft-block food farm → farm food again). ≥2 → drop register + explore/fight break.
@@ -731,6 +733,7 @@
         this.bagFullUntil = 0;
         this.shopFireFails = 0;
         this.pondRethinks = 0;
+        this.pondBreakUntil = 0;
         this.foodFarmSoftBlocks = 0;
         this.hatchetRethinks = 0;
         this.bagFullFails = 0;
@@ -913,6 +916,14 @@
           } else if ((stance.hungry || w.healReserve <= 0 || w.food <= 0) && (w.pondKnown || stance.hungry || w.healReserve <= 0)) {
             this.clearAnvilStrive();
             if (w.bagFree > 0 && this.tryWalkLoot(host, w, stance, "loot for food")) return;
+            if (this.pondBreakActive()) {
+              host.clearEngage();
+              if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+              else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+              this.setStatus(host, w, stance, "pond break \u2014 explore");
+              this.cool = 3;
+              return;
+            }
             if (w.explore) {
               host.clearEngage();
               host.walkTo(w.explore.x, w.explore.y);
@@ -1085,6 +1096,14 @@
           if (this.bagFullActive()) {
             this.setStatus(host, w, stance, "sell for loot space");
             this.cool = 2;
+            return;
+          }
+          if (this.pondBreakActive()) {
+            host.clearEngage();
+            if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+            else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+            this.setStatus(host, w, stance, "pond break \u2014 explore");
+            this.cool = 3;
             return;
           }
           if (w.explore) {
@@ -2081,6 +2100,10 @@
     bagFullActive() {
       return this.runTicks < this.bagFullUntil;
     }
+    /** e47: cool window after pond thrash — block find-pond/farm-food desire re-entry. */
+    pondBreakActive() {
+      return this.runTicks < this.pondBreakUntil;
+    }
     /**
      * Gather with fail-adapt + same-target stuck (earlier than floor hang).
      * False = fall through to explore / wander / other lane.
@@ -2382,6 +2405,7 @@
         stuckTicks: this.stuckTicks,
         stuckDesire: this.stuckDesireKey || "",
         pondRethinks: this.pondRethinks,
+        pondBreakUntil: this.pondBreakUntil,
         hatchetRethinks: this.hatchetRethinks,
         bagFull: this.runTicks < this.bagFullUntil,
         mineBlocked: this.runTicks < this.mineBlockUntil,
@@ -2732,9 +2756,10 @@
       this.lootWalkHits = 0;
       this.lootStandHits = 0;
       const stRethink = (this.lastStatus || "").toLowerCase();
-      const pondSpin = /find pond|farm food|enroute pond|regen to hub/i.test(stRethink) && w.food === 0 && w.healReserve === 0;
+      const pondSpin = /find pond|farm food|enroute pond|regen to hub/i.test(stRethink);
       if (pondSpin) this.pondRethinks++;
-      if (this.pondRethinks >= 3) {
+      const pondThresh = w.food === 0 && w.healReserve === 0 ? 3 : 4;
+      if (this.pondRethinks >= pondThresh) {
         this.pondRethinks = 0;
         this.laneBias = "gear";
         if (this.lastFoodFarm) {
@@ -2742,6 +2767,7 @@
           this.lastFoodFarm = null;
           this.foodFarmSoftBlocks = 0;
         }
+        this.pondBreakUntil = this.runTicks + 48;
         this.noteAction("pond thrash \u2014 fight/XP");
         host.log("AUTO: pond thrash \u2014 break to fight/XP");
         if (w.explore) {
@@ -2750,7 +2776,7 @@
           host.walkTo(w.wander.x, w.wander.y);
         }
         this.setStatus(host, w, stance, "pond thrash \u2014 fight/XP");
-        this.cool = 3;
+        this.cool = 5;
         return;
       }
       const hatchetSpin = /hub for hatchet|forge hatchet|shop for hatchet|wait anvil hatchet|explore for hatchet/i.test(stRethink) && !host.hasTool("hatchet");
