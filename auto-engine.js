@@ -1,4 +1,4 @@
-/* phd auto-engine e47 — pull via GET /api/auto-engine */
+/* phd auto-engine e48 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e47";
+  var AUTO_ENGINE_VERSION = "e48";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -650,6 +650,8 @@
       __publicField(this, "pondRethinks", 0);
       /** e47: runTicks until find-pond/farm-food desire allowed again after pond thrash break. */
       __publicField(this, "pondBreakUntil", 0);
+      /** e48: runTicks until chop-for-fire/lastTree allowed again after bag-stuck thrash. */
+      __publicField(this, "chopBreakUntil", 0);
       /**
        * e46: consecutive stuck-rethink soft-blocks of lastFoodFarm (R2/R3 hang sameTile /
        * soft-block food farm → farm food again). ≥2 → drop register + explore/fight break.
@@ -734,6 +736,7 @@
         this.shopFireFails = 0;
         this.pondRethinks = 0;
         this.pondBreakUntil = 0;
+        this.chopBreakUntil = 0;
         this.foodFarmSoftBlocks = 0;
         this.hatchetRethinks = 0;
         this.bagFullFails = 0;
@@ -1775,6 +1778,7 @@
      * else walk lastTree on this floor.
      */
     tryChopForCookFuel(host, w, stance) {
+      if (this.chopBreakActive()) return false;
       if (w.gather && this.tryGather(host, w, stance, "chop for fire")) {
         this.rememberTree(w);
         return true;
@@ -2072,8 +2076,16 @@
         this.bagFullFails = 0;
         this.bagFullUntil = 0;
         this.lastFoodFarm = null;
+        if (this.lastTree) {
+          const t = this.lastTree;
+          this.noteGatherFail(t.x, t.y);
+          this.noteAction(`bag stuck \u2014 drop last tree F${t.depth} (${t.x},${t.y})`);
+          this.lastTree = null;
+        }
+        this.chopBreakUntil = this.runTicks + 48;
         this.noteAction("bag stuck \u2014 move on");
-        host.log("AUTO: bag full relief failed \u2014 move on");
+        this.noteAction("chop thrash \u2014 bag cool");
+        host.log("AUTO: bag full relief failed \u2014 move on (chop cool)");
         if (w.kitReady && w.stairs && w.stairsLit && w.stairsOpen && !this.isGatherTileBlocked(w.stairs.x, w.stairs.y)) {
           this.markStairsStrive("bag stuck \u2192 stairs", w);
           host.clearEngage();
@@ -2103,6 +2115,10 @@
     /** e47: cool window after pond thrash — block find-pond/farm-food desire re-entry. */
     pondBreakActive() {
       return this.runTicks < this.pondBreakUntil;
+    }
+    /** e48: cool window after bag-stuck chop thrash — block chop-for-fire/lastTree. */
+    chopBreakActive() {
+      return this.runTicks < this.chopBreakUntil;
     }
     /**
      * Gather with fail-adapt + same-target stuck (earlier than floor hang).
@@ -2406,6 +2422,7 @@
         stuckDesire: this.stuckDesireKey || "",
         pondRethinks: this.pondRethinks,
         pondBreakUntil: this.pondBreakUntil,
+        chopBreakUntil: this.chopBreakUntil,
         hatchetRethinks: this.hatchetRethinks,
         bagFull: this.runTicks < this.bagFullUntil,
         mineBlocked: this.runTicks < this.mineBlockUntil,
