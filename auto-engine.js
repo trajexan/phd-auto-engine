@@ -1,4 +1,4 @@
-/* phd auto-engine e48 — pull via GET /api/auto-engine */
+/* phd auto-engine e49 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e48";
+  var AUTO_ENGINE_VERSION = "e49";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -653,6 +653,11 @@
       /** e48: runTicks until chop-for-fire/lastTree allowed again after bag-stuck thrash. */
       __publicField(this, "chopBreakUntil", 0);
       /**
+       * e49: consecutive stuck-rethinks while farm-ceiling explore/mob (kitReady + healOk).
+       * ≥4 → force stairs / find stairs (R6 floor-advance stall).
+       */
+      __publicField(this, "ceilingRethinks", 0);
+      /**
        * e46: consecutive stuck-rethink soft-blocks of lastFoodFarm (R2/R3 hang sameTile /
        * soft-block food farm → farm food again). ≥2 → drop register + explore/fight break.
        */
@@ -737,6 +742,7 @@
         this.pondRethinks = 0;
         this.pondBreakUntil = 0;
         this.chopBreakUntil = 0;
+        this.ceilingRethinks = 0;
         this.foodFarmSoftBlocks = 0;
         this.hatchetRethinks = 0;
         this.bagFullFails = 0;
@@ -1901,6 +1907,9 @@
       const hpPct = w.maxHp > 0 ? w.hp / w.maxHp : 1;
       const emptyHeal = w.healReserve <= 0 && w.food <= 0;
       const stairsOk = this.stairsUsable(w) && w.descendSafe && !emptyHeal && (w.kitReady || w.hasMetalWeapon) && hpPct >= 0.45;
+      if (this.ceilingRethinks >= 3 && stairsOk) {
+        return this.walkStairsStrive(host, w, stance, "ceiling thrash \u2014 stairs");
+      }
       const foodFat = w.healReserve >= stance.safetyLevel * 1.5 && stance.stocked;
       if (foodFat && stairsOk) {
         const fatUrge = 0.45 + this.traits.risk * 0.2 + this.traits.aggression * 0.15 + (1 - this.traits.patience) * 0.1 + this.rnd() * 0.2;
@@ -2423,6 +2432,7 @@
         pondRethinks: this.pondRethinks,
         pondBreakUntil: this.pondBreakUntil,
         chopBreakUntil: this.chopBreakUntil,
+        ceilingRethinks: this.ceilingRethinks,
         hatchetRethinks: this.hatchetRethinks,
         bagFull: this.runTicks < this.bagFullUntil,
         mineBlocked: this.runTicks < this.mineBlockUntil,
@@ -2817,6 +2827,32 @@
         if (w.explore) host.walkTo(w.explore.x, w.explore.y);
         else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         this.setStatus(host, w, stance, "hatchet thrash \u2014 explore");
+        this.cool = 3;
+        return;
+      }
+      const ceilingSpin = /farm ceiling/i.test(stRethink) && w.kitReady && (w.healReserve > 0 || w.food > 0);
+      if (ceilingSpin) this.ceilingRethinks++;
+      else this.ceilingRethinks = 0;
+      if (this.ceilingRethinks >= 4) {
+        this.ceilingRethinks = 0;
+        this.noteAction("ceiling thrash \u2014 stairs");
+        host.log("AUTO: farm ceiling thrash \u2014 break to stairs");
+        if (this.stairsUsable(w) && w.descendSafe) {
+          if (this.walkStairsStrive(host, w, stance, "ceiling thrash \u2014 stairs")) return;
+        }
+        if (w.explore) {
+          host.walkTo(w.explore.x, w.explore.y);
+          this.setStatus(host, w, stance, "ceiling thrash \u2014 find stairs");
+          this.cool = 3;
+          return;
+        }
+        if (w.wander) {
+          host.walkTo(w.wander.x, w.wander.y);
+          this.setStatus(host, w, stance, "ceiling thrash \u2014 find stairs");
+          this.cool = 3;
+          return;
+        }
+        this.setStatus(host, w, stance, "ceiling thrash \u2014 stairs");
         this.cool = 3;
         return;
       }
