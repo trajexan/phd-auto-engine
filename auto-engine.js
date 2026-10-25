@@ -1,4 +1,4 @@
-/* phd auto-engine e42 — pull via GET /api/auto-engine */
+/* phd auto-engine e43 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e42";
+  var AUTO_ENGINE_VERSION = "e43";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -634,8 +634,8 @@
        */
       __publicField(this, "pondRethinks", 0);
       /**
-       * e37: consecutive stuck-rethinks while hub/forge/shop/wait hatchet without hatchet —
-       * ≥3 → soft-block hatchet strive + explore/mine (hub-hatchet thrash hang).
+       * e37/e43: consecutive stuck-rethinks while hub/forge/shop/wait/explore hatchet
+       * without hatchet — ≥3 → soft-block hatchet strive + clear stylePivot + mine/food.
        */
       __publicField(this, "hatchetRethinks", 0);
       /**
@@ -1070,9 +1070,19 @@
         }
         if (w.anvilNearby && this.stylePivot !== true) this.stylePivot = false;
         if (this.stylePivot == null && !w.anvilNearby && !kitBuilt && !w.hasMetalWeapon && this.runTicks >= 40) {
-          const hunt = this.traits.patience * 0.55 + (1 - this.traits.risk) * 0.25;
-          const pivot = (1 - this.traits.patience) * 0.45 + this.traits.risk * 0.35 + this.traits.aggression * 0.15;
-          this.stylePivot = pivot + this.rnd() * 0.3 > hunt + 0.15;
+          if (needHealPrep && (hasPick || w.oreCount > 0)) {
+            this.stylePivot = false;
+          } else {
+            const hunt = this.traits.patience * 0.55 + (1 - this.traits.risk) * 0.25;
+            const pivot = (1 - this.traits.patience) * 0.45 + this.traits.risk * 0.35 + this.traits.aggression * 0.15;
+            this.stylePivot = pivot + this.rnd() * 0.3 > hunt + 0.15;
+          }
+        }
+        if (this.stylePivot === true && !hasHatchet && !kitBuilt && needHealPrep && (hasPick || w.oreCount > 0)) {
+          this.stylePivot = false;
+          this.clearAnvilStrive();
+          this.noteAction("hatchet explore peel \u2014 mine/forge/food");
+          host.log("AUTO: hatchet explore peel \u2014 mine/forge/food");
         }
         if (this.stylePivot === true && !styleDone && !w.hasMetalWeapon) {
           if (!hasHatchet) {
@@ -2617,17 +2627,22 @@
         this.cool = 3;
         return;
       }
-      const hatchetSpin = /hub for hatchet|forge hatchet|shop for hatchet|wait anvil hatchet/i.test(stRethink) && !host.hasTool("hatchet");
+      const hatchetSpin = /hub for hatchet|forge hatchet|shop for hatchet|wait anvil hatchet|explore for hatchet/i.test(stRethink) && !host.hasTool("hatchet");
       if (hatchetSpin) this.hatchetRethinks++;
       else this.hatchetRethinks = 0;
       if (this.hatchetRethinks >= 3) {
         this.hatchetRethinks = 0;
         this.clearAnvilStrive();
+        this.stylePivot = false;
         this.toolBlock.set("hatchet", this.runTicks + TOOL_BLOCK_TICKS);
         this.laneBias = "gear";
         this.noteAction("hatchet thrash \u2014 explore/mine");
         host.log("AUTO: hatchet thrash \u2014 break to explore/mine");
         if (w.gather && host.hasTool("pickaxe") && w.bagFree > 0 && this.tryGather(host, w, stance, "mine ore")) {
+          return;
+        }
+        if (w.food === 0 && w.healReserve === 0 && w.pondKnown && w.gather && this.tryGather(host, w, stance, "farm food")) {
+          this.rememberFoodFarm(w);
           return;
         }
         if (w.explore) host.walkTo(w.explore.x, w.explore.y);
