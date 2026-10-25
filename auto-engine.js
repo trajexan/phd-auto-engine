@@ -1,4 +1,4 @@
-/* phd auto-engine e49 — pull via GET /api/auto-engine */
+/* phd auto-engine e50 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e49";
+  var AUTO_ENGINE_VERSION = "e50";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -947,6 +947,21 @@
         }
         if (!imminentR && !this.hoarding && this.peakHealThisFloor >= stance.safetyLevel * 1.2 && w.healReserve < stance.safetyLevel && (w.kitReady || w.hasMetalWeapon || w.hasStyleWeapon)) {
           if (this.tryFoodFellFallback(host, w, stance)) return;
+        }
+        if (w.rawFish > 0 && !imminentR && !this.hoarding) {
+          if (w.hasFire) {
+            host.cookOnce();
+            host.pickupLoot();
+            this.setStatus(host, w, stance, "cooking");
+            this.cool = 2;
+            return;
+          }
+          if (host.lightFireOnce()) {
+            this.setStatus(host, w, stance, "cook fuel");
+            this.cool = 3;
+            return;
+          }
+          if (host.hasTool("hatchet") && this.tryChopForCookFuel(host, w, stance)) return;
         }
         const canClimb = w.depth > 1 && !!w.upStairs && this.runTicks >= this.foodRetreatCoolUntil && !this.hoarding;
         if (canClimb && (foodCleaned || belowSafe && unsafeNear)) {
