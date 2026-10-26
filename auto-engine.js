@@ -1,4 +1,4 @@
-/* phd auto-engine e53 — pull via GET /api/auto-engine */
+/* phd auto-engine e54 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e53";
+  var AUTO_ENGINE_VERSION = "e54";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -718,7 +718,7 @@
       this.watchHang(host, w);
       if (this.hangReported) return;
       const stance = foodStance(w.healReserve, w.floorHealNeed, this.traits, w.food);
-      if (w.bagFree > 0 && this.runTicks >= this.bagFullUntil) {
+      if (w.bagFree >= 3 || w.bagFree > 0 && this.runTicks >= this.bagFullUntil) {
         this.bagFullUntil = 0;
         this.bagFullFails = 0;
       }
@@ -874,18 +874,8 @@
         );
         const imminentR = w.foes.some((f) => f.alive && f.lit && f.dist <= 2);
         if (this.hoarding && !stance.stocked && !imminentR) {
-          host.cookOnce();
-          host.pickupLoot();
           host.buyFoodIfCritical();
-          if (w.rawFish > 0 && !w.hasFire && host.lightFireOnce()) {
-            this.setStatus(host, w, stance, "hoard fire");
-            this.cool = 3;
-            return;
-          }
-          if (w.pondKnown && w.gather && this.tryGather(host, w, stance, "hoard food")) {
-            this.rememberFoodFarm(w);
-            return;
-          }
+          if (this.tryMeal(host, w, stance)) return;
           if (w.bagFree > 0 && this.tryWalkLoot(host, w, stance, "hoard loot")) return;
           if (w.explore) {
             host.clearEngage();
@@ -896,18 +886,7 @@
           }
         }
         if (belowSafe && !imminentR && !this.hoarding) {
-          if (w.rawFish > 0 && w.hasFire) {
-            host.cookOnce();
-            host.pickupLoot();
-            this.setStatus(host, w, stance, "cooking");
-            this.cool = 2;
-            return;
-          }
-          if (w.rawFish > 0 && !w.hasFire && host.lightFireOnce()) {
-            this.setStatus(host, w, stance, "cook fuel");
-            this.cool = 3;
-            return;
-          }
+          if (this.tryMeal(host, w, stance)) return;
           if (w.rawFish > 0 && !w.hasFire && !w.hasLogs && host.hasTool("hatchet") && this.bagFullActive() && this.tryBagFullRelief(host, w, stance)) {
             return;
           }
@@ -959,18 +938,7 @@
           if (this.tryFoodFellFallback(host, w, stance)) return;
         }
         if (w.rawFish > 0 && !imminentR && !this.hoarding) {
-          if (w.hasFire) {
-            host.cookOnce();
-            host.pickupLoot();
-            this.setStatus(host, w, stance, "cooking");
-            this.cool = 2;
-            return;
-          }
-          if (host.lightFireOnce()) {
-            this.setStatus(host, w, stance, "cook fuel");
-            this.cool = 3;
-            return;
-          }
+          if (this.tryMeal(host, w, stance)) return;
           if (!w.hasLogs && w.bagFree <= 0 && host.hasTool("hatchet")) {
             if (host.sellUnusedOnce()) {
               this.setStatus(host, w, stance, "sell for cook slot");
@@ -1021,7 +989,7 @@
         this.cool = 3;
         return;
       }
-      if (!imminent && this.tryOpenChestOnce(host, w, stance, { needBag: true, cool: 1 })) {
+      if (!imminent && !this.mealOwns(w, stance) && this.tryOpenChestOnce(host, w, stance, { needBag: true, cool: 1 })) {
         return;
       }
       {
@@ -1112,6 +1080,8 @@
           if (this.resumeMineStrive(host, w, stance)) return;
           if (this.bagFullActive()) {
             if (this.tryBagFullRelief(host, w, stance)) return;
+          } else if (this.tryMeal(host, w, stance)) {
+            return;
           } else if (w.pondKnown && w.gather && this.tryGather(host, w, stance, "farm food")) {
             this.rememberFoodFarm(w);
             return;
@@ -1374,7 +1344,7 @@
             this.cool = 2;
             return;
           }
-          if (w.rawFish > 0 && hasHatchet && w.hasLogs && !w.hasFire && host.lightFireOnce()) {
+          if (w.rawFish > 0 && hasHatchet && w.hasLogs && !w.hasFire && !this.catchingMeal(w, stance) && host.lightFireOnce()) {
             this.setStatus(host, w, stance, "lighting fire");
             this.cool = 4;
             return;
@@ -1532,11 +1502,12 @@
         this.cool = 1;
         return;
       }
-      if (!imminent && this.tryOpenChestOnce(host, w, stance, { needBag: false, cool: 2 })) {
+      const mealHold = this.mealOwns(w, stance);
+      if (!imminent && !mealHold && this.tryOpenChestOnce(host, w, stance, { needBag: false, cool: 2 })) {
         return;
       }
-      if (!imminent && this.tryCraftWoodForValue(host, w, stance, "fletch sell")) return;
-      if (!imminent && host.sellUnusedOnce()) {
+      if (!imminent && !mealHold && this.tryCraftWoodForValue(host, w, stance, "fletch sell")) return;
+      if (!imminent && !mealHold && host.sellUnusedOnce()) {
         this.setStatus(host, w, stance, "sell unused");
         this.cool = 3;
         return;
@@ -2671,7 +2642,57 @@
       return parts.length > 3 ? parts.slice(3).join("|") : parts.join("|");
     }
     stuckFoodFpOf(w) {
-      return `h${w.healReserve}|f${w.food}`;
+      return `h${w.healReserve}|f${w.food}|r${w.rawFish}`;
+    }
+    /** A meal owns the hero. Shop and chest wait until the catch is cooked. */
+    mealOwns(w, stance) {
+      return w.bagFree > 1 && (w.healReserve <= 0 || w.food < stance.minFood) && (w.rawFish > 0 || this.catchingMeal(w, stance));
+    }
+    /**
+     * How many raw fish to land before lighting. A normal log only burns 24 ticks,
+     * which is not enough to fish and cook in the same fire.
+     */
+    mealBatch(w, stance) {
+      const room = Math.max(1, w.rawFish + Math.max(0, w.bagFree - 1));
+      const want = Math.max(4, Math.min(8, stance.minFood));
+      return Math.max(1, Math.min(want, room));
+    }
+    /** The catch is not full yet. Keep the log. Do not light. */
+    catchingMeal(w, stance) {
+      if (w.hasFire) return false;
+      if (w.healReserve > 0 && w.food >= stance.minFood) return false;
+      if (w.bagFree <= 1) return false;
+      return w.rawFish < this.mealBatch(w, stance);
+    }
+    /**
+     * One job: a log in the bag, fish until the batch, then one fire and cook.
+     * A fire that is already burning is used immediately so it is not wasted.
+     */
+    tryMeal(host, w, stance) {
+      const needs = w.healReserve <= 0 || w.food < stance.minFood;
+      if (!needs) return false;
+      if (w.foes.some((f) => f.alive && f.lit && f.dist <= 2)) return false;
+      if (w.hasFire && w.rawFish > 0) {
+        host.cookOnce();
+        host.pickupLoot();
+        this.setStatus(host, w, stance, "cooking");
+        this.cool = 2;
+        return true;
+      }
+      const catching = this.catchingMeal(w, stance) && host.hasTool("rod") && w.pondKnown;
+      if (catching && !w.hasLogs && !w.hasFire && host.hasTool("hatchet") && this.tryChopForCookFuel(host, w, stance)) {
+        return true;
+      }
+      if (catching && w.gather && !this.bagFullActive() && this.tryGather(host, w, stance, "fish for food")) {
+        this.rememberFoodFarm(w);
+        return true;
+      }
+      if (!this.catchingMeal(w, stance) && w.rawFish > 0 && !w.hasFire && host.lightFireOnce()) {
+        this.setStatus(host, w, stance, "cook fuel");
+        this.cool = 3;
+        return true;
+      }
+      return false;
     }
     /** Current desire tile (stairs / anvil hub / gather / loot / explore from status). */
     stuckDesireTarget(w) {
@@ -2688,7 +2709,7 @@
       if (/anvil|forge|smith|hatchet|craft gem/i.test(st) && w.hub) {
         return { key: `anvil:${w.hub.x},${w.hub.y}`, x: w.hub.x, y: w.hub.y };
       }
-      if (/sell for loot|fletch sell|bag stuck/i.test(st) && w.hub) {
+      if (/sell\b|fletch sell|bag stuck/i.test(st) && w.hub) {
         return { key: `hub:${w.hub.x},${w.hub.y}`, x: w.hub.x, y: w.hub.y };
       }
       if (/food fell/i.test(st) && this.lastFoodFarm && this.lastFoodFarm.depth === w.depth) {
