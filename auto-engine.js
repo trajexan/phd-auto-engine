@@ -1,4 +1,4 @@
-/* phd auto-engine e56 — pull via GET /api/auto-engine */
+/* phd auto-engine e57 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e56";
+  var AUTO_ENGINE_VERSION = "e57";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -891,19 +891,20 @@
         if (belowSafe && !imminentR && !this.hoarding) {
           if (this.tryMeal(host, w, stance)) return;
           if (w.rawFish > 0 && !w.hasFire && !w.hasLogs && host.hasTool("hatchet") && this.bagFullActive()) {
-            if (host.freeCookSlot()) {
-              this.setStatus(host, w, stance, "drop for a log");
-              this.cool = 2;
-              return;
-            }
-            if (w.bagFree > 0) this.bagFullUntil = 0;
-            else if (this.tryBagFullRelief(host, w, stance)) return;
+            if (this.dropUntilCookSlot(host)) {
+              if (host.world().bagFree <= 0) {
+                this.setStatus(host, w, stance, "drop for a log");
+                this.cool = 2;
+                return;
+              }
+              this.bagFullUntil = 0;
+            } else if (host.world().bagFree <= 0 && this.tryBagFullRelief(host, w, stance)) return;
           }
           if (w.rawFish > 0 && !w.hasFire && !w.hasLogs && host.hasTool("hatchet") && this.tryChopForCookFuel(host, w, stance)) {
             return;
           }
           if (w.rawFish > 0 && !w.hasFire && !w.hasLogs && host.hasTool("hatchet") && this.cookOwed(w, stance)) {
-            if (w.bagFree <= 0 && host.freeCookSlot()) {
+            if (w.bagFree <= 0 && this.dropUntilCookSlot(host)) {
               this.setStatus(host, w, stance, "drop for a log");
               this.cool = 2;
               return;
@@ -968,7 +969,7 @@
                 this.cool = 3;
                 return;
               }
-              if (host.freeCookSlot()) {
+              if (this.dropUntilCookSlot(host)) {
                 this.setStatus(host, w, stance, "drop for cook slot");
                 this.cool = 2;
                 return;
@@ -1502,7 +1503,8 @@
             this.forgeBlockUntil = this.runTicks + 280;
             this.noteAction("forge+ soft-block (need ore?)");
           }
-          if (this.farmCeiling() && healOkE && this.tryFarmCeilingMoveOn(host, w, stance)) return;
+          if (w.food < stance.minFood && w.bagFree > 0 && this.tryWalkLoot(host, w, stance, "loot for food")) return;
+          if (this.farmCeiling() && w.food >= stance.minFood && healOkE && this.tryFarmCeilingMoveOn(host, w, stance)) return;
           if (healOkE && this.tryFarmCoinsForGear(host, w, stance, {
             forgeSoft: forgeSoftE,
             kitArmed: kitArmedE
@@ -1827,6 +1829,19 @@
     rememberTree(w) {
       if (!w.gather) return;
       this.lastTree = { depth: w.depth, x: w.gather.x, y: w.gather.y };
+    }
+    /**
+     * e57: one raw fish from a stack does not free a slot (9ufsdp, 23 raw, logs 0).
+     * Drop until a slot exists, or nothing left will go. True if anything was dropped.
+     */
+    dropUntilCookSlot(host) {
+      let dropped = false;
+      for (let n = 0; n < 24; n++) {
+        if (host.world().bagFree > 0) return dropped;
+        if (!host.freeCookSlot()) return dropped;
+        dropped = true;
+      }
+      return dropped;
     }
     /**
      * e44: chop for cook fuel. Prefer current gather (host prefers tree when raw+no logs);
@@ -2250,7 +2265,9 @@
         this.noteAction(`gather fail \u2014 ${reason}`);
         host.log(`AUTO: gather fail \u2014 ${reason}`);
         if (tooFull) {
-          if (/log/i.test(reason) && host.freeCookSlot()) {
+          if (/log/i.test(reason) && this.dropUntilCookSlot(host)) {
+            this.tileBlock.delete(`${gx},${gy}`);
+            this.sameTargetHits = 0;
             this.setStatus(host, w, stance, "drop for a log");
             this.cool = 2;
             return true;
@@ -2988,7 +3005,7 @@
         this.cool = 3;
         return;
       }
-      const ceilingSpin = /farm ceiling|ceiling thrash/i.test(stRethink) && w.kitReady && (w.healReserve > 0 || w.food > 0);
+      const ceilingSpin = /farm ceiling|ceiling thrash/i.test(stRethink) && w.kitReady && w.food >= stance.minFood;
       if (ceilingSpin) this.ceilingRethinks = Math.min(8, this.ceilingRethinks + 1);
       else this.ceilingRethinks = 0;
       if (this.ceilingRethinks >= 4) {
