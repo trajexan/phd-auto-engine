@@ -1,4 +1,4 @@
-/* phd auto-engine e55 — pull via GET /api/auto-engine */
+/* phd auto-engine e56 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e55";
+  var AUTO_ENGINE_VERSION = "e56";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -652,6 +652,8 @@
       __publicField(this, "pondBreakUntil", 0);
       /** e48: runTicks until chop-for-fire/lastTree allowed again after bag-stuck thrash. */
       __publicField(this, "chopBreakUntil", 0);
+      /** e56: runTicks when the dry-ground walk started. 0 = not in it. */
+      __publicField(this, "drySince", 0);
       /**
        * e49: consecutive stuck-rethinks while farm-ceiling explore/mob (kitReady + healOk).
        * ≥4 → force stairs / find stairs (R6 floor-advance stall).
@@ -742,6 +744,7 @@
         this.pondRethinks = 0;
         this.pondBreakUntil = 0;
         this.chopBreakUntil = 0;
+        this.drySince = 0;
         this.ceilingRethinks = 0;
         this.foodFarmSoftBlocks = 0;
         this.hatchetRethinks = 0;
@@ -887,10 +890,29 @@
         }
         if (belowSafe && !imminentR && !this.hoarding) {
           if (this.tryMeal(host, w, stance)) return;
-          if (w.rawFish > 0 && !w.hasFire && !w.hasLogs && host.hasTool("hatchet") && this.bagFullActive() && this.tryBagFullRelief(host, w, stance)) {
-            return;
+          if (w.rawFish > 0 && !w.hasFire && !w.hasLogs && host.hasTool("hatchet") && this.bagFullActive()) {
+            if (host.freeCookSlot()) {
+              this.setStatus(host, w, stance, "drop for a log");
+              this.cool = 2;
+              return;
+            }
+            if (w.bagFree > 0) this.bagFullUntil = 0;
+            else if (this.tryBagFullRelief(host, w, stance)) return;
           }
           if (w.rawFish > 0 && !w.hasFire && !w.hasLogs && host.hasTool("hatchet") && this.tryChopForCookFuel(host, w, stance)) {
+            return;
+          }
+          if (w.rawFish > 0 && !w.hasFire && !w.hasLogs && host.hasTool("hatchet") && this.cookOwed(w, stance)) {
+            if (w.bagFree <= 0 && host.freeCookSlot()) {
+              this.setStatus(host, w, stance, "drop for a log");
+              this.cool = 2;
+              return;
+            }
+            host.clearEngage();
+            if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+            else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+            this.setStatus(host, w, stance, "explore for a tree");
+            this.cool = 3;
             return;
           }
           const postKitFood = w.kitReady || w.hasMetalWeapon && w.hasArmour || w.hasStyleWeapon;
@@ -1829,8 +1851,19 @@
         this.noteAction(`chop fail \u2014 drop last tree F${tree.depth} (${tree.x},${tree.y})`);
         this.noteGatherFail(tree.x, tree.y);
         this.lastTree = null;
+        return false;
       }
-      return false;
+      return this.walkLastTree(host, w, stance, "chop for fire \u2192 last floor");
+    }
+    /** Last tree on this floor is handled by the caller. A tree one or more floors up is a climb. */
+    walkLastTree(host, w, stance, label) {
+      const tree = this.lastTree;
+      if (!tree || tree.depth >= w.depth || !w.upStairs) return false;
+      host.clearEngage();
+      host.walkTo(w.upStairs.x, w.upStairs.y);
+      this.setStatus(host, w, stance, label);
+      this.cool = 3;
+      return true;
     }
     /** Explicit improve (forge+ / equip drop) — also resets farm ceiling. */
     noteImprove() {
@@ -2217,6 +2250,11 @@
         this.noteAction(`gather fail \u2014 ${reason}`);
         host.log(`AUTO: gather fail \u2014 ${reason}`);
         if (tooFull) {
+          if (/log/i.test(reason) && host.freeCookSlot()) {
+            this.setStatus(host, w, stance, "drop for a log");
+            this.cool = 2;
+            return true;
+          }
           this.bagFullUntil = this.runTicks + 600;
           this.sameTargetHits = SAME_TARGET_MAX;
           if (host.sellUnusedOnce() || host.sellOreKeep(0) || host.sellMatsForCoins(30)) {
@@ -2704,7 +2742,13 @@
         return true;
       }
       if (w.hasLogs && w.rawFish > 0 && !w.hasFire) {
-        const spot = w.wander || w.explore;
+        if (this.drySince === 0) this.drySince = this.runTicks;
+        if (this.runTicks - this.drySince > 36) {
+          this.drySince = 0;
+          if (this.walkLastTree(host, w, stance, "dry ground \u2192 last tree")) return true;
+          if (w.healReserve > 0) return false;
+        }
+        const spot = w.explore || w.wander;
         if (spot) {
           host.clearEngage();
           host.walkTo(spot.x, spot.y);
@@ -2712,6 +2756,8 @@
           this.cool = 2;
           return true;
         }
+      } else {
+        this.drySince = 0;
       }
       return false;
     }
@@ -2733,9 +2779,15 @@
       if (/sell\b|fletch sell|bag stuck/i.test(st) && w.hub) {
         return { key: `hub:${w.hub.x},${w.hub.y}`, x: w.hub.x, y: w.hub.y };
       }
+      if (/last floor|last tree/i.test(st) && w.upStairs && this.lastTree && this.lastTree.depth < w.depth) {
+        return { key: `uptree:${w.upStairs.x},${w.upStairs.y}`, x: w.upStairs.x, y: w.upStairs.y };
+      }
       if (/dry ground/i.test(st)) {
-        const spot = w.wander || w.explore;
+        const spot = w.explore || w.wander;
         if (spot) return { key: `dry:${spot.x},${spot.y}`, x: spot.x, y: spot.y };
+      }
+      if (/explore for a tree/i.test(st) && w.explore) {
+        return { key: `tree:${w.explore.x},${w.explore.y}`, x: w.explore.x, y: w.explore.y };
       }
       if (/food fell/i.test(st) && this.lastFoodFarm && this.lastFoodFarm.depth === w.depth) {
         const s = this.lastFoodFarm;
