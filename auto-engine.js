@@ -1,4 +1,4 @@
-/* phd auto-engine e54 — pull via GET /api/auto-engine */
+/* phd auto-engine e55 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e54";
+  var AUTO_ENGINE_VERSION = "e55";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -939,19 +939,21 @@
         }
         if (w.rawFish > 0 && !imminentR && !this.hoarding) {
           if (this.tryMeal(host, w, stance)) return;
-          if (!w.hasLogs && w.bagFree <= 0 && host.hasTool("hatchet")) {
-            if (host.sellUnusedOnce()) {
-              this.setStatus(host, w, stance, "sell for cook slot");
-              this.cool = 3;
-              return;
+          if (this.cookOwed(w, stance) && !w.hasLogs && host.hasTool("hatchet")) {
+            if (w.bagFree <= 0) {
+              if (host.sellUnusedOnce()) {
+                this.setStatus(host, w, stance, "sell for cook slot");
+                this.cool = 3;
+                return;
+              }
+              if (host.freeCookSlot()) {
+                this.setStatus(host, w, stance, "drop for cook slot");
+                this.cool = 2;
+                return;
+              }
             }
-            if (host.freeCookSlot()) {
-              this.setStatus(host, w, stance, "drop for cook slot");
-              this.cool = 2;
-              return;
-            }
+            if (this.tryChopForCookFuel(host, w, stance)) return;
           }
-          if (host.hasTool("hatchet") && this.tryChopForCookFuel(host, w, stance)) return;
         }
         const canClimb = w.depth > 1 && !!w.upStairs && this.runTicks >= this.foodRetreatCoolUntil && !this.hoarding;
         if (canClimb && (foodCleaned || belowSafe && unsafeNear)) {
@@ -2646,7 +2648,15 @@
     }
     /** A meal owns the hero. Shop and chest wait until the catch is cooked. */
     mealOwns(w, stance) {
-      return w.bagFree > 1 && (w.healReserve <= 0 || w.food < stance.minFood) && (w.rawFish > 0 || this.catchingMeal(w, stance));
+      return w.bagFree > 1 && this.cookOwed(w, stance) && (w.rawFish > 0 || this.catchingMeal(w, stance));
+    }
+    /**
+     * Heal-rich ignores the piece floor (same exception as foodStance).
+     * Do not start a new chop just because a few raw fish are still in the bag.
+     */
+    cookOwed(w, stance) {
+      if (w.healReserve >= stance.safetyLevel * 1.5 && w.food > 0) return false;
+      return w.healReserve <= 0 || w.food < stance.minFood;
     }
     /**
      * How many raw fish to land before lighting. A normal log only burns 24 ticks,
@@ -2659,6 +2669,7 @@
     }
     /** The catch is not full yet. Keep the log. Do not light. */
     catchingMeal(w, stance) {
+      if (!this.cookOwed(w, stance)) return false;
       if (w.hasFire) return false;
       if (w.healReserve > 0 && w.food >= stance.minFood) return false;
       if (w.bagFree <= 1) return false;
@@ -2669,8 +2680,6 @@
      * A fire that is already burning is used immediately so it is not wasted.
      */
     tryMeal(host, w, stance) {
-      const needs = w.healReserve <= 0 || w.food < stance.minFood;
-      if (!needs) return false;
       if (w.foes.some((f) => f.alive && f.lit && f.dist <= 2)) return false;
       if (w.hasFire && w.rawFish > 0) {
         host.cookOnce();
@@ -2679,6 +2688,8 @@
         this.cool = 2;
         return true;
       }
+      const needs = this.cookOwed(w, stance);
+      if (!needs) return false;
       const catching = this.catchingMeal(w, stance) && host.hasTool("rod") && w.pondKnown;
       if (catching && !w.hasLogs && !w.hasFire && host.hasTool("hatchet") && this.tryChopForCookFuel(host, w, stance)) {
         return true;
@@ -2691,6 +2702,16 @@
         this.setStatus(host, w, stance, "cook fuel");
         this.cool = 3;
         return true;
+      }
+      if (w.hasLogs && w.rawFish > 0 && !w.hasFire) {
+        const spot = w.wander || w.explore;
+        if (spot) {
+          host.clearEngage();
+          host.walkTo(spot.x, spot.y);
+          this.setStatus(host, w, stance, "dry ground for fire");
+          this.cool = 2;
+          return true;
+        }
       }
       return false;
     }
@@ -2711,6 +2732,10 @@
       }
       if (/sell\b|fletch sell|bag stuck/i.test(st) && w.hub) {
         return { key: `hub:${w.hub.x},${w.hub.y}`, x: w.hub.x, y: w.hub.y };
+      }
+      if (/dry ground/i.test(st)) {
+        const spot = w.wander || w.explore;
+        if (spot) return { key: `dry:${spot.x},${spot.y}`, x: spot.x, y: spot.y };
       }
       if (/food fell/i.test(st) && this.lastFoodFarm && this.lastFoodFarm.depth === w.depth) {
         const s = this.lastFoodFarm;
@@ -2757,7 +2782,7 @@
           usefulApproach = true;
         } else if (dist <= 1) {
           const stPark = (this.lastStatus || "").toLowerCase();
-          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest/i.test(stPark);
+          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest/i.test(stPark);
           if (desire.key.startsWith("gather:") && !gatherBusy) {
             usefulApproach = false;
           } else {
