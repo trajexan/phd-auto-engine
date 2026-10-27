@@ -1,4 +1,4 @@
-/* phd auto-engine e57 — pull via GET /api/auto-engine */
+/* phd auto-engine e59 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e57";
+  var AUTO_ENGINE_VERSION = "e59";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1068,8 +1068,8 @@
       }
       if (!imminent && (earlyBare || w.depth <= 5 && w.healReserve <= 0)) {
         const ORE_HATCHET = 2;
-        const ORE_WEP = 3;
-        const ORE_ARMOUR = 3;
+        const ORE_WEP = 1;
+        const ORE_ARMOUR = 5;
         const healOkPrep = w.healReserve > 0 || w.food > 0;
         const needHealPrep = !healOkPrep;
         if (!host.hasTool("pickaxe") && w.coins >= TOOL) {
@@ -1158,7 +1158,9 @@
           this.cool = 2;
           return;
         }
-        if (this.anvilStrive && (healOkPrep || !kitBuilt)) {
+        const emptyBelly = w.healReserve <= 0 && w.food <= 0 && !(w.rawFish > 0);
+        if (emptyBelly && !hasHatchet && this.anvilStrive) this.clearAnvilStrive();
+        if (this.anvilStrive && (healOkPrep || !kitBuilt) && !(emptyBelly && !hasHatchet)) {
           if (this.resumeAnvilStrive(host, w, stance)) return;
         }
         if (w.anvilNearby && this.stylePivot !== true) this.stylePivot = false;
@@ -1239,7 +1241,7 @@
         if (!skipNewMine && !this.anvilStrive && !this.stylePivot && !styleDone && hasPick && !metalDone && orePlan > 0 && w.oreCount < orePlan && w.gather) {
           if (this.tryGather(host, w, stance, "mine ore")) return;
         }
-        if (!this.stylePivot && !styleDone && hasPick && !hasHatchet && (w.oreCount >= ORE_HATCHET || w.coins >= TOOL || w.oreCount >= orePlan)) {
+        if (!this.stylePivot && !styleDone && hasPick && !hasHatchet && !emptyBelly && (w.oreCount >= ORE_HATCHET || w.coins >= TOOL || w.oreCount >= orePlan)) {
           if (host.acquireTool("hatchet")) {
             const lab = w.oreCount >= ORE_HATCHET ? "forge hatchet" : "shop for hatchet";
             if (w.oreCount >= ORE_HATCHET) this.markAnvilStrive(lab, w);
@@ -1333,7 +1335,7 @@
               if (this.dashPastElite(host, w, stance)) return;
             }
           } else {
-            const forged = host.forgeWieldedOnce(2);
+            const forged = host.forgeWieldedOnce();
             if (forged) {
               this.noteImprove();
               this.setStatus(host, w, stance, "forge kit +");
@@ -1493,7 +1495,7 @@
             return;
           }
           if (healOkE && !forgeSoftE && kitArmedE && w.oreCount > 0 && forgeFundedE) {
-            const forged = host.forgeWieldedOnce(2);
+            const forged = host.forgeWieldedOnce();
             if (forged) {
               this.noteImprove();
               this.setStatus(host, w, stance, "forge kit +");
