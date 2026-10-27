@@ -1,4 +1,4 @@
-/* phd auto-engine e59 — pull via GET /api/auto-engine */
+/* phd auto-engine e60 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e59";
+  var AUTO_ENGINE_VERSION = "e60";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -710,7 +710,7 @@
       this.rnd = rnd;
     }
     tick(host) {
-      var _a, _b, _c, _d, _e, _f;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n;
       const w = host.world();
       if (w.blocked) return;
       this.ensureActiveClock();
@@ -806,11 +806,18 @@
         const hpPctEarly = w.maxHp > 0 ? w.hp / w.maxHp : 1;
         const meleePress2 = w.foes.some((f) => f.alive && f.lit && f.dist <= 2);
         const eatBelowEarly = meleePress2 ? 0.75 : stance.hungry ? 0.5 : stance.stocked ? 0.35 : 0.45;
-        if (hpPctEarly < 0.95 && hpPctEarly < eatBelowEarly && w.food > 0) {
-          host.eat();
-          this.setStatus(host, w, stance, "eating");
-          this.cool = 2;
-          return;
+        if (hpPctEarly < 0.95 && hpPctEarly < eatBelowEarly) {
+          if ((_e = host.drinkOnce) == null ? void 0 : _e.call(host, "hurt")) {
+            this.setStatus(host, w, stance, "drink potion");
+            this.cool = 2;
+            return;
+          }
+          if (w.food > 0) {
+            host.eat();
+            this.setStatus(host, w, stance, "eating");
+            this.cool = 2;
+            return;
+          }
         }
       }
       {
@@ -832,7 +839,7 @@
         host.noteDecision(ev.id, opt.id, ev.title);
         {
           const key = `${ev.id}:${opt.id}`;
-          this.forkCounts[key] = ((_e = this.forkCounts[key]) != null ? _e : 0) + 1;
+          this.forkCounts[key] = ((_f = this.forkCounts[key]) != null ? _f : 0) + 1;
         }
         this.noteAction(`fork ${ev.id}\u2192${opt.id}`);
         host.log(`AUTO: ${ev.title} \u2192 ${opt.label}`);
@@ -858,6 +865,33 @@
         if (!pressed && fed && geared && host.runecraftOnce()) {
           this.setStatus(host, w, stance, "runecraft");
           this.cool = 4;
+          return;
+        }
+      }
+      {
+        const pressedGear = w.foes.some((f) => f.alive && f.lit && f.dist <= 2);
+        const sewn = (_h = (_g = host.craftClothesOnce) == null ? void 0 : _g.call(host)) != null ? _h : null;
+        if (sewn) {
+          host.equipUp();
+          this.setStatus(host, w, stance, sewn === "robe" ? "craft robe" : "craft leather");
+          this.cool = 2;
+          return;
+        }
+        const shield = (_j = (_i = host.craftShieldOnce) == null ? void 0 : _i.call(host)) != null ? _j : null;
+        if (shield) {
+          host.equipUp();
+          this.setStatus(host, w, stance, shield === "cshield" ? "craft cloth shield" : "craft leather shield");
+          this.cool = 2;
+          return;
+        }
+        if (!pressedGear && ((_k = host.brewOnce) == null ? void 0 : _k.call(host))) {
+          this.setStatus(host, w, stance, "brew potion");
+          this.cool = 3;
+          return;
+        }
+        if (!pressedGear && (w.healReserve > 0 || w.food > 0) && ((_l = host.drinkOnce) == null ? void 0 : _l.call(host, "buff"))) {
+          this.setStatus(host, w, stance, "drink potion");
+          this.cool = 2;
           return;
         }
       }
@@ -1516,11 +1550,18 @@
       const hpPct = w.maxHp > 0 ? w.hp / w.maxHp : 1;
       const meleePress = imminent;
       const eatBelow = meleePress ? 0.75 : stance.hungry ? 0.5 : stance.stocked ? 0.35 : 0.45;
-      if (hpPct < 0.95 && hpPct < eatBelow && w.food > 0) {
-        host.eat();
-        this.setStatus(host, w, stance, "eating");
-        this.cool = 2;
-        return;
+      if (hpPct < 0.95 && hpPct < eatBelow) {
+        if ((_m = host.drinkOnce) == null ? void 0 : _m.call(host, "hurt")) {
+          this.setStatus(host, w, stance, "drink potion");
+          this.cool = 2;
+          return;
+        }
+        if (w.food > 0) {
+          host.eat();
+          this.setStatus(host, w, stance, "eating");
+          this.cool = 2;
+          return;
+        }
       }
       const emergency = w.healReserve <= 0 && hpPct < 0.4 && w.stairsLit && w.stairsOpen;
       const mayDescend = (w.kitReady || emergency) && (!this.hoarding || stance.stocked) && (!stance.hungry || w.healReserve <= 0 || emergency);
@@ -1650,7 +1691,7 @@
       if (this.stairsUsable(w) && mayDescend && (w.healReserve <= 0 || emergency)) {
         if (this.walkStairsStrive(host, w, stance, emergency ? "emergency stairs" : "pushing stairs")) return;
       }
-      const lane = (_f = this.laneBias) != null ? _f : pickFarmLane(this.traits, stance, w.descendSafe, this.rnd);
+      const lane = (_n = this.laneBias) != null ? _n : pickFarmLane(this.traits, stance, w.descendSafe, this.rnd);
       if ((!mayDescend || stance.hungry && w.healReserve > 0) && !this.farmCeiling()) {
         const criticalHeal = stance.ratio <= 0.35;
         if (lane === "food" || lane === "gear" && criticalHeal || lane === "resource") {
@@ -2392,8 +2433,11 @@
       return { entries: this.journal.slice(), trunc: this.journalTruncFlag };
     }
     applyOption(host, w, ev, opt, stance) {
+      var _a;
       const id = opt.id;
-      if ((id === "eat" || id.startsWith("eat_")) && (w.maxHp <= 0 || w.hp / w.maxHp < 0.95)) host.eat();
+      if ((id === "eat" || id.startsWith("eat_")) && (w.maxHp <= 0 || w.hp / w.maxHp < 0.95)) {
+        if (!((_a = host.drinkOnce) == null ? void 0 : _a.call(host, "hurt"))) host.eat();
+      }
       if (id === "chase" || id === "engage" || id === "eat_engage" || id === "eat_then_chase" || id === "fight_pack" || id === "enter" || id === "eat_enter" || id === "clear" || id === "eat_clear") {
         const foe = this.pickForEvent(w, ev, stance);
         if (foe) host.engage(foe);
