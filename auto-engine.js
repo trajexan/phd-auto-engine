@@ -1,4 +1,4 @@
-/* phd auto-engine e60 — pull via GET /api/auto-engine */
+/* phd auto-engine e61 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e60";
+  var AUTO_ENGINE_VERSION = "e61";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
