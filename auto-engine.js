@@ -1,4 +1,4 @@
-/* phd auto-engine e68 — pull via GET /api/auto-engine */
+/* phd auto-engine e69 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e68";
+  var AUTO_ENGINE_VERSION = "e69";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -711,7 +711,7 @@
       this.rnd = rnd;
     }
     tick(host) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q;
       const w = host.world();
       if (w.blocked) return;
       this.ensureActiveClock();
@@ -1069,37 +1069,30 @@
           }
         }
       }
-      const bellyEmpty = w.healReserve <= 0 && w.food <= 0;
-      if (bellyEmpty && !imminent) {
+      const prefer = !imminent ? this.nearestMissingNearby(host, w) : null;
+      if (prefer) {
         if (w.rawFish > 0 && this.tryMeal(host, w, stance)) return;
-        if (w.rawFish > 0 && !host.hasTool("hatchet") && host.acquireTool("hatchet")) {
-          this.setStatus(host, w, stance, "shop for hatchet");
+        if (w.coins >= TOOL && host.acquireTool(prefer.tool)) {
+          this.setStatus(host, w, stance, `shop for ${prefer.name}`);
           this.cool = 3;
           return;
         }
-        if (!host.hasTool("rod")) {
-          if (w.coins >= TOOL && host.acquireTool("rod")) {
-            this.setStatus(host, w, stance, "shop for rod");
-            this.cool = 3;
-            return;
-          }
-          if (this.tryWalkLoot(host, w, stance, "loot for rod")) return;
-          if (this.walkHub(host, w, stance, "hub for rod")) return;
-          if (((_o = w.seen) == null ? void 0 : _o.shop) && this.walkSeen(host, w, stance, w.seen.shop, "remembered shop")) return;
-        } else if (!this.bagFullActive() && w.pondKnown && w.gather && this.tryGather(host, w, stance, "fish for food")) {
-          this.rememberFoodFarm(w);
-          return;
-        } else if (((_p = w.seen) == null ? void 0 : _p.pond) && this.walkSeen(host, w, stance, w.seen.pond, "remembered pond")) {
-          return;
-        } else if (w.explore) {
-          host.clearEngage();
-          host.walkTo(w.explore.x, w.explore.y);
-          this.setStatus(host, w, stance, "find pond");
+        if ((w.oreCount > 0 || w.hasLogs || w.rawFish > 0) && (host.sellUnusedOnce() || host.sellMatsForCoins(TOOL) || host.sellOreKeep(0))) {
+          this.setStatus(host, w, stance, "sell for tool");
           this.cool = 3;
           return;
         }
+        const owned = this.nearestOwnedNearby(host, w);
+        if (owned && !this.bagFullActive() && w.gather && this.tryGather(host, w, stance, `gather ${owned.name}`)) {
+          if (owned.tool === "rod") this.rememberFoodFarm(w);
+          return;
+        }
+        if (owned && this.walkSeen(host, w, stance, owned.tile, `gather ${owned.name}`)) return;
+        if (this.tryWalkLoot(host, w, stance, "loot for tool")) return;
+        if (((_o = w.seen) == null ? void 0 : _o.shop) && this.walkSeen(host, w, stance, w.seen.shop, "shop")) return;
+        if (this.walkHub(host, w, stance, "hub for tool")) return;
       }
-      const needPick = earlyBare && !host.hasTool("pickaxe") && w.coins >= TOOL;
+      const needPick = earlyBare && !host.hasTool("pickaxe") && w.coins >= TOOL && (!prefer || prefer.tool === "pickaxe");
       if (needPick) {
         if (!meleeOnMe) {
           if (host.acquireTool("pickaxe")) {
@@ -1139,14 +1132,14 @@
         const ORE_ARMOUR = 5;
         const healOkPrep = w.healReserve > 0 || w.food > 0;
         const needHealPrep = !healOkPrep;
-        if (!host.hasTool("pickaxe") && w.coins >= TOOL) {
+        if (!host.hasTool("pickaxe") && w.coins >= TOOL && (!prefer || prefer.tool === "pickaxe")) {
           if (host.acquireTool("pickaxe")) {
             this.setStatus(host, w, stance, "shop for pickaxe");
             this.cool = 3;
             return;
           }
         }
-        if (!host.hasTool("pickaxe") && w.coins < TOOL) {
+        if ((!prefer || prefer.tool === "pickaxe") && !host.hasTool("pickaxe") && w.coins < TOOL) {
           if (!imminent && this.tryWalkLoot(host, w, stance, "loot for pickaxe coins")) return;
           if (this.walkHub(host, w, stance, "hub for pickaxe")) return;
           if (w.explore) {
@@ -1584,7 +1577,7 @@
       const meleePress = imminent;
       const eatBelow = meleePress ? 0.75 : stance.hungry ? 0.5 : stance.stocked ? 0.35 : 0.45;
       if (hpPct < 0.95 && hpPct < eatBelow) {
-        if ((_q = host.drinkOnce) == null ? void 0 : _q.call(host, "hurt")) {
+        if ((_p = host.drinkOnce) == null ? void 0 : _p.call(host, "hurt")) {
           this.setStatus(host, w, stance, "drink potion");
           this.cool = 2;
           return;
@@ -1724,7 +1717,7 @@
       if (this.stairsUsable(w) && mayDescend && (w.healReserve <= 0 || emergency)) {
         if (this.walkStairsStrive(host, w, stance, emergency ? "emergency stairs" : "pushing stairs")) return;
       }
-      const lane = (_r = this.laneBias) != null ? _r : pickFarmLane(this.traits, stance, w.descendSafe, this.rnd);
+      const lane = (_q = this.laneBias) != null ? _q : pickFarmLane(this.traits, stance, w.descendSafe, this.rnd);
       if ((!mayDescend || stance.hungry && w.healReserve > 0) && !this.farmCeiling()) {
         const criticalHeal = stance.ratio <= 0.35;
         if (lane === "food" || lane === "gear" && criticalHeal || lane === "resource") {
@@ -3350,6 +3343,35 @@
       const cost = (_b = (_a = w.seen) == null ? void 0 : _a.forgeCost) != null ? _b : -1;
       if (cost < 0) return true;
       return w.coins >= cost || w.oreCount > 0;
+    }
+    /**
+     * Gather nodes already close to the hero. 12 tiles is the camp around the shop.
+     * A node remembered across the floor is not a reason to buy that tool yet.
+     */
+    nearbyGather(w) {
+      var _a, _b, _c;
+      const nodes = [
+        { tool: "pickaxe", tile: (_a = w.seen) == null ? void 0 : _a.rock, name: "rock" },
+        { tool: "hatchet", tile: (_b = w.seen) == null ? void 0 : _b.tree, name: "tree" },
+        { tool: "rod", tile: (_c = w.seen) == null ? void 0 : _c.pond, name: "pond" }
+      ];
+      const out = [];
+      for (const n of nodes) {
+        if (!n.tile) continue;
+        const dist = Math.max(Math.abs(n.tile.x - w.tile.x), Math.abs(n.tile.y - w.tile.y));
+        if (dist > 12) continue;
+        out.push({ tool: n.tool, tile: n.tile, name: n.name, dist });
+      }
+      out.sort((a, b) => a.dist - b.dist);
+      return out;
+    }
+    nearestMissingNearby(host, w) {
+      var _a;
+      return (_a = this.nearbyGather(w).find((n) => !host.hasTool(n.tool))) != null ? _a : null;
+    }
+    nearestOwnedNearby(host, w) {
+      var _a;
+      return (_a = this.nearbyGather(w).find((n) => host.hasTool(n.tool))) != null ? _a : null;
     }
     walkSeen(host, w, stance, tile, label) {
       if (!tile) return false;
