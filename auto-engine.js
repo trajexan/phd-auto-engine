@@ -1,4 +1,4 @@
-/* phd auto-engine e73 — pull via GET /api/auto-engine */
+/* phd auto-engine e74 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e73";
+  var AUTO_ENGINE_VERSION = "e74";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -580,6 +580,9 @@
       __publicField(this, "bagFullUntil", 0);
       /** forgeWieldedOnce failed (need ore / mats) — soft-block forge+ until runTicks. */
       __publicField(this, "forgeBlockUntil", 0);
+      /** Coins and ore at the moment forge refused. A rise clears the block. */
+      __publicField(this, "forgeBlockCoins", 0);
+      __publicField(this, "forgeBlockOre", 0);
       /**
        * e23: persist walk-to-anvil (forge hatchet / smith kit) until adj+smith or soft-block.
        * Prevents mid-path divert to mine/farm food / door thrash desire flicker.
@@ -751,6 +754,8 @@
         this.hatchetRethinks = 0;
         this.bagFullFails = 0;
         this.forgeBlockUntil = 0;
+        this.forgeBlockCoins = 0;
+        this.forgeBlockOre = 0;
         this.mineFailStreak = 0;
         this.mineBlockUntil = 0;
         this.lastOreCount = -1;
@@ -1362,7 +1367,7 @@
         }
         const kitArmed = metalDone || styleDone || w.hasMetalWeapon && w.hasArmour;
         const forgeFunded = healOk || w.coins >= TOOL + 5 || kitArmed && w.oreCount > 0 && w.coins >= TOOL;
-        if (healOk && !forgeSoftBlocked && kitArmed && w.oreCount > 0 && forgeFunded) {
+        if (!forgeSoftBlocked && kitArmed && w.oreCount > 0 && forgeFunded && (healOk || w.anvilNearby && this.canPayForge(w))) {
           if (eliteLit && foeNear) {
             if (w.explore) {
               host.clearEngage();
@@ -1382,7 +1387,7 @@
               this.cool = 4;
               return;
             }
-            this.forgeBlockUntil = this.runTicks + 280;
+            this.noteForgeMiss(w);
             this.noteAction("forge+ soft-block (need ore?)");
           }
         }
@@ -1534,7 +1539,7 @@
             this.cool = 4;
             return;
           }
-          if (healOkE && !forgeSoftE && kitArmedE && w.oreCount > 0 && forgeFundedE) {
+          if (!forgeSoftE && kitArmedE && w.oreCount > 0 && forgeFundedE && (healOkE || w.anvilNearby && this.canPayForge(w))) {
             const forged = this.canPayForge(w) && host.forgeWieldedOnce();
             if (forged) {
               this.noteImprove();
@@ -1542,7 +1547,7 @@
               this.cool = 4;
               return;
             }
-            this.forgeBlockUntil = this.runTicks + 280;
+            this.noteForgeMiss(w);
             this.noteAction("forge+ soft-block (need ore?)");
           }
           if (w.food < stance.minFood && w.bagFree > 0 && this.tryWalkLoot(host, w, stance, "loot for food")) return;
@@ -3356,11 +3361,33 @@
       this.cool = 3;
       return true;
     }
+    /** Forge refused. Wait, but a new coin or a new ore opens it again. */
+    noteForgeMiss(w, ticks = 280) {
+      this.forgeBlockUntil = this.runTicks + ticks;
+      this.forgeBlockCoins = w.coins;
+      this.forgeBlockOre = w.oreCount;
+    }
+    /** True when the worn kit can take another forge and the anvil is in this camp. */
+    forgeReady(w) {
+      var _a;
+      if (w.oreCount <= 0 || !this.wornEnough(w)) return false;
+      if (!w.anvilNearby && !((_a = w.seen) == null ? void 0 : _a.anvil)) return false;
+      if (!this.canPayForge(w)) return false;
+      if (this.runTicks < this.forgeBlockUntil && w.coins <= this.forgeBlockCoins && w.oreCount <= this.forgeBlockOre) return false;
+      this.forgeBlockUntil = 0;
+      return true;
+    }
     /** Camp: one lit foe, the node you can already work, or the shop. Not the frontier. */
     stayInCamp(host, w, stance) {
-      var _a;
+      var _a, _b, _c;
       const s = w.seen;
       if (!(s == null ? void 0 : s.camp)) return false;
+      if (this.forgeReady(w) && host.forgeWieldedOnce()) {
+        this.noteImprove();
+        this.setStatus(host, w, stance, "forge kit +");
+        this.cool = 4;
+        return true;
+      }
       const missing = !host.hasTool("pickaxe") || !host.hasTool("hatchet") || !host.hasTool("rod");
       const hungry = w.food <= 0 && w.healReserve <= 0;
       if (!missing && !hungry) return false;
@@ -3374,6 +3401,13 @@
       }
       const owned = this.nearestOwnedNearby(host, w);
       if (owned && !this.bagFullActive()) {
+        const holdOre = w.oreCount > 0 && (w.anvilNearby || !!((_b = w.seen) == null ? void 0 : _b.anvil));
+        const product = !holdOre && (w.logCount > 0 || w.rawFish > 0);
+        if (product && ((_c = w.seen) == null ? void 0 : _c.shop) && (host.sellMatsForCoins(w.coins + 1) || this.sellJunk(host, w))) {
+          this.setStatus(host, w, stance, "camp sell");
+          this.cool = 3;
+          return true;
+        }
         if (w.gather && this.tryGather(host, w, stance, "camp node")) return true;
         if (this.walkSeen(host, w, stance, owned.tile, "camp node")) return true;
       }
@@ -3534,7 +3568,7 @@
       if (s.standHits >= standLim || aged >= ageLim) {
         this.noteAction(`anvil strive soft-block (${s.label})`);
         host.log(`AUTO: anvil unreachable (${s.label}) \u2014 soft-block`);
-        this.forgeBlockUntil = this.runTicks + 200;
+        this.noteForgeMiss(w, 200);
         this.clearAnvilStrive();
         return false;
       }
