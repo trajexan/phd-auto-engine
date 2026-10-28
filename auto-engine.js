@@ -1,4 +1,4 @@
-/* phd auto-engine e69 — pull via GET /api/auto-engine */
+/* phd auto-engine e70 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e69";
+  var AUTO_ENGINE_VERSION = "e70";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -960,7 +960,8 @@
             this.cool = 4;
             return;
           }
-          const earlyForgeFirst = w.depth <= 5 && !postKitFood && (w.oreCount > 0 || host.hasTool("pickaxe") && w.anvilNearby || !host.hasTool("pickaxe") && w.coins >= 30);
+          const nearRock = this.nearbyGather(w).some((n) => n.tool === "pickaxe");
+          const earlyForgeFirst = w.depth <= 5 && !postKitFood && (w.oreCount > 0 || host.hasTool("pickaxe") && w.anvilNearby || !host.hasTool("pickaxe") && w.coins >= 30 && nearRock);
           if (postKitFood && !host.hasTool("rod")) {
           } else if (postKitFood && this.farmCeiling() && w.food >= stance.minFood && w.rawFish <= 0) {
           } else if (earlyForgeFirst && !(w.food <= 0 && w.healReserve <= 0 && (w.pondKnown || w.rawFish > 0))) {
@@ -975,20 +976,9 @@
             this.clearAnvilStrive();
             if (w.bagFree > 0 && this.tryWalkLoot(host, w, stance, "loot for food")) return;
             if (this.pondBreakActive()) {
-              host.clearEngage();
-              if (w.explore) host.walkTo(w.explore.x, w.explore.y);
-              else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-              this.setStatus(host, w, stance, "pond break \u2014 explore");
-              this.cool = 3;
-              return;
+              if (this.exploreOut(host, w, stance, "pond break \u2014 explore")) return;
             }
-            if (w.explore) {
-              host.clearEngage();
-              host.walkTo(w.explore.x, w.explore.y);
-              this.setStatus(host, w, stance, w.pondKnown ? "farm food" : "find pond");
-              this.cool = 3;
-              return;
-            }
+            if (this.exploreOut(host, w, stance, w.pondKnown ? "farm food" : "find pond")) return;
             this.setStatus(host, w, stance, w.pondKnown ? "farm food" : "find pond");
             this.cool = 2;
             return;
@@ -1142,13 +1132,7 @@
         if ((!prefer || prefer.tool === "pickaxe") && !host.hasTool("pickaxe") && w.coins < TOOL) {
           if (!imminent && this.tryWalkLoot(host, w, stance, "loot for pickaxe coins")) return;
           if (this.walkHub(host, w, stance, "hub for pickaxe")) return;
-          if (w.explore) {
-            host.clearEngage();
-            host.walkTo(w.explore.x, w.explore.y);
-            this.setStatus(host, w, stance, "explore for coins");
-            this.cool = 3;
-            return;
-          }
+          if (w.explore && this.exploreOut(host, w, stance, "explore for coins")) return;
         }
         const hasPick = host.hasTool("pickaxe");
         const hasHatchet = host.hasTool("hatchet");
@@ -1200,20 +1184,9 @@
             return;
           }
           if (this.pondBreakActive()) {
-            host.clearEngage();
-            if (w.explore) host.walkTo(w.explore.x, w.explore.y);
-            else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-            this.setStatus(host, w, stance, "pond break \u2014 explore");
-            this.cool = 3;
-            return;
+            if (this.exploreOut(host, w, stance, "pond break \u2014 explore")) return;
           }
-          if (w.explore) {
-            host.clearEngage();
-            host.walkTo(w.explore.x, w.explore.y);
-            this.setStatus(host, w, stance, w.pondKnown ? "farm food" : "find pond");
-            this.cool = 3;
-            return;
-          }
+          if (this.exploreOut(host, w, stance, w.pondKnown ? "farm food" : "find pond")) return;
           this.setStatus(host, w, stance, w.pondKnown ? "farm food" : "find pond");
           this.cool = 2;
           return;
@@ -3343,6 +3316,47 @@
       const cost = (_b = (_a = w.seen) == null ? void 0 : _a.forgeCost) != null ? _b : -1;
       if (cost < 0) return true;
       return w.coins >= cost || w.oreCount > 0;
+    }
+    /**
+     * A frontier step. If this is already a camp, fight the one mob here or
+     * go back to the shop / the node. Do not walk into a way that is packed.
+     */
+    exploreOut(host, w, stance, label) {
+      var _a;
+      if (((_a = w.seen) == null ? void 0 : _a.camp) && this.stayInCamp(host, w, stance)) return true;
+      if (w.explore && this.walkSaferWay(host, w, stance)) return true;
+      const spot = w.explore || w.wander;
+      if (!spot) return false;
+      host.clearEngage();
+      host.walkTo(spot.x, spot.y);
+      this.setStatus(host, w, stance, label);
+      this.cool = 3;
+      return true;
+    }
+    /** Camp: one lit foe, the node you can already work, or the shop. Not the frontier. */
+    stayInCamp(host, w, stance) {
+      var _a;
+      const s = w.seen;
+      if (!(s == null ? void 0 : s.camp)) return false;
+      const missing = !host.hasTool("pickaxe") || !host.hasTool("hatchet") || !host.hasTool("rod");
+      const hungry = w.food <= 0 && w.healReserve <= 0;
+      if (!missing && !hungry) return false;
+      const foe = w.foes.filter((f) => f.alive && f.lit && !f.boss && !f.gateBoss && f.dist <= 5).sort((a, b) => a.dist - b.dist)[0];
+      const packed = foe ? (s.ways || []).some((wy) => wy.mobs >= 3 && wy.dx === Math.sign(foe.x - w.tile.x) && wy.dy === Math.sign(foe.y - w.tile.y)) : false;
+      if (foe && !packed && ((_a = s.drag) != null ? _a : 0) < 100) {
+        host.engage(foe);
+        this.setStatus(host, w, stance, "camp fight");
+        this.cool = 2;
+        return true;
+      }
+      const owned = this.nearestOwnedNearby(host, w);
+      if (owned && !this.bagFullActive()) {
+        if (w.gather && this.tryGather(host, w, stance, "camp node")) return true;
+        if (this.walkSeen(host, w, stance, owned.tile, "camp node")) return true;
+      }
+      if (s.shop && this.walkSeen(host, w, stance, s.shop, "camp shop")) return true;
+      if (s.anvil && w.oreCount > 0 && !w.anvilNearby && this.walkSeen(host, w, stance, s.anvil, "camp anvil")) return true;
+      return false;
     }
     /**
      * Gather nodes already close to the hero. 12 tiles is the camp around the shop.
