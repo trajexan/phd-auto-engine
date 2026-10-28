@@ -1,4 +1,4 @@
-/* phd auto-engine e72 — pull via GET /api/auto-engine */
+/* phd auto-engine e73 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e72";
+  var AUTO_ENGINE_VERSION = "e73";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1620,6 +1620,7 @@
         threat.danger === "prey" && hpPct >= 0.7 && threat.dist <= (host.hasTool("pickaxe") ? 2 : 1)
       )) && !(hurtBare && threat.dist > 2 && (threat.elite || threat.alpha || threat.gold)) && !(noFood && (threat.danger === "threat" || threat.danger === "deadly") && threat.dist > 1);
       if (noFood) canChase = false;
+      if (!this.wornEnough(w)) canChase = false;
       if (threat && canChase) {
         if (this.tryFunnel1v1(host, w, stance)) return;
         if (!w.hasStyleWeapon && threat.dist <= 2 && threat.danger !== "prey" && this.stepAway(host, w, stance, "melee kite")) {
@@ -1663,7 +1664,7 @@
               return;
             }
             if (unready || bareStarter) {
-              const prey = w.foes.filter((f) => f.alive && f.lit && f.danger === "prey" && f.dist <= 1 && hpPct >= 0.7).sort((a, b) => a.dist - b.dist)[0];
+              const prey = !this.wornEnough(w) ? void 0 : w.foes.filter((f) => f.alive && f.lit && f.danger === "prey" && f.dist <= 1 && hpPct >= 0.7).sort((a, b) => a.dist - b.dist)[0];
               if (prey && !needPick) {
                 host.engage(prey);
                 this.setStatus(host, w, stance, "fight prey");
@@ -1743,7 +1744,7 @@
       if (earlyBare && litPack >= 2) {
         if (this.tryFunnel1v1(host, w, stance)) return;
         const trash = w.foes.filter((f) => f.alive && f.lit && !f.gold && !f.elite && !f.alpha && !f.gateBoss && !f.boss && f.dist <= 5).sort((a, b) => a.dist - b.dist)[0];
-        if (trash && (trash.danger !== "deadly" || trash.dist <= 2)) {
+        if (trash && this.wornEnough(w) && (trash.danger !== "deadly" || trash.dist <= 2)) {
           host.engage(trash);
           this.setStatus(host, w, stance, "fighting pack");
           this.cool = 1;
@@ -1961,7 +1962,7 @@
       let mobUrge = (combatOpen ? 0.4 : 0.05) + this.traits.aggression * 0.3 + this.traits.risk * 0.2 + this.traits.goldChase * 0.25 + this.rnd() * 0.2;
       if (w.anvilNearby && (mats || !!w.gather)) craftUrge += 0.2;
       if (combatOpen && !w.anvilNearby) mobUrge += 0.2;
-      const preferMobs = mobUrge >= craftUrge && combatOpen;
+      const preferMobs = this.wornEnough(w) && mobUrge >= craftUrge && combatOpen;
       if (preferMobs) {
         host.engage(trash);
         this.setStatus(host, w, stance, "farm coins \u2192 mobs");
@@ -1989,7 +1990,7 @@
       if (w.gather && (hasPick || hasHatchet) && w.bagFree > 0 && this.runTicks >= this.bagFullUntil) {
         if (this.tryGather(host, w, stance, "farm coins \u2192 craft sell")) return true;
       }
-      if (combatOpen) {
+      if (combatOpen && this.wornEnough(w)) {
         host.engage(trash);
         this.setStatus(host, w, stance, "farm coins \u2192 mobs");
         this.cool = 1;
@@ -2054,7 +2055,7 @@
       const trash = w.foes.filter(
         (f) => f.alive && f.lit && !f.gold && !f.elite && !f.alpha && !f.gateBoss && !f.boss && (f.danger === "prey" || f.danger === "even") && f.dist <= 7 && !(emptyHeal && f.danger === "even" && f.dist > 2)
       ).sort((a, b) => a.dist - b.dist)[0];
-      if (trash && hpPct >= 0.5) {
+      if (trash && this.wornEnough(w) && hpPct >= 0.5) {
         host.engage(trash);
         this.setStatus(host, w, stance, "farm ceiling \u2192 mob XP");
         this.cool = 1;
@@ -2140,7 +2141,7 @@
         const db = b.danger === "prey" ? 0 : b.danger === "even" ? 1 : 2;
         return da - db || a.dist - b.dist;
       })[0];
-      if (push) {
+      if (push && this.wornEnough(w)) {
         host.engage(push);
         this.setStatus(host, w, stance, push.danger === "prey" ? "fight past elite" : "push elite");
         this.cool = 2;
@@ -2447,15 +2448,17 @@
       }
       if (id === "chase" || id === "engage" || id === "eat_engage" || id === "eat_then_chase" || id === "fight_pack" || id === "enter" || id === "eat_enter" || id === "clear" || id === "eat_clear") {
         const foe = this.pickForEvent(w, ev, stance);
-        if (foe) host.engage(foe);
+        if (foe && foe.dist > 1 && !this.wornEnough(w)) {
+          host.clearEngage();
+        } else if (foe) host.engage(foe);
         else if (id.includes("enter") || id === "clear" || id === "eat_clear") {
           const t = this.pickThreat(w, w.descendSafe && !stance.hungry, !stance.hungry);
-          if (t) host.engage(t);
+          if (t && (t.dist <= 1 || this.wornEnough(w))) host.engage(t);
         }
       }
       if (id === "ignore" || id === "flee" || id === "retreat" || id === "save") {
         const melee = w.foes.filter((f) => f.alive && f.lit && f.dist <= 2).sort((a, b) => a.dist - b.dist)[0];
-        if (melee && (id === "flee" || id === "retreat" || id === "ignore")) {
+        if (melee && (id === "flee" || id === "retreat" || id === "ignore") && (melee.dist <= 1 || this.wornEnough(w))) {
           host.engage(melee);
         } else {
           host.clearEngage();
@@ -2497,7 +2500,7 @@
       }
       if (id === "pull") {
         const trash = w.foes.filter((f) => f.alive && f.lit && !f.gold && !f.elite && !f.alpha && !f.gateBoss && !f.boss && f.danger !== "deadly").sort((a, b) => a.dist - b.dist);
-        if (trash[0]) host.engage(trash[0]);
+        if (trash[0] && (trash[0].dist <= 1 || this.wornEnough(w))) host.engage(trash[0]);
         else if (w.explore) {
           host.clearEngage();
           host.walkTo(w.explore.x, w.explore.y);
@@ -3332,6 +3335,10 @@
       if (cost < 0) return true;
       return w.coins >= cost || w.oreCount > 0;
     }
+    /** Metal weapon and armour, or a bow or wand. A plain sword is not enough to go looking. */
+    wornEnough(w) {
+      return w.hasMetalWeapon && w.hasArmour || w.hasStyleWeapon;
+    }
     /**
      * A frontier step. If this is already a camp, fight the one mob here or
      * go back to the shop / the node. Do not walk into a way that is packed.
@@ -3358,7 +3365,7 @@
       if (!missing && !hungry) return false;
       const foe = w.foes.filter((f) => f.alive && f.lit && !f.boss && !f.gateBoss && f.dist <= 5).sort((a, b) => a.dist - b.dist)[0];
       const packed = foe ? (s.ways || []).some((wy) => wy.mobs >= 3 && wy.dx === Math.sign(foe.x - w.tile.x) && wy.dy === Math.sign(foe.y - w.tile.y)) : false;
-      if (foe && !packed && ((_a = s.drag) != null ? _a : 0) < 100) {
+      if (foe && !packed && ((_a = s.drag) != null ? _a : 0) < 100 && this.wornEnough(w)) {
         host.engage(foe);
         this.setStatus(host, w, stance, "camp fight");
         this.cool = 2;
