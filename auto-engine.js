@@ -3491,7 +3491,7 @@
       if (owned && host.hasTool(owned.tool) && !this.bagFullActive()) {
         host.clearEngage();
         const attempt = host.gatherAt(owned.tile.x, owned.tile.y);
-        const enroute = /^enroute$/i.test(attempt.reason || "");
+        const enroute = !attempt.ok && /^enroute$/i.test(attempt.reason || "");
         if (attempt.ok || enroute) {
           this.setStatus(host, w, stance, "camp node");
           this.cool = attempt.ok ? 2 : 1;
