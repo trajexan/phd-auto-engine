@@ -1,4 +1,4 @@
-/* phd auto-engine e66 — pull via GET /api/auto-engine */
+/* phd auto-engine e67 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e66";
+  var AUTO_ENGINE_VERSION = "e67";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -606,6 +606,7 @@
       __publicField(this, "chestFailStreak", 0);
       /** e42: runTicks until new chest open allowed after thrash soft-block. */
       __publicField(this, "chestBlockUntil", 0);
+      __publicField(this, "doorSeenUntil", 0);
       /** e42: last coins+bag fingerprint — reset fail streak on loot gain. */
       __publicField(this, "chestProgKey", "");
       /**
@@ -710,7 +711,7 @@
       this.rnd = rnd;
     }
     tick(host) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p;
       const w = host.world();
       if (w.blocked) return;
       this.ensureActiveClock();
@@ -755,6 +756,7 @@
         this.lastOreCount = -1;
         this.chestFailStreak = 0;
         this.chestBlockUntil = 0;
+        this.doorSeenUntil = 0;
         this.chestProgKey = "";
         this.anvilStrive = null;
         this.mineStrive = null;
@@ -858,6 +860,7 @@
         return;
       }
       if (this.stairsStrive && this.resumeStairsStrive(host, w, stance)) return;
+      if (this.actOnSeen(host, w, stance)) return;
       {
         const pressed = w.foes.some((f) => f.alive && f.lit && f.dist <= 2);
         const fed = w.healReserve > 0 || w.food >= 2;
@@ -877,19 +880,19 @@
           this.cool = 2;
           return;
         }
-        const shield = (_j = (_i = host.craftShieldOnce) == null ? void 0 : _i.call(host)) != null ? _j : null;
+        const shield = ((_j = (_i = w.seen) == null ? void 0 : _i.hands) != null ? _j : 0) >= 2 ? null : (_l = (_k = host.craftShieldOnce) == null ? void 0 : _k.call(host)) != null ? _l : null;
         if (shield) {
           host.equipUp();
           this.setStatus(host, w, stance, shield === "cshield" ? "craft cloth shield" : "craft leather shield");
           this.cool = 2;
           return;
         }
-        if (!pressedGear && ((_k = host.brewOnce) == null ? void 0 : _k.call(host))) {
+        if (!pressedGear && ((_m = host.brewOnce) == null ? void 0 : _m.call(host))) {
           this.setStatus(host, w, stance, "brew potion");
           this.cool = 3;
           return;
         }
-        if (!pressedGear && (w.healReserve > 0 || w.food > 0) && ((_l = host.drinkOnce) == null ? void 0 : _l.call(host, "buff"))) {
+        if (!pressedGear && (w.healReserve > 0 || w.food > 0) && ((_n = host.drinkOnce) == null ? void 0 : _n.call(host, "buff"))) {
           this.setStatus(host, w, stance, "drink potion");
           this.cool = 2;
           return;
@@ -1369,7 +1372,7 @@
               if (this.dashPastElite(host, w, stance)) return;
             }
           } else {
-            const forged = host.forgeWieldedOnce();
+            const forged = this.canPayForge(w) && host.forgeWieldedOnce();
             if (forged) {
               this.noteImprove();
               this.setStatus(host, w, stance, "forge kit +");
@@ -1529,7 +1532,7 @@
             return;
           }
           if (healOkE && !forgeSoftE && kitArmedE && w.oreCount > 0 && forgeFundedE) {
-            const forged = host.forgeWieldedOnce();
+            const forged = this.canPayForge(w) && host.forgeWieldedOnce();
             if (forged) {
               this.noteImprove();
               this.setStatus(host, w, stance, "forge kit +");
@@ -1551,7 +1554,7 @@
       const meleePress = imminent;
       const eatBelow = meleePress ? 0.75 : stance.hungry ? 0.5 : stance.stocked ? 0.35 : 0.45;
       if (hpPct < 0.95 && hpPct < eatBelow) {
-        if ((_m = host.drinkOnce) == null ? void 0 : _m.call(host, "hurt")) {
+        if ((_o = host.drinkOnce) == null ? void 0 : _o.call(host, "hurt")) {
           this.setStatus(host, w, stance, "drink potion");
           this.cool = 2;
           return;
@@ -1691,7 +1694,7 @@
       if (this.stairsUsable(w) && mayDescend && (w.healReserve <= 0 || emergency)) {
         if (this.walkStairsStrive(host, w, stance, emergency ? "emergency stairs" : "pushing stairs")) return;
       }
-      const lane = (_n = this.laneBias) != null ? _n : pickFarmLane(this.traits, stance, w.descendSafe, this.rnd);
+      const lane = (_p = this.laneBias) != null ? _p : pickFarmLane(this.traits, stance, w.descendSafe, this.rnd);
       if ((!mayDescend || stance.hungry && w.healReserve > 0) && !this.farmCeiling()) {
         const criticalHeal = stance.ratio <= 0.35;
         if (lane === "food" || lane === "gear" && criticalHeal || lane === "resource") {
@@ -2054,6 +2057,7 @@
         this.cool = 1;
         return true;
       }
+      if (w.explore && this.walkSaferWay(host, w, stance)) return true;
       if (w.explore) {
         host.clearEngage();
         host.walkTo(w.explore.x, w.explore.y);
@@ -3280,12 +3284,72 @@
       };
     }
     /**
+     * e67: SIT memory from the previous tick. Only fills a hole the current target does not.
+     * A fight already on you, or a stairs walk, is left alone.
+     */
+    actOnSeen(host, w, stance) {
+      const s = w.seen;
+      if (!s || this.stairsStrive) return false;
+      const pressed = w.foes.some((f) => {
+        var _a;
+        return f.alive && f.lit && (f.dist <= 2 || f.watch === 3 && ((_a = f.reach) != null ? _a : 99) <= 4);
+      });
+      if (pressed) return false;
+      if (s.pit && w.explore && w.explore.x === s.pit.x && w.explore.y === s.pit.y && w.wander) {
+        return this.walkSeen(host, w, stance, w.wander, "avoid pit");
+      }
+      const starving = w.food <= 0 && w.healReserve <= 0 && w.rawFish <= 0;
+      if (starving && host.hasTool("rod") && s.pond && !w.gather) {
+        return this.walkSeen(host, w, stance, s.pond, "remembered pond");
+      }
+      if (w.rawFish > 0 && !w.hasLogs && !w.hasFire && host.hasTool("hatchet") && s.tree && s.treeDrag >= 0 && s.treeDrag < 100 && !w.gather) {
+        return this.walkSeen(host, w, stance, s.tree, "remembered tree");
+      }
+      if (s.camp && !w.kitReady && w.depth <= 4 && s.anvil && w.oreCount > 0 && !w.anvilNearby) {
+        return this.walkSeen(host, w, stance, s.anvil, "remembered camp");
+      }
+      if (!starving && s.ironKey && s.door && this.runTicks >= this.doorSeenUntil) {
+        const d = Math.max(Math.abs(s.door.x - w.tile.x), Math.abs(s.door.y - w.tile.y));
+        if (d <= 1) this.doorSeenUntil = this.runTicks + 80;
+        else if (d <= 8) return this.walkSeen(host, w, stance, s.door, "remembered door");
+      }
+      return false;
+    }
+    canPayForge(w) {
+      var _a, _b;
+      const cost = (_b = (_a = w.seen) == null ? void 0 : _a.forgeCost) != null ? _b : -1;
+      if (cost < 0) return true;
+      return w.coins >= cost || w.oreCount > 0;
+    }
+    walkSeen(host, w, stance, tile, label) {
+      if (!tile) return false;
+      if (w.tile.x === tile.x && w.tile.y === tile.y) return false;
+      host.clearEngage();
+      host.walkTo(tile.x, tile.y);
+      this.setStatus(host, w, stance, label);
+      this.cool = 2;
+      return true;
+    }
+    /** A step into a room remembered as full, when a cleaned way is still there. */
+    walkSaferWay(host, w, stance) {
+      var _a;
+      const ways = ((_a = w.seen) == null ? void 0 : _a.ways) || [];
+      if (!w.explore || ways.length < 2) return false;
+      const stepx = Math.sign(w.explore.x - w.tile.x);
+      const stepy = Math.sign(w.explore.y - w.tile.y);
+      const hot = ways.find((wy) => wy.mobs >= 3 && wy.dx === stepx && wy.dy === stepy);
+      if (!hot) return false;
+      const safe = ways.find((wy) => wy.back && wy.mobs >= 0 && wy.mobs < 3) || ways.find((wy) => wy.been && wy.mobs >= 0 && wy.mobs < 3);
+      if (!safe || safe.dx === hot.dx && safe.dy === hot.dy) return false;
+      return this.walkSeen(host, w, stance, { x: w.tile.x + safe.dx, y: w.tile.y + safe.dy }, "remembered way");
+    }
+    /**
      * Don't open when a mob is already coming, or the job is expected to wake a fight you should not take.
      * Expected notices of 1.00 or more is a sure wake. A pond makes the walk long, so a sure wake may still be late.
      * A single glance through a door stays under 1 and does not hold the chest.
      */
     chestExposed(w) {
-      var _a, _b;
+      var _a, _b, _c, _d, _e, _f;
       const hurt = w.hp * 2 < w.maxHp;
       for (const f of w.foes) {
         if (!f.alive || !f.lit || f.gold) continue;
@@ -3296,8 +3360,11 @@
         const arrives = steps >= 0 && steps <= 8;
         if (chasing && arrives) return true;
         if (expect >= 100 && arrives && (hard || hurt)) return true;
+        const drag = (_c = (_b = w.seen) == null ? void 0 : _b.drag) != null ? _c : 0;
+        const chestPath = (_e = (_d = w.seen) == null ? void 0 : _d.chestPath) != null ? _e : -1;
+        if (drag >= 100 && chestPath >= 0 && chestPath <= 8 && (hard || hurt)) return true;
         if (steps >= 0 && steps <= 3 && hard && (hurt || f.danger === "deadly") && expect >= 20) return true;
-        if (chasing && f.ranged && f.los && f.dist <= ((_b = f.atkRange) != null ? _b : 1)) return true;
+        if (chasing && f.ranged && f.los && f.dist <= ((_f = f.atkRange) != null ? _f : 1)) return true;
       }
       return false;
     }
