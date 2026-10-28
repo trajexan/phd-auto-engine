@@ -2480,7 +2480,8 @@
         const hpPctA = w.maxHp > 0 ? w.hp / w.maxHp : 1;
         const escape = w.healReserve <= 0 && hpPctA < 0.85;
         const canStairs = !!w.stairs && w.stairsLit && (w.descendSafe || escape) && (!stance.hungry || w.healReserve <= 0);
-        const melee = w.foes.filter((f) => f.alive && f.lit && f.dist <= 2).sort((a, b) => a.dist - b.dist)[0];
+        const meleeReach = this.wornEnough(w) ? 2 : 1;
+        const melee = w.foes.filter((f) => f.alive && f.lit && f.dist <= meleeReach).sort((a, b) => a.dist - b.dist)[0];
         if (melee && (!canStairs || melee.danger === "deadly" || melee.danger === "threat")) {
           host.engage(melee);
         } else if (canStairs) {
