@@ -1,4 +1,4 @@
-/* phd auto-engine e74 — pull via GET /api/auto-engine */
+/* phd auto-engine e75 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e74";
+  var AUTO_ENGINE_VERSION = "e75";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -3379,7 +3379,7 @@
     }
     /** Camp: one lit foe, the node you can already work, or the shop. Not the frontier. */
     stayInCamp(host, w, stance) {
-      var _a, _b, _c;
+      var _a;
       const s = w.seen;
       if (!(s == null ? void 0 : s.camp)) return false;
       if (this.forgeReady(w) && host.forgeWieldedOnce()) {
@@ -3400,16 +3400,15 @@
         return true;
       }
       const owned = this.nearestOwnedNearby(host, w);
-      if (owned && !this.bagFullActive()) {
-        const holdOre = w.oreCount > 0 && (w.anvilNearby || !!((_b = w.seen) == null ? void 0 : _b.anvil));
-        const product = !holdOre && (w.logCount > 0 || w.rawFish > 0);
-        if (product && ((_c = w.seen) == null ? void 0 : _c.shop) && (host.sellMatsForCoins(w.coins + 1) || this.sellJunk(host, w))) {
-          this.setStatus(host, w, stance, "camp sell");
-          this.cool = 3;
+      if (owned && host.hasTool(owned.tool) && !this.bagFullActive()) {
+        host.clearEngage();
+        const attempt = host.gatherAt(owned.tile.x, owned.tile.y);
+        const enroute = /^enroute$/i.test(attempt.reason || "");
+        if (attempt.ok || enroute) {
+          this.setStatus(host, w, stance, "camp node");
+          this.cool = attempt.ok ? 2 : 1;
           return true;
         }
-        if (w.gather && this.tryGather(host, w, stance, "camp node")) return true;
-        if (this.walkSeen(host, w, stance, owned.tile, "camp node")) return true;
       }
       if (s.shop && this.walkSeen(host, w, stance, s.shop, "camp shop")) return true;
       if (s.anvil && w.oreCount > 0 && !w.anvilNearby && this.walkSeen(host, w, stance, s.anvil, "camp anvil")) return true;
