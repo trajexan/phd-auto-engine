@@ -1,4 +1,4 @@
-/* phd auto-engine e75 — pull via GET /api/auto-engine */
+/* phd auto-engine e76 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e75";
+  var AUTO_ENGINE_VERSION = "e76";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1278,12 +1278,16 @@
           if (!hasHatchet) orePlan += ORE_HATCHET;
           if (!w.hasMetalWeapon) orePlan += ORE_WEP;
           if (!w.hasArmour) orePlan += ORE_ARMOUR;
+        } else if (!this.stylePivot && styleDone && !w.hasArmour) {
+          if (!hasHatchet) orePlan += ORE_HATCHET;
+          orePlan += ORE_ARMOUR;
         }
         {
           const lootUrge = this.traits.greed * 0.5 + this.traits.goldChase * 0.35 + (stance.hungry ? 0.25 : 0);
           if (w.bagFree > 0 && lootUrge + this.rnd() * 0.3 > 0.35 && this.tryWalkLoot(host, w, stance, "loot drop")) return;
         }
-        if (!skipNewMine && !this.anvilStrive && !this.stylePivot && !styleDone && hasPick && !metalDone && orePlan > 0 && w.oreCount < orePlan && w.gather) {
+        const needArmourMine = styleDone && !w.hasArmour;
+        if (!skipNewMine && !this.anvilStrive && !this.stylePivot && (!styleDone || needArmourMine) && hasPick && !metalDone && orePlan > 0 && w.oreCount < orePlan && w.gather) {
           if (this.tryGather(host, w, stance, "mine ore")) return;
         }
         if (!this.stylePivot && !styleDone && hasPick && !hasHatchet && !emptyBelly && (w.oreCount >= ORE_HATCHET || w.coins >= TOOL || w.oreCount >= orePlan)) {
@@ -1342,6 +1346,39 @@
               this.cool = 2;
               return;
             }
+          }
+        }
+        if (styleDone && !w.hasArmour && !this.stylePivot) {
+          if (!hasPick && w.coins >= TOOL && host.acquireTool("pickaxe")) {
+            this.setStatus(host, w, stance, "shop for pickaxe");
+            this.cool = 3;
+            return;
+          }
+          if (!hasHatchet && !emptyBelly && (w.oreCount >= ORE_HATCHET || w.coins >= TOOL)) {
+            if (host.acquireTool("hatchet")) {
+              const lab = w.oreCount >= ORE_HATCHET ? "forge hatchet" : "shop for hatchet";
+              if (w.oreCount >= ORE_HATCHET) this.markAnvilStrive(lab, w);
+              else this.clearAnvilStrive();
+              this.setStatus(host, w, stance, lab);
+              this.cool = 3;
+              return;
+            }
+          }
+          if (!skipNewMine && !this.anvilStrive && hasPick && w.oreCount < ORE_ARMOUR && w.gather) {
+            if (this.tryGather(host, w, stance, "mine ore")) return;
+          }
+          if (w.oreCount >= ORE_ARMOUR) {
+            if (host.smithKitOnce()) {
+              this.markAnvilStrive("smith armour", w);
+              this.setStatus(host, w, stance, "smith armour");
+              this.cool = 4;
+              return;
+            }
+            this.markAnvilStrive("smith armour", w);
+            if (this.walkHub(host, w, stance, "hub to smith")) return;
+            this.setStatus(host, w, stance, "wait anvil armour");
+            this.cool = 2;
+            return;
           }
         }
         const postKit = metalDone || styleDone || w.kitReady;
@@ -1575,7 +1612,7 @@
         }
       }
       const emergency = w.healReserve <= 0 && hpPct < 0.4 && w.stairsLit && w.stairsOpen;
-      const mayDescend = (w.kitReady || emergency) && (!this.hoarding || stance.stocked) && (!stance.hungry || w.healReserve <= 0 || emergency);
+      const mayDescend = (this.descendKit(w) || emergency) && (!this.hoarding || stance.stocked) && (!stance.hungry || w.healReserve <= 0 || emergency);
       const mayBraveElite = !stance.hungry && (stance.stocked || stance.bravery >= 0.45);
       if (host.pickupLoot()) {
         this.setStatus(host, w, stance, "looting");
@@ -1593,10 +1630,10 @@
         return;
       }
       if ((earlyBare || w.kitReady) && !imminent && this.tryWalkLoot(host, w, stance, "loot drop")) return;
-      if (w.kitReady && this.stairsUsable(w) && mayDescend && !imminent) {
+      if (this.descendKit(w) && this.stairsUsable(w) && mayDescend && !imminent) {
         if (this.walkStairsStrive(host, w, stance, "kit ready \u2014 stairs")) return;
       }
-      if (w.kitReady && mayDescend && !w.stairsLit && !imminent && w.explore) {
+      if (this.descendKit(w) && mayDescend && !w.stairsLit && !imminent && w.explore) {
         const press = w.foes.some(
           (f) => f.alive && f.lit && f.dist <= 6 && f.danger !== "prey"
         );
@@ -1688,7 +1725,7 @@
             return;
           }
           if (this.walkHub(host, w, stance, "flee to hub")) return;
-          if (w.kitReady && this.stairsUsable(w) && mayDescend) {
+          if (this.descendKit(w) && this.stairsUsable(w) && mayDescend) {
             if (this.walkStairsStrive(host, w, stance, "kiting stairs")) return;
           }
           if (w.wander) {
@@ -2018,6 +2055,14 @@
       }
       return false;
     }
+    /** e76: armour worn — style/kitReady alone is still naked (SIT ~2k). */
+    bodyOn(w) {
+      return !!w.hasArmour;
+    }
+    /** e76: descend/ceiling kit = body + weapon. Not heal/descendSafe kitReady loophole. */
+    descendKit(w) {
+      return this.bodyOn(w) && (!!w.hasMetalWeapon || !!w.hasStyleWeapon);
+    }
     /**
      * Darren t1154–57: ceiling of same-floor farming — heal stock and gear unchanged
      * for PROGRESS_STALL_TICKS while postKit → stop gather thrash and move on.
@@ -2036,7 +2081,7 @@
     tryFarmCeilingMoveOn(host, w, stance) {
       const hpPct = w.maxHp > 0 ? w.hp / w.maxHp : 1;
       const emptyHeal = w.healReserve <= 0 && w.food <= 0;
-      const stairsOk = this.stairsUsable(w) && w.descendSafe && !emptyHeal && (w.kitReady || w.hasMetalWeapon) && hpPct >= 0.45;
+      const stairsOk = this.stairsUsable(w) && w.descendSafe && !emptyHeal && this.descendKit(w) && w.food >= stance.minFood && hpPct >= 0.45;
       if (this.ceilingRethinks >= 3 && stairsOk) {
         return this.walkStairsStrive(host, w, stance, "ceiling thrash \u2014 stairs");
       }
