@@ -1,4 +1,4 @@
-/* phd auto-engine e77 — pull via GET /api/auto-engine */
+/* phd auto-engine e78 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e77";
+  var AUTO_ENGINE_VERSION = "e78";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1612,7 +1612,7 @@
         }
       }
       const emergency = w.healReserve <= 0 && hpPct < 0.4 && w.stairsLit && w.stairsOpen;
-      const mayDescend = (this.descendKit(w) || emergency) && (!this.hoarding || stance.stocked) && (!stance.hungry || w.healReserve <= 0 || emergency);
+      const mayDescend = this.descendKit(w) && (!this.hoarding || stance.stocked) && (!stance.hungry || w.healReserve <= 0 || emergency);
       const mayBraveElite = !stance.hungry && (stance.stocked || stance.bravery >= 0.45);
       if (host.pickupLoot()) {
         this.setStatus(host, w, stance, "looting");
@@ -2514,7 +2514,7 @@
           host.clearEngage();
           const hpPctF = w.maxHp > 0 ? w.hp / w.maxHp : 1;
           const escape = w.healReserve <= 0 && hpPctF < 0.85;
-          const canStairs = !!w.stairs && w.stairsLit && w.kitReady && (w.descendSafe || escape) && (!stance.hungry || w.healReserve <= 0);
+          const canStairs = !!w.stairs && w.stairsLit && this.descendKit(w) && (w.descendSafe || escape) && (!stance.hungry || w.healReserve <= 0);
           if ((id === "flee" || id === "retreat") && w.hub) {
             host.walkTo(w.hub.x, w.hub.y);
           } else if ((id === "flee" || id === "retreat") && canStairs) {
@@ -2529,7 +2529,7 @@
       if (id === "stairs") {
         const hpPctA = w.maxHp > 0 ? w.hp / w.maxHp : 1;
         const escape = w.healReserve <= 0 && hpPctA < 0.85;
-        const canStairs = !!w.stairs && w.stairsLit && (w.descendSafe || escape) && (!stance.hungry || w.healReserve <= 0);
+        const canStairs = !!w.stairs && w.stairsLit && this.descendKit(w) && (w.descendSafe || escape) && (!stance.hungry || w.healReserve <= 0);
         const meleeReach = this.wornEnough(w) ? 2 : 1;
         const melee = w.foes.filter((f) => f.alive && f.lit && f.dist <= meleeReach).sort((a, b) => a.dist - b.dist)[0];
         if (melee && (!canStairs || melee.danger === "deadly" || melee.danger === "threat")) {
