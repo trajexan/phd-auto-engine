@@ -1,4 +1,4 @@
-/* phd auto-engine e70 — pull via GET /api/auto-engine */
+/* phd auto-engine e71 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e70";
+  var AUTO_ENGINE_VERSION = "e71";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -991,7 +991,7 @@
           if (this.tryMeal(host, w, stance)) return;
           if (this.cookOwed(w, stance) && !w.hasLogs && host.hasTool("hatchet")) {
             if (w.bagFree <= 0) {
-              if (host.sellUnusedOnce()) {
+              if (this.sellJunk(host, w)) {
                 this.setStatus(host, w, stance, "sell for cook slot");
                 this.cool = 3;
                 return;
@@ -1052,7 +1052,7 @@
         const freeUrge = this.traits.greed * 0.45 + this.traits.patience * 0.35 + this.traits.goldChase * 0.2;
         if (freeUrge + this.rnd() * 0.4 > 0.5) {
           if (this.tryCraftWoodForValue(host, w, stance, "fletch sell")) return;
-          if (host.sellUnusedOnce()) {
+          if (this.sellJunk(host, w)) {
             this.setStatus(host, w, stance, "sell for loot space");
             this.cool = 3;
             return;
@@ -1067,7 +1067,7 @@
           this.cool = 3;
           return;
         }
-        if ((w.oreCount > 0 || w.hasLogs || w.rawFish > 0) && (host.sellUnusedOnce() || host.sellMatsForCoins(TOOL) || host.sellOreKeep(0))) {
+        if ((w.oreCount > 0 || w.hasLogs || w.rawFish > 0) && (this.sellJunk(host, w) || host.sellMatsForCoins(TOOL) || host.sellOreKeep(0))) {
           this.setStatus(host, w, stance, "sell for tool");
           this.cool = 3;
           return;
@@ -1161,7 +1161,7 @@
             const short = w.coins < TOOL;
             if (short && mats || bagTight) {
               if (this.tryCraftWoodForValue(host, w, stance, "fletch sell")) return;
-              if (host.sellUnusedOnce() || host.sellMatsForCoins(TOOL) || host.sellOreKeep(0)) {
+              if (this.sellJunk(host, w) || host.sellMatsForCoins(TOOL) || host.sellOreKeep(0)) {
                 this.setStatus(host, w, stance, "sell for rod");
                 this.cool = 3;
                 return;
@@ -1439,7 +1439,7 @@
                 this.rodCoinMines = 0;
                 return;
               }
-              if (host.sellUnusedOnce() || host.sellMatsForCoins(TOOL) || host.sellOreKeep(0)) {
+              if (this.sellJunk(host, w) || host.sellMatsForCoins(TOOL) || host.sellOreKeep(0)) {
                 this.rodCoinMines = 0;
                 this.setStatus(host, w, stance, "sell for rod");
                 this.cool = 3;
@@ -1457,7 +1457,7 @@
               this.rodCoinMines = 0;
               if (bagTight && mats) {
                 if (this.tryCraftWoodForValue(host, w, stance, "craft logs")) return;
-                if (host.sellUnusedOnce() || host.sellOreKeep(0)) {
+                if (this.sellJunk(host, w) || host.sellOreKeep(0)) {
                   this.setStatus(host, w, stance, "sell for rod slot");
                   this.cool = 3;
                   return;
@@ -1575,7 +1575,7 @@
         return;
       }
       if (!imminent && !mealHold && this.tryCraftWoodForValue(host, w, stance, "fletch sell")) return;
-      if (!imminent && !mealHold && host.sellUnusedOnce()) {
+      if (!imminent && !mealHold && this.sellJunk(host, w)) {
         this.setStatus(host, w, stance, "sell unused");
         this.cool = 3;
         return;
@@ -1964,7 +1964,7 @@
       const need = Math.max(TOOL * 2, w.coins + 40);
       if (mats) {
         if (this.tryCraftWoodForValue(host, w, stance, "farm coins \u2192 craft sell")) return true;
-        if (host.sellUnusedOnce()) {
+        if (this.sellJunk(host, w)) {
           this.setStatus(host, w, stance, "farm coins \u2192 craft sell");
           this.cool = 3;
           return true;
@@ -2192,7 +2192,7 @@
         this.bagFullFails = 0;
         return true;
       }
-      if (host.sellUnusedOnce() || host.sellOreKeep(0) || host.sellMatsForCoins(30)) {
+      if (this.sellJunk(host, w) || host.sellOreKeep(0) || host.sellMatsForCoins(30)) {
         this.bagFullFails = 0;
         this.setStatus(host, w, stance, "sell for loot space");
         this.cool = 3;
@@ -2317,7 +2317,7 @@
           }
           this.bagFullUntil = this.runTicks + 600;
           this.sameTargetHits = SAME_TARGET_MAX;
-          if (host.sellUnusedOnce() || host.sellOreKeep(0) || host.sellMatsForCoins(30)) {
+          if (this.sellJunk(host, w) || host.sellOreKeep(0) || host.sellMatsForCoins(30)) {
             this.setStatus(host, w, stance, "sell for loot space");
             this.cool = 3;
             return true;
@@ -3284,11 +3284,12 @@
      * A fight already on you, or a stairs walk, is left alone.
      */
     actOnSeen(host, w, stance) {
+      var _a;
       const s = w.seen;
       if (!s || this.stairsStrive) return false;
       const pressed = w.foes.some((f) => {
-        var _a;
-        return f.alive && f.lit && (f.dist <= 2 || f.watch === 3 && ((_a = f.reach) != null ? _a : 99) <= 4);
+        var _a2;
+        return f.alive && f.lit && (f.dist <= 2 || f.watch === 3 && ((_a2 = f.reach) != null ? _a2 : 99) <= 4);
       });
       if (pressed) return false;
       if (s.pit && w.explore && w.explore.x === s.pit.x && w.explore.y === s.pit.y && w.wander) {
@@ -3303,6 +3304,13 @@
       }
       if (s.camp && !w.kitReady && w.depth <= 4 && s.anvil && w.oreCount > 0 && !w.anvilNearby) {
         return this.walkSeen(host, w, stance, s.anvil, "remembered camp");
+      }
+      if (!starving && s.chest && !this.chestExposed(w) && this.runTicks >= this.chestBlockUntil) {
+        const path = (_a = s.chestPath) != null ? _a : -1;
+        if (path >= 0 && path <= 16) {
+          const d = Math.max(Math.abs(s.chest.x - w.tile.x), Math.abs(s.chest.y - w.tile.y));
+          if (d > 1) return this.walkSeen(host, w, stance, s.chest, "remembered chest");
+        }
       }
       if (!starving && s.ironKey && s.door && this.runTicks >= this.doorSeenUntil) {
         const d = Math.max(Math.abs(s.door.x - w.tile.x), Math.abs(s.door.y - w.tile.y));
@@ -3357,6 +3365,21 @@
       if (s.shop && this.walkSeen(host, w, stance, s.shop, "camp shop")) return true;
       if (s.anvil && w.oreCount > 0 && !w.anvilNearby && this.walkSeen(host, w, stance, s.anvil, "camp anvil")) return true;
       return false;
+    }
+    /** Bag piece has more room than what is worn. Equip it. Do not sell it. */
+    spareBeatsWorn(w) {
+      const s = w.seen;
+      if (!s || s.spareRoom < 0) return false;
+      const worn = [s.wepRoom, s.armRoom, s.offRoom].filter((n) => n >= 0);
+      if (!worn.length) return true;
+      return s.spareRoom > Math.max(...worn);
+    }
+    sellJunk(host, w) {
+      if (this.spareBeatsWorn(w)) {
+        host.equipUp();
+        return false;
+      }
+      return host.sellUnusedOnce();
     }
     /**
      * Gather nodes already close to the hero. 12 tiles is the camp around the shop.
@@ -3428,6 +3451,8 @@
         if (expect >= 100 && arrives && (hard || hurt)) return true;
         const drag = (_c = (_b = w.seen) == null ? void 0 : _b.drag) != null ? _c : 0;
         const chestPath = (_e = (_d = w.seen) == null ? void 0 : _d.chestPath) != null ? _e : -1;
+        const toChest = typeof f.reachChest === "number" ? f.reachChest : -1;
+        if (toChest >= 0 && chestPath >= 0 && toChest <= chestPath + 2 && (chasing || expect >= 100 || hard)) return true;
         if (drag >= 100 && chestPath >= 0 && chestPath <= 8 && (hard || hurt)) return true;
         if (steps >= 0 && steps <= 3 && hard && (hurt || f.danger === "deadly") && expect >= 20) return true;
         if (chasing && f.ranged && f.los && f.dist <= ((_f = f.atkRange) != null ? _f : 1)) return true;
