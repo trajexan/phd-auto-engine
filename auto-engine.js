@@ -1,4 +1,4 @@
-/* phd auto-engine e78 — pull via GET /api/auto-engine */
+/* phd auto-engine e79 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e78";
+  var AUTO_ENGINE_VERSION = "e79";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -996,6 +996,12 @@
           if (this.tryMeal(host, w, stance)) return;
           if (this.cookOwed(w, stance) && !w.hasLogs && host.hasTool("hatchet")) {
             if (w.bagFree <= 0) {
+              host.equipUp();
+              if (host.world().bagFree > 0) {
+                this.setStatus(host, w, stance, "belt for cook slot");
+                this.cool = 1;
+                return;
+              }
               if (this.sellJunk(host, w)) {
                 this.setStatus(host, w, stance, "sell for cook slot");
                 this.cool = 3;
@@ -2245,6 +2251,9 @@
      * True = action issued. When bagFull and false, caller must skip explore-for-pond / food gather this tick.
      */
     tryBagFullRelief(host, w, stance) {
+      host.equipUp();
+      w = host.world();
+      if (w.bagFree > 0) return true;
       if (this.runTicks >= this.bagFullUntil) return false;
       if (this.tryCraftWoodForValue(host, w, stance, "fletch sell")) {
         this.bagFullFails = 0;
@@ -3399,19 +3408,35 @@
         const openable = !!s.chestOpenable;
         const adj = s.chestAdj;
         const dChest = Math.max(Math.abs(s.chest.x - w.tile.x), Math.abs(s.chest.y - w.tile.y));
-        if (openable || dChest <= 1) {
-        } else if (reach < 0 && path < 0) {
-          this.softBlockChest(host, w, s.chest.x, s.chest.y, "chest unreachable");
-        } else if (reach < 0 && (!adj || path >= 0 && path > 16)) {
-          this.softBlockChest(host, w, s.chest.x, s.chest.y, "chest no adj");
-        } else if (reach >= 0 && reach <= 16 || path >= 0 && path <= 16) {
-          const target = adj || s.chest;
-          if (adj && (w.tile.x !== adj.x || w.tile.y !== adj.y)) {
-            return this.walkSeen(host, w, stance, adj, "remembered chest");
+        if (w.bagFree <= 0 && !(openable || dChest <= 1)) {
+          host.equipUp();
+          const w2 = host.world();
+          if (w2.bagFree <= 0 && this.tryBagFullRelief(host, w2, stance)) return true;
+          if (host.world().bagFree <= 0 && this.dropUntilCookSlot(host)) {
+            this.setStatus(host, w, stance, "drop for chest slot");
+            this.cool = 2;
+            return true;
           }
-          if (!adj && dChest > 1) {
-            if (target.x !== w.tile.x || target.y !== w.tile.y) {
-              return this.walkSeen(host, w, stance, target, "remembered chest");
+          if (host.world().bagFree <= 0) {
+          } else {
+          }
+        }
+        const bagOk = host.world().bagFree > 0 || openable || dChest <= 1;
+        if (bagOk) {
+          if (openable || dChest <= 1) {
+          } else if (reach < 0 && path < 0) {
+            this.softBlockChest(host, w, s.chest.x, s.chest.y, "chest unreachable");
+          } else if (reach < 0 && (!adj || path >= 0 && path > 16)) {
+            this.softBlockChest(host, w, s.chest.x, s.chest.y, "chest no adj");
+          } else if (reach >= 0 && reach <= 16 || path >= 0 && path <= 16) {
+            const target = adj || s.chest;
+            if (adj && (w.tile.x !== adj.x || w.tile.y !== adj.y)) {
+              return this.walkSeen(host, w, stance, adj, "remembered chest");
+            }
+            if (!adj && dChest > 1) {
+              if (target.x !== w.tile.x || target.y !== w.tile.y) {
+                return this.walkSeen(host, w, stance, target, "remembered chest");
+              }
             }
           }
         }
