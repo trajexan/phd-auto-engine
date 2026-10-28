@@ -1,4 +1,4 @@
-/* phd auto-engine e76 — pull via GET /api/auto-engine */
+/* phd auto-engine e77 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e76";
+  var AUTO_ENGINE_VERSION = "e77";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2628,6 +2628,20 @@
         chestBlocked: this.runTicks < this.chestBlockUntil
       };
     }
+    /** Format-7 SIT: ticks standing on the same tile (hang precursor). */
+    sameTileTicks() {
+      return this.hangTileTicks | 0;
+    }
+    /** Format-7 SIT: remaining chest soft-block ticks (0 if clear). */
+    chestBlockRemaining() {
+      return Math.max(0, this.chestBlockUntil - this.runTicks);
+    }
+    /** Format-7 SIT: remaining tile soft-block ticks for (x,y). */
+    tileBlockRemaining(x, y) {
+      const until = this.tileBlock.get(`${x},${y}`);
+      if (until == null) return 0;
+      return Math.max(0, until - this.runTicks);
+    }
     /** Freeze active timer (PAUSE ALL / page hidden). Safe to call repeatedly. */
     pauseClock() {
       if (this.activeStartedAt) {
@@ -2888,6 +2902,7 @@
     }
     /** Current desire tile (stairs / anvil hub / gather / loot / explore from status). */
     stuckDesireTarget(w) {
+      var _a;
       if (this.stairsStrive) {
         return { key: `stairs:${this.stairsStrive.sx},${this.stairsStrive.sy}`, x: this.stairsStrive.sx, y: this.stairsStrive.sy };
       }
@@ -2924,6 +2939,11 @@
       if (/find pond/i.test(st) && !w.gather && w.explore) {
         return { key: `explore:${w.explore.x},${w.explore.y}`, x: w.explore.x, y: w.explore.y };
       }
+      if (/remembered chest|open chest/i.test(st) && ((_a = w.seen) == null ? void 0 : _a.chest)) {
+        const adj = w.seen.chestAdj;
+        const t = adj || w.seen.chest;
+        return { key: `chest:${w.seen.chest.x},${w.seen.chest.y}`, x: t.x, y: t.y };
+      }
       if (/loot|chest/i.test(st) && w.loot) {
         return { key: `loot:${w.loot.x},${w.loot.y}`, x: w.loot.x, y: w.loot.y };
       }
@@ -2933,6 +2953,7 @@
       return null;
     }
     maybeRethinkIdle(host, w, stance) {
+      var _a;
       const combatBusy = w.foes.some((f) => f.alive && f.lit && f.dist <= 2);
       const gatherBusy = this.sameTargetHits > 0 && this.cool > 0 && !!w.gather;
       const striveBusy = !!this.mineStrive || !!this.anvilStrive;
@@ -2959,7 +2980,7 @@
           usefulApproach = true;
         } else if (dist <= 1) {
           const stPark = (this.lastStatus || "").toLowerCase();
-          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest/i.test(stPark);
+          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest|remembered chest/i.test(stPark);
           if (desire.key.startsWith("gather:") && !gatherBusy) {
             usefulApproach = false;
           } else {
@@ -3058,6 +3079,12 @@
       }
       if (w.gather) this.noteGatherFail(w.gather.x, w.gather.y);
       if (w.loot) this.noteGatherFail(w.loot.x, w.loot.y);
+      {
+        const stChest = (this.lastStatus || "").toLowerCase();
+        if (/remembered chest|open chest/i.test(stChest) && ((_a = w.seen) == null ? void 0 : _a.chest)) {
+          this.softBlockChest(host, w, w.seen.chest.x, w.seen.chest.y, "stuck rethink");
+        }
+      }
       this.open = null;
       this.laneBias = null;
       this.sameTargetKey = "";
@@ -3366,11 +3393,27 @@
       if (s.camp && !w.kitReady && w.depth <= 4 && s.anvil && w.oreCount > 0 && !w.anvilNearby) {
         return this.walkSeen(host, w, stance, s.anvil, "remembered camp");
       }
-      if (!starving && s.chest && !this.chestExposed(w) && this.runTicks >= this.chestBlockUntil) {
+      if (!starving && s.chest && !this.chestExposed(w) && this.runTicks >= this.chestBlockUntil && !s.chestBlocked) {
+        const reach = typeof s.chestReach === "number" ? s.chestReach : -1;
         const path = (_a = s.chestPath) != null ? _a : -1;
-        if (path >= 0 && path <= 16) {
-          const d = Math.max(Math.abs(s.chest.x - w.tile.x), Math.abs(s.chest.y - w.tile.y));
-          if (d > 1) return this.walkSeen(host, w, stance, s.chest, "remembered chest");
+        const openable = !!s.chestOpenable;
+        const adj = s.chestAdj;
+        const dChest = Math.max(Math.abs(s.chest.x - w.tile.x), Math.abs(s.chest.y - w.tile.y));
+        if (openable || dChest <= 1) {
+        } else if (reach < 0 && path < 0) {
+          this.softBlockChest(host, w, s.chest.x, s.chest.y, "chest unreachable");
+        } else if (reach < 0 && (!adj || path >= 0 && path > 16)) {
+          this.softBlockChest(host, w, s.chest.x, s.chest.y, "chest no adj");
+        } else if (reach >= 0 && reach <= 16 || path >= 0 && path <= 16) {
+          const target = adj || s.chest;
+          if (adj && (w.tile.x !== adj.x || w.tile.y !== adj.y)) {
+            return this.walkSeen(host, w, stance, adj, "remembered chest");
+          }
+          if (!adj && dChest > 1) {
+            if (target.x !== w.tile.x || target.y !== w.tile.y) {
+              return this.walkSeen(host, w, stance, target, "remembered chest");
+            }
+          }
         }
       }
       if (!starving && s.ironKey && s.door && this.runTicks >= this.doorSeenUntil) {
@@ -3502,6 +3545,13 @@
     nearestOwnedNearby(host, w) {
       var _a;
       return (_a = this.nearbyGather(w).find((n) => host.hasTool(n.tool))) != null ? _a : null;
+    }
+    /** e77: soft-block a remembered chest (unreachable / stuck rethink) like pond. */
+    softBlockChest(host, _w, x, y, why) {
+      this.noteGatherFail(x, y);
+      this.chestBlockUntil = this.runTicks + 160;
+      this.noteAction(`chest soft-block \u2014 ${why} (${x},${y})`);
+      host.log(`AUTO: chest soft-block \u2014 ${why}`);
     }
     walkSeen(host, w, stance, tile, label) {
       if (!tile) return false;
