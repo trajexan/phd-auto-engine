@@ -1,4 +1,4 @@
-/* phd auto-engine e71 — pull via GET /api/auto-engine */
+/* phd auto-engine e72 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -356,7 +356,7 @@
   ];
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "e71";
+  var AUTO_ENGINE_VERSION = "e72";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -711,7 +711,7 @@
       this.rnd = rnd;
     }
     tick(host) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r;
       const w = host.world();
       if (w.blocked) return;
       this.ensureActiveClock();
@@ -1059,6 +1059,13 @@
           }
         }
       }
+      if (!imminent && w.oreCount > 0 && (w.anvilNearby || ((_o = w.seen) == null ? void 0 : _o.anvil)) && (!w.hasMetalWeapon || !w.hasArmour)) {
+        if (host.smithKitOnce()) {
+          this.setStatus(host, w, stance, w.hasMetalWeapon ? "smith armour" : "smith wep");
+          this.cool = 4;
+          return;
+        }
+      }
       const prefer = !imminent ? this.nearestMissingNearby(host, w) : null;
       if (prefer) {
         if (w.rawFish > 0 && this.tryMeal(host, w, stance)) return;
@@ -1079,7 +1086,7 @@
         }
         if (owned && this.walkSeen(host, w, stance, owned.tile, `gather ${owned.name}`)) return;
         if (this.tryWalkLoot(host, w, stance, "loot for tool")) return;
-        if (((_o = w.seen) == null ? void 0 : _o.shop) && this.walkSeen(host, w, stance, w.seen.shop, "shop")) return;
+        if (((_p = w.seen) == null ? void 0 : _p.shop) && this.walkSeen(host, w, stance, w.seen.shop, "shop")) return;
         if (this.walkHub(host, w, stance, "hub for tool")) return;
       }
       const needPick = earlyBare && !host.hasTool("pickaxe") && w.coins >= TOOL && (!prefer || prefer.tool === "pickaxe");
@@ -1550,7 +1557,7 @@
       const meleePress = imminent;
       const eatBelow = meleePress ? 0.75 : stance.hungry ? 0.5 : stance.stocked ? 0.35 : 0.45;
       if (hpPct < 0.95 && hpPct < eatBelow) {
-        if ((_p = host.drinkOnce) == null ? void 0 : _p.call(host, "hurt")) {
+        if ((_q = host.drinkOnce) == null ? void 0 : _q.call(host, "hurt")) {
           this.setStatus(host, w, stance, "drink potion");
           this.cool = 2;
           return;
@@ -1690,7 +1697,7 @@
       if (this.stairsUsable(w) && mayDescend && (w.healReserve <= 0 || emergency)) {
         if (this.walkStairsStrive(host, w, stance, emergency ? "emergency stairs" : "pushing stairs")) return;
       }
-      const lane = (_q = this.laneBias) != null ? _q : pickFarmLane(this.traits, stance, w.descendSafe, this.rnd);
+      const lane = (_r = this.laneBias) != null ? _r : pickFarmLane(this.traits, stance, w.descendSafe, this.rnd);
       if ((!mayDescend || stance.hungry && w.healReserve > 0) && !this.farmCeiling()) {
         const criticalHeal = stance.ratio <= 0.35;
         if (lane === "food" || lane === "gear" && criticalHeal || lane === "resource") {
