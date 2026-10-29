@@ -1,4 +1,4 @@
-/* phd auto-engine 2010 — pull via GET /api/auto-engine */
+/* phd auto-engine 2011 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -927,7 +927,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2010";
+  var AUTO_ENGINE_VERSION = "2011";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2145,6 +2145,15 @@
     canFundRodNow(w) {
       return w.coins >= 30 || w.logCount >= 1;
     }
+    /** Plain pick/hatchet shop is BEGINNER_TOOL_PRICE 30c; forge needs anvil+ore (t1628 nncz96). */
+    canFundPlainToolNow(tool, w, anvil) {
+      if (w.coins >= 30) return true;
+      return !!(anvil || w.anvilNearby) && w.oreCount > 0;
+    }
+    canFundToolNow(tool, w, anvil) {
+      if (tool === "rod") return this.canFundRodNow(w);
+      return this.canFundPlainToolNow(tool, w, anvil);
+    }
     phaseTools1001(host, w, stance) {
       var _a, _b;
       const rock = this.mem(w, "rock");
@@ -2161,20 +2170,24 @@
         return false;
       }
       if (tool) {
-        this.setStatus1001(host, w, stance, `tools ${tool}`);
-        const tryAcquire = tool !== "rod" || host.hasTool("rod") || this.canFundRodNow(w);
-        if (tryAcquire && host.acquireTool(tool)) {
-          if (tool === "rod" && host.hasTool("rod") && (pond || w.pondKnown)) {
-            const t = pond != null ? pond : w.gather;
-            if (t) {
-              this.lastFoodFarm = { depth: w.depth, x: t.x, y: t.y };
-              this.setStatus1001(host, w, stance, "tools fish");
-              if (this.walkToTile(host, t.x, t.y)) return true;
+        const tryAcquire = host.hasTool(tool) || this.canFundToolNow(tool, w, anvil);
+        if (tryAcquire) {
+          this.setStatus1001(host, w, stance, `tools ${tool}`);
+          if (host.acquireTool(tool)) {
+            if (tool === "rod" && host.hasTool("rod") && (pond || w.pondKnown)) {
+              const t = pond != null ? pond : w.gather;
+              if (t) {
+                this.lastFoodFarm = { depth: w.depth, x: t.x, y: t.y };
+                this.setStatus1001(host, w, stance, "tools fish");
+                if (this.walkToTile(host, t.x, t.y)) return true;
+              }
             }
+            return true;
           }
-          return true;
+          if (tool === "pickaxe" && (anvil || w.anvilNearby) && host.smithKitOnce()) return true;
+        } else {
+          this.setStatus1001(host, w, stance, `tools fund ${tool}`);
         }
-        if (tool === "pickaxe" && (anvil || w.anvilNearby) && host.smithKitOnce()) return true;
       }
       const liveRock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : null;
       if (liveRock && host.hasTool("pickaxe") && !this.isGatherTileBlocked(liveRock.x, liveRock.y)) {
