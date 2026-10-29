@@ -1,4 +1,4 @@
-/* phd auto-engine 2007 — pull via GET /api/auto-engine */
+/* phd auto-engine 2008 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -927,7 +927,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2007";
+  var AUTO_ENGINE_VERSION = "2008";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1833,9 +1833,19 @@
       if (w.food > 0 || w.healReserve > 0) {
         if (!((_b = host.drinkOnce) == null ? void 0 : _b.call(host, "hurt"))) host.eat();
         this.setStatus1001(host, w, stance, "lethal run+eat");
-      } else {
-        this.setStatus1001(host, w, stance, "lethal kite");
+        if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+        this.cool = 2;
+        return true;
       }
+      if (!w.hasStyleWeapon && (pressFoe == null ? void 0 : pressFoe.ranged)) {
+        if (this.tryCoverBreakLos(host, w, stance, pressFoe, "lethal cover")) return true;
+        host.engage(pressFoe);
+        this.setStatus1001(host, w, stance, "lethal close");
+        this.cool = 1;
+        return true;
+      }
+      this.setStatus1001(host, w, stance, "lethal kite");
       if (w.hub) host.walkTo(w.hub.x, w.hub.y);
       else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
       this.cool = 2;
@@ -3402,6 +3412,39 @@
      * e26 / Darren t1203–09: can this foe hit the hero standing at (hx,hy) right now?
      * Universal — melee reach OR any ranged/spell with range + LOS. No species branches.
      */
+    /**
+     * Melee cover-kite vs ranged/mage (t1617): one step that breaks LOS so they chase around
+     * tree/door/wall. Prefer tighter choke. False = no cover step available.
+     */
+    tryCoverBreakLos(host, w, stance, foe, label) {
+      var _a, _b;
+      if (!foe.ranged) return false;
+      if (typeof host.hasLos !== "function") return false;
+      const hx = w.tile.x;
+      const hy = w.tile.y;
+      if (!this.foeCanHitAt(foe, hx, hy, host)) return false;
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+      let best = null;
+      for (const [dx, dy] of dirs) {
+        const nx = hx + dx;
+        const ny = hy + dy;
+        if (!host.isWalkable(nx, ny)) continue;
+        if (w.foes.some((f) => f.alive && f.x === nx && f.y === ny)) continue;
+        if (this.foeCanHitAt(foe, nx, ny, host)) continue;
+        const dist = Math.max(Math.abs(nx - foe.x), Math.abs(ny - foe.y));
+        if (dist > ((_a = foe.atkRange) != null ? _a : 4) + 3) continue;
+        let score = this.chokeScore(host, nx, ny) * 10;
+        score -= dist;
+        if (dist <= ((_b = foe.atkRange) != null ? _b : 4) + 1) score += 8;
+        if (!best || score > best.score) best = { x: nx, y: ny, score };
+      }
+      if (!best) return false;
+      host.clearEngage();
+      host.walkTo(best.x, best.y);
+      this.setStatus1001(host, w, stance, label);
+      this.cool = 1;
+      return true;
+    }
     foeCanHitAt(foe, hx, hy, host) {
       var _a;
       const range = Math.max(1, (_a = foe.atkRange) != null ? _a : 1);
