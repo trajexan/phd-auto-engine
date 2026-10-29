@@ -2137,14 +2137,47 @@
         if (this.walkToTile(host, pond.x, pond.y)) return true;
         return this.tryGather(host, w, stance, "tools fish");
       }
-      if (tree && host.hasTool("hatchet") && !host.hasTool("rod")) {
-        if (w.logCount >= 1 && host.craftWoodForValueOnce()) return true;
-        this.setStatus1001(host, w, stance, "tools chop");
-        if (this.walkToTile(host, tree.x, tree.y)) return true;
-        return this.tryGather(host, w, stance, "tools chop");
+      if (host.hasTool("hatchet") && !host.hasTool("rod")) {
+        if (w.logCount >= 1) {
+          if (host.fletchStyleOnce()) {
+            this.setStatus1001(host, w, stance, "tools fletch");
+            return true;
+          }
+          if (host.craftWoodForValueOnce()) {
+            this.setStatus1001(host, w, stance, "tools craft wood");
+            return true;
+          }
+        }
+        if (tree && !this.isGatherTileBlocked(tree.x, tree.y)) {
+          this.setStatus1001(host, w, stance, "tools chop");
+          if (this.walkToTile(host, tree.x, tree.y)) return true;
+          if (this.tryGather(host, w, stance, "tools chop")) return true;
+          const attempt = host.gatherAt(tree.x, tree.y);
+          if (attempt.ok || /^enroute$/i.test(attempt.reason || "")) {
+            this.setStatus1001(host, w, stance, "tools chop mem");
+            return true;
+          }
+        }
+        if (host.sellUnusedOnce()) {
+          this.setStatus1001(host, w, stance, "tools sell wood");
+          return true;
+        }
+        if (host.sellMatsForCoins(1)) {
+          this.setStatus1001(host, w, stance, "tools sell mats");
+          return true;
+        }
+      }
+      if (!rock && !host.hasTool("pickaxe") && w.explore) {
+        this.setStatus1001(host, w, stance, "tools find rock");
+        host.walkTo(w.explore.x, w.explore.y);
+        return true;
       }
       if (!tool) {
-        this.h1001.phase = "FIRST_WEP";
+        if (!w.hasMetalWeapon && !w.hasStyleWeapon) {
+          this.h1001.phase = "FIRST_WEP";
+          return false;
+        }
+        this.h1001.phase = "GEAR_FARM";
         return false;
       }
       if (w.explore) {
@@ -2168,12 +2201,15 @@
         if (this.walkToTile(host, rock.x, rock.y)) return true;
         return this.tryGather(host, w, stance, "mine first wep");
       }
-      if (host.acquireTool("pickaxe")) return true;
       if (w.logCount > 0 && host.fletchStyleOnce()) return true;
-      if (tree && host.hasTool("hatchet")) {
+      if (tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y)) {
         if (this.walkToTile(host, tree.x, tree.y)) return true;
-        return this.tryGather(host, w, stance, "chop first wep");
+        if (this.tryGather(host, w, stance, "chop first wep")) return true;
+        const attempt = host.gatherAt(tree.x, tree.y);
+        if (attempt.ok || /^enroute$/i.test(attempt.reason || "")) return true;
       }
+      if (host.acquireTool("pickaxe")) return true;
+      if (host.sellUnusedOnce() || host.sellMatsForCoins(1)) return true;
       if (anvil && w.oreCount > 0) {
         host.walkTo(anvil.x, anvil.y);
         return true;
