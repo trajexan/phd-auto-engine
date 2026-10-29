@@ -1,4 +1,4 @@
-/* phd auto-engine 1001 — pull via GET /api/auto-engine */
+/* phd auto-engine 1002 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -415,18 +415,37 @@
     map.set(exact, { kind, x: tile.x, y: tile.y, safe, depth: w.depth });
     map.set(`${w.depth}:${kind}`, { kind, x: tile.x, y: tile.y, safe, depth: w.depth });
   }
-  function registerSeenNodes(map, w) {
+  function registerSeenNodes(map, w, extra) {
     var _a;
     const s = w.seen;
-    if (!s) return;
-    upsertNode(map, "rock", s.rock, w);
-    upsertNode(map, "tree", s.tree, w);
-    upsertNode(map, "pond", s.pond, w);
-    upsertNode(map, "shop", s.shop, w);
-    upsertNode(map, "anvil", s.anvil, w);
-    upsertNode(map, "altar", s.altar, w);
-    upsertNode(map, "chest", (_a = s.chestAdj) != null ? _a : s.chest, w);
+    if (s) {
+      upsertNode(map, "rock", s.rock, w);
+      upsertNode(map, "tree", s.tree, w);
+      upsertNode(map, "pond", s.pond, w);
+      upsertNode(map, "shop", s.shop, w);
+      upsertNode(map, "anvil", s.anvil, w);
+      upsertNode(map, "altar", s.altar, w);
+      upsertNode(map, "chest", (_a = s.chestAdj) != null ? _a : s.chest, w);
+    }
     if (w.hub) upsertNode(map, "hub", w.hub, w);
+    const farm = extra == null ? void 0 : extra.lastFoodFarm;
+    if (farm && farm.depth === w.depth) upsertNode(map, "pond", farm, w);
+  }
+  function memNode(map, kind, w) {
+    var _a, _b, _c;
+    const hit = map.get(`${w.depth}:${kind}`);
+    if (hit) return { x: hit.x, y: hit.y };
+    const s = w.seen;
+    if (kind === "hub") return (_a = w.hub) != null ? _a : null;
+    if (!s) return null;
+    if (kind === "rock") return s.rock;
+    if (kind === "tree") return s.tree;
+    if (kind === "pond") return (_b = s.pond) != null ? _b : w.pondKnown && w.gather ? w.gather : null;
+    if (kind === "shop") return s.shop;
+    if (kind === "anvil") return s.anvil;
+    if (kind === "altar") return s.altar;
+    if (kind === "chest") return (_c = s.chestAdj) != null ? _c : s.chest;
+    return null;
   }
   function buildRoundTrip(map, w, farmRange = 40) {
     const seen = /* @__PURE__ */ new Set();
@@ -495,13 +514,14 @@
     const u = h.utilityPick ? `~${h.utilityPick}` : "";
     return `${h.phase}/${h.topEvent}${u}`;
   }
-  function bootstrapTool(host, w) {
+  function bootstrapTool(host, w, map) {
     const s = w.seen;
-    const R = !!(s == null ? void 0 : s.rock);
-    const T = !!(s == null ? void 0 : s.tree);
-    const P = !!(s == null ? void 0 : s.pond) || w.pondKnown;
-    const A = !!(s == null ? void 0 : s.anvil) || w.anvilNearby;
-    const S = !!(s == null ? void 0 : s.shop);
+    const has = (kind) => !!(map && map.get(`${w.depth}:${kind}`));
+    const R = !!(s == null ? void 0 : s.rock) || has("rock");
+    const T = !!(s == null ? void 0 : s.tree) || has("tree");
+    const P = !!(s == null ? void 0 : s.pond) || w.pondKnown || has("pond");
+    const A = !!(s == null ? void 0 : s.anvil) || w.anvilNearby || has("anvil");
+    const S = !!(s == null ? void 0 : s.shop) || has("shop");
     if (!R && !T && !P && !A) return null;
     if (A && R && S && !host.hasTool("pickaxe")) return "pickaxe";
     if (A && R && !host.hasTool("pickaxe")) return "pickaxe";
@@ -518,14 +538,15 @@
   }
   function advancePhase(h, w, stance) {
     const s = w.seen;
+    const has = (kind) => !!h.nodes.get(`${w.depth}:${kind}`);
     if (h.phase === "BOOT") h.phase = "MAP_HUB";
     if (h.phase === "PUSH") h.phase = "GEAR_FARM";
     if (!stance.hungry && h.phaseResume && h.phase === "FOOD_BUFFER") {
       h.phase = h.phaseResume;
       h.phaseResume = null;
     }
-    if (h.phase === "MAP_HUB" && (w.hub || (s == null ? void 0 : s.anvil) || (s == null ? void 0 : s.shop) || (s == null ? void 0 : s.rock) || (s == null ? void 0 : s.pond) || (s == null ? void 0 : s.tree))) {
-      const needTools = (s == null ? void 0 : s.rock) && true || (s == null ? void 0 : s.tree) && true || ((s == null ? void 0 : s.pond) || w.pondKnown) && true;
+    if (h.phase === "MAP_HUB" && (w.hub || (s == null ? void 0 : s.anvil) || (s == null ? void 0 : s.shop) || (s == null ? void 0 : s.rock) || (s == null ? void 0 : s.pond) || (s == null ? void 0 : s.tree) || has("anvil") || has("shop") || has("rock") || has("pond") || has("tree"))) {
+      const needTools = !!((s == null ? void 0 : s.rock) || has("rock")) || !!((s == null ? void 0 : s.tree) || has("tree")) || !!((s == null ? void 0 : s.pond) || w.pondKnown || has("pond"));
       if (needTools) h.phase = "TOOLS";
       else if (!w.hasMetalWeapon && !w.hasStyleWeapon) h.phase = "FIRST_WEP";
       else h.phase = "GEAR_FARM";
@@ -536,60 +557,66 @@
       h.phase = "GEAR_FARM";
     }
   }
-  function calmUtilOptions(w, stance) {
+  function calmUtilOptions(w, stance, map) {
     const opts = [];
     const t = w.tile;
-    const s = w.seen;
-    if (s == null ? void 0 : s.rock) {
-      const d = cheb(t.x, t.y, s.rock.x, s.rock.y);
+    const empty = /* @__PURE__ */ new Map();
+    const nodes = map != null ? map : empty;
+    const rock = memNode(nodes, "rock", w);
+    const tree = memNode(nodes, "tree", w);
+    const pond = memNode(nodes, "pond", w);
+    const anvil = memNode(nodes, "anvil", w);
+    const shop = memNode(nodes, "shop", w);
+    if (rock) {
+      const d = cheb(t.x, t.y, rock.x, rock.y);
       opts.push({
         id: "mine",
         label: "mine",
         value: 6 + w.oreCount,
         cost: 1,
-        risk: nodeThreat(w, s.rock.x, s.rock.y) ? 2 : 0,
+        risk: nodeThreat(w, rock.x, rock.y) ? 2 : 0,
         travel: d,
         progress: !w.hasMetalWeapon ? 2 : 1
       });
     }
-    if (s == null ? void 0 : s.tree) {
-      const d = cheb(t.x, t.y, s.tree.x, s.tree.y);
+    if (tree) {
+      const d = cheb(t.x, t.y, tree.x, tree.y);
       opts.push({
         id: "chop",
         label: "chop",
         value: 4 + w.logCount,
         cost: 1,
-        risk: nodeThreat(w, s.tree.x, s.tree.y) ? 2 : 0,
+        risk: nodeThreat(w, tree.x, tree.y) ? 2 : 0,
         travel: d,
         progress: w.hasStyleWeapon ? 0.5 : 1.2
       });
     }
-    if (s == null ? void 0 : s.pond) {
-      const d = cheb(t.x, t.y, s.pond.x, s.pond.y);
+    if (pond) {
+      const d = cheb(t.x, t.y, pond.x, pond.y);
       opts.push({
         id: "fish",
         label: "fish",
         value: stance.hungry ? 10 : 3,
         cost: 1,
-        risk: nodeThreat(w, s.pond.x, s.pond.y) ? 2 : 0,
+        risk: nodeThreat(w, pond.x, pond.y) ? 2 : 0,
         travel: d,
         progress: stance.stocked ? 0.3 : 1.5
       });
     }
-    if (s == null ? void 0 : s.anvil) {
-      const d = cheb(t.x, t.y, s.anvil.x, s.anvil.y);
+    if (anvil) {
+      const d = cheb(t.x, t.y, anvil.x, anvil.y);
       opts.push({
         id: "anvil",
         label: "anvil forge",
         value: 8,
         cost: w.oreCount < 1 ? 3 : 0,
-        risk: nodeThreat(w, s.anvil.x, s.anvil.y) ? 2 : 0,
+        risk: nodeThreat(w, anvil.x, anvil.y) ? 2 : 0,
         travel: d,
         progress: 2
       });
     }
-    if ((s == null ? void 0 : s.shop) && (w.bagFree <= 2 || w.oreCount > 5)) {
-      const d = cheb(t.x, t.y, s.shop.x, s.shop.y);
+    if (shop && (w.bagFree <= 2 || w.oreCount > 5)) {
+      const d = cheb(t.x, t.y, shop.x, shop.y);
       opts.push({
         id: "shop",
         label: "shop trim",
@@ -615,7 +642,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "1001";
+  var AUTO_ENGINE_VERSION = "1002";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1103,7 +1130,7 @@
         if (this.stairsStrive && this.resumeStairsStrive(host, w, stance)) return;
         return;
       }
-      registerSeenNodes(this.h1001.nodes, w);
+      registerSeenNodes(this.h1001.nodes, w, { lastFoodFarm: this.lastFoodFarm });
       this.trackProgress(w);
       if (w.progressFp && w.progressFp !== this.progressFp) {
         this.h1001.progressDelta = 1;
@@ -1168,7 +1195,6 @@
       return true;
     }
     evEmergFood(host, w, stance) {
-      var _a, _b;
       if (!stance.hungry) return false;
       this.h1001.topEvent = "emerg_food";
       if (this.h1001.phase !== "FOOD_BUFFER" && this.h1001.phase !== "BOOT" && this.h1001.phase !== "TOOLS") {
@@ -1182,11 +1208,11 @@
         this.setStatus1001(host, w, stance, "emerg cook");
         return true;
       }
-      if (!host.hasTool("rod") && (w.pondKnown || ((_a = w.seen) == null ? void 0 : _a.pond))) {
+      const pond = this.mem(w, "pond");
+      if (!host.hasTool("rod") && (w.pondKnown || pond)) {
         this.setStatus1001(host, w, stance, "emerg rod");
         if (host.acquireTool("rod")) return true;
       }
-      const pond = (_b = w.seen) == null ? void 0 : _b.pond;
       if (pond || w.gather && w.pondKnown) {
         const t = pond != null ? pond : w.gather;
         this.setStatus1001(host, w, stance, "emerg fish");
@@ -1219,7 +1245,6 @@
       return true;
     }
     evBagFull(host, w, stance) {
-      var _a;
       if (w.bagFree > 0) return false;
       this.h1001.topEvent = "bag_full";
       this.bagFullUntil = this.runTicks + 600;
@@ -1237,8 +1262,9 @@
         this.bagFullFails = 0;
         if (host.freeCookSlot()) return true;
       }
-      if ((_a = w.seen) == null ? void 0 : _a.shop) {
-        host.walkTo(w.seen.shop.x, w.seen.shop.y);
+      const shop = this.mem(w, "shop");
+      if (shop) {
+        host.walkTo(shop.x, shop.y);
         return true;
       }
       return true;
@@ -1299,12 +1325,13 @@
       return false;
     }
     evAltar(host, w, stance) {
-      var _a, _b, _c, _d;
-      const altar = (_a = w.seen) == null ? void 0 : _a.altar;
+      var _a;
+      const altar = this.mem(w, "altar");
       if (!altar) return false;
       const d = cheb(w.tile.x, w.tile.y, altar.x, altar.y);
       if (d > 3) return false;
       this.h1001.topEvent = "altar";
+      const anvil = this.mem(w, "anvil");
       const opts = [
         { id: "runecraft", label: "altar rune", value: 8, cost: 0, risk: 0, travel: d, progress: 1 },
         {
@@ -1313,20 +1340,20 @@
           value: 7,
           cost: 1,
           risk: 0,
-          travel: ((_b = w.seen) == null ? void 0 : _b.anvil) ? cheb(w.tile.x, w.tile.y, w.seen.anvil.x, w.seen.anvil.y) : 4,
+          travel: anvil ? cheb(w.tile.x, w.tile.y, anvil.x, anvil.y) : 4,
           progress: 1.2
         }
       ];
       const best = pickUtility(opts);
-      this.h1001.utilityPick = (_c = best == null ? void 0 : best.id) != null ? _c : "";
+      this.h1001.utilityPick = (_a = best == null ? void 0 : best.id) != null ? _a : "";
       if ((best == null ? void 0 : best.id) === "runecraft") {
         this.setStatus1001(host, w, stance, "altar runecraft");
         return host.runecraftOnce();
       }
       this.setStatus1001(host, w, stance, "altar\u2192forge");
       if (host.forgeWieldedOnce() || host.smithKitOnce()) return true;
-      if ((_d = w.seen) == null ? void 0 : _d.anvil) {
-        host.walkTo(w.seen.anvil.x, w.seen.anvil.y);
+      if (anvil) {
+        host.walkTo(anvil.x, anvil.y);
         return true;
       }
       return host.runecraftOnce();
@@ -1363,13 +1390,12 @@
       }
     }
     phaseMapHub1001(host, w, stance) {
-      var _a, _b, _c, _d, _e;
       this.setStatus1001(host, w, stance, "map hub");
       if (w.hub && cheb(w.tile.x, w.tile.y, w.hub.x, w.hub.y) > 2) {
         host.walkTo(w.hub.x, w.hub.y);
         return true;
       }
-      if (((_a = w.seen) == null ? void 0 : _a.shop) || ((_b = w.seen) == null ? void 0 : _b.anvil) || ((_c = w.seen) == null ? void 0 : _c.rock) || ((_d = w.seen) == null ? void 0 : _d.pond) || ((_e = w.seen) == null ? void 0 : _e.tree)) {
+      if (this.mem(w, "shop") || this.mem(w, "anvil") || this.mem(w, "rock") || this.mem(w, "pond") || this.mem(w, "tree")) {
         this.h1001.phase = "TOOLS";
         return false;
       }
@@ -1380,9 +1406,12 @@
       return false;
     }
     phaseTools1001(host, w, stance) {
-      var _a, _b, _c, _d, _e, _f, _g, _h;
-      const tool = bootstrapTool(host, w);
-      if (tool === null && !((_a = w.seen) == null ? void 0 : _a.rock) && !((_b = w.seen) == null ? void 0 : _b.tree) && !((_c = w.seen) == null ? void 0 : _c.pond) && !w.anvilNearby && !((_d = w.seen) == null ? void 0 : _d.anvil)) {
+      const rock = this.mem(w, "rock");
+      const tree = this.mem(w, "tree");
+      const pond = this.mem(w, "pond");
+      const anvil = this.mem(w, "anvil");
+      const tool = bootstrapTool(host, w, this.h1001.nodes);
+      if (tool === null && !rock && !tree && !pond && !w.anvilNearby && !anvil) {
         this.setStatus1001(host, w, stance, "tools wait node");
         if (w.explore) {
           host.walkTo(w.explore.x, w.explore.y);
@@ -1392,23 +1421,34 @@
       }
       if (tool) {
         this.setStatus1001(host, w, stance, `tools ${tool}`);
-        if (host.acquireTool(tool)) return true;
-        if (tool === "pickaxe" && (((_e = w.seen) == null ? void 0 : _e.anvil) || w.anvilNearby) && host.smithKitOnce()) return true;
+        if (host.acquireTool(tool)) {
+          if (tool === "rod" && (pond || w.pondKnown)) {
+            const t = pond != null ? pond : w.gather;
+            if (t) {
+              this.lastFoodFarm = { depth: w.depth, x: t.x, y: t.y };
+              this.setStatus1001(host, w, stance, "tools fish");
+              if (this.walkToTile(host, t.x, t.y)) return true;
+            }
+          }
+          return true;
+        }
+        if (tool === "pickaxe" && (anvil || w.anvilNearby) && host.smithKitOnce()) return true;
       }
-      if (((_f = w.seen) == null ? void 0 : _f.rock) && host.hasTool("pickaxe")) {
+      if (rock && host.hasTool("pickaxe")) {
         this.setStatus1001(host, w, stance, "tools mine");
-        if (this.walkToTile(host, w.seen.rock.x, w.seen.rock.y)) return true;
+        if (this.walkToTile(host, rock.x, rock.y)) return true;
         return this.tryGather(host, w, stance, "tools mine");
       }
-      if (((_g = w.seen) == null ? void 0 : _g.pond) && host.hasTool("rod")) {
+      if (pond && host.hasTool("rod")) {
         this.setStatus1001(host, w, stance, "tools fish");
-        if (this.walkToTile(host, w.seen.pond.x, w.seen.pond.y)) return true;
+        this.lastFoodFarm = { depth: w.depth, x: pond.x, y: pond.y };
+        if (this.walkToTile(host, pond.x, pond.y)) return true;
         return this.tryGather(host, w, stance, "tools fish");
       }
-      if (((_h = w.seen) == null ? void 0 : _h.tree) && host.hasTool("hatchet") && !host.hasTool("rod")) {
+      if (tree && host.hasTool("hatchet") && !host.hasTool("rod")) {
         if (w.logCount >= 1 && host.craftWoodForValueOnce()) return true;
         this.setStatus1001(host, w, stance, "tools chop");
-        if (this.walkToTile(host, w.seen.tree.x, w.seen.tree.y)) return true;
+        if (this.walkToTile(host, tree.x, tree.y)) return true;
         return this.tryGather(host, w, stance, "tools chop");
       }
       if (!tool) {
@@ -1422,27 +1462,29 @@
       return false;
     }
     phaseFirstWep1001(host, w, stance) {
-      var _a, _b, _c, _d;
       if (w.hasMetalWeapon || w.hasStyleWeapon) {
         this.h1001.phase = "GEAR_FARM";
         return false;
       }
       this.setStatus1001(host, w, stance, "first wep");
-      if (((_a = w.seen) == null ? void 0 : _a.anvil) || w.anvilNearby) {
+      const anvil = this.mem(w, "anvil");
+      const rock = this.mem(w, "rock");
+      const tree = this.mem(w, "tree");
+      if (anvil || w.anvilNearby) {
         if ((w.oreCount > 0 || w.coins >= 20) && host.smithKitOnce()) return true;
-        if (((_b = w.seen) == null ? void 0 : _b.rock) && host.hasTool("pickaxe")) {
+        if (rock && host.hasTool("pickaxe")) {
           this.h1001.lockedMats = true;
-          if (this.walkToTile(host, w.seen.rock.x, w.seen.rock.y)) return true;
+          if (this.walkToTile(host, rock.x, rock.y)) return true;
           return this.tryGather(host, w, stance, "mine first wep");
         }
-        if ((_c = w.seen) == null ? void 0 : _c.anvil) {
-          host.walkTo(w.seen.anvil.x, w.seen.anvil.y);
+        if (anvil) {
+          host.walkTo(anvil.x, anvil.y);
           return true;
         }
       }
       if (w.logCount > 0 && host.fletchStyleOnce()) return true;
-      if (((_d = w.seen) == null ? void 0 : _d.tree) && host.hasTool("hatchet")) {
-        if (this.walkToTile(host, w.seen.tree.x, w.seen.tree.y)) return true;
+      if (tree && host.hasTool("hatchet")) {
+        if (this.walkToTile(host, tree.x, tree.y)) return true;
         return this.tryGather(host, w, stance, "chop first wep");
       }
       if (host.acquireTool("pickaxe")) return true;
@@ -1453,13 +1495,15 @@
       return false;
     }
     phaseGear1001(host, w, stance) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i;
+      var _a, _b;
       this.h1001.phase = "GEAR_FARM";
       const foodLow = w.food <= Math.max(2, Math.floor(stance.minFood * 0.5));
       const matsFull = w.bagFree <= 1 && (w.oreCount >= 2 || w.logCount >= 2);
-      if ((_a = w.seen) == null ? void 0 : _a.anvil) {
+      const anvil = this.mem(w, "anvil");
+      const rock = this.mem(w, "rock");
+      if (anvil) {
         const nearElite = w.foes.some(
-          (f) => f.alive && f.lit && (f.elite || f.danger === "threat" || f.danger === "deadly") && cheb(f.x, f.y, w.seen.anvil.x, w.seen.anvil.y) <= 6
+          (f) => f.alive && f.lit && (f.elite || f.danger === "threat" || f.danger === "deadly") && cheb(f.x, f.y, anvil.x, anvil.y) <= 6
         );
         if (nearElite && !stance.stocked) {
           this.setStatus1001(host, w, stance, "prepare before anvil");
@@ -1468,7 +1512,7 @@
           return false;
         }
       }
-      if ((foodLow || matsFull) && (((_b = w.seen) == null ? void 0 : _b.anvil) || w.hub)) {
+      if ((foodLow || matsFull) && (anvil || w.hub)) {
         this.setStatus1001(host, w, stance, "hub forge/clean");
         if (host.forgeWieldedOnce()) {
           this.lastImproveTick = this.runTicks;
@@ -1476,12 +1520,12 @@
         }
         if (host.smithKitOnce()) return true;
         if (host.craftGemRingOnce()) return true;
-        if ((_c = host.craftClothesOnce) == null ? void 0 : _c.call(host)) return true;
-        if ((_d = host.craftShieldOnce) == null ? void 0 : _d.call(host)) return true;
+        if ((_a = host.craftClothesOnce) == null ? void 0 : _a.call(host)) return true;
+        if ((_b = host.craftShieldOnce) == null ? void 0 : _b.call(host)) return true;
         this.h1001.phase = "SELL_TRIM";
         return this.phaseSellTrim1001(host, w, stance);
       }
-      if (w.anvilNearby || ((_e = w.seen) == null ? void 0 : _e.anvil) && cheb(w.tile.x, w.tile.y, w.seen.anvil.x, w.seen.anvil.y) <= 2) {
+      if (w.anvilNearby || anvil && cheb(w.tile.x, w.tile.y, anvil.x, anvil.y) <= 2) {
         if (host.forgeWieldedOnce()) {
           this.h1001.forgeMissStreak = 0;
           this.lastImproveTick = this.runTicks;
@@ -1497,22 +1541,22 @@
         return false;
       }
       if (!w.hasArmour || !w.hasMetalWeapon) {
-        if (w.oreCount >= 3 && (((_f = w.seen) == null ? void 0 : _f.anvil) || w.anvilNearby)) {
+        if (w.oreCount >= 3 && (anvil || w.anvilNearby)) {
           this.setStatus1001(host, w, stance, "smith kit");
           if (host.smithKitOnce()) return true;
-          if ((_g = w.seen) == null ? void 0 : _g.anvil) {
-            host.walkTo(w.seen.anvil.x, w.seen.anvil.y);
+          if (anvil) {
+            host.walkTo(anvil.x, anvil.y);
             return true;
           }
         }
-        if (((_h = w.seen) == null ? void 0 : _h.rock) && host.hasTool("pickaxe") && this.runTicks >= this.mineBlockUntil) {
+        if (rock && host.hasTool("pickaxe") && this.runTicks >= this.mineBlockUntil) {
           this.h1001.lockedMats = true;
           this.setStatus1001(host, w, stance, "mine gear");
-          if (this.walkToTile(host, w.seen.rock.x, w.seen.rock.y)) return true;
+          if (this.walkToTile(host, rock.x, rock.y)) return true;
           return this.tryGather(host, w, stance, "mine gear");
         }
-        if ((_i = w.seen) == null ? void 0 : _i.anvil) {
-          host.walkTo(w.seen.anvil.x, w.seen.anvil.y);
+        if (anvil) {
+          host.walkTo(anvil.x, anvil.y);
           this.setStatus1001(host, w, stance, "walk anvil");
           return true;
         }
@@ -1525,7 +1569,6 @@
       return false;
     }
     phaseGatherFund1001(host, w, stance) {
-      var _a, _b;
       this.setStatus1001(host, w, stance, "gather fund");
       if (w.oreCount >= 3 || w.coins >= 40) {
         this.forgeBlockUntil = 0;
@@ -1533,12 +1576,14 @@
         this.h1001.lockedMats = true;
         return false;
       }
-      if (((_a = w.seen) == null ? void 0 : _a.rock) && host.hasTool("pickaxe")) {
-        if (this.walkToTile(host, w.seen.rock.x, w.seen.rock.y)) return true;
+      const rock = this.mem(w, "rock");
+      const tree = this.mem(w, "tree");
+      if (rock && host.hasTool("pickaxe")) {
+        if (this.walkToTile(host, rock.x, rock.y)) return true;
         return this.tryGather(host, w, stance, "fund mine");
       }
-      if (((_b = w.seen) == null ? void 0 : _b.tree) && host.hasTool("hatchet")) {
-        if (this.walkToTile(host, w.seen.tree.x, w.seen.tree.y)) return true;
+      if (tree && host.hasTool("hatchet")) {
+        if (this.walkToTile(host, tree.x, tree.y)) return true;
         return this.tryGather(host, w, stance, "fund chop");
       }
       const prey = w.foes.filter((f) => f.alive && f.lit && (f.danger === "prey" || f.danger === "even") && f.dist <= 8).sort((a, b) => a.dist - b.dist)[0];
@@ -1555,41 +1600,43 @@
       return false;
     }
     phaseSellTrim1001(host, w, stance) {
-      var _a;
       this.setStatus1001(host, w, stance, "sell trim");
       if (host.sellUnusedOnce()) return true;
       if (host.sellOreKeep(this.h1001.lockedMats && !w.hasArmour ? 2 : 0)) return true;
       if (host.sellMatsForCoins(1)) return true;
-      if (((_a = w.seen) == null ? void 0 : _a.shop) && cheb(w.tile.x, w.tile.y, w.seen.shop.x, w.seen.shop.y) > 1) {
-        host.walkTo(w.seen.shop.x, w.seen.shop.y);
+      const shop = this.mem(w, "shop");
+      if (shop && cheb(w.tile.x, w.tile.y, shop.x, shop.y) > 1) {
+        host.walkTo(shop.x, shop.y);
         return true;
       }
       this.h1001.phase = stance.hungry || w.food < stance.minFood ? "FOOD_BUFFER" : "GEAR_FARM";
       return false;
     }
     phaseFood1001(host, w, stance) {
-      var _a, _b, _c, _d;
+      var _a;
       if (stance.stocked && w.food >= stance.minFood) {
         this.h1001.phase = (_a = this.h1001.phaseResume) != null ? _a : "GEAR_FARM";
         this.h1001.phaseResume = null;
         return false;
       }
       this.setStatus1001(host, w, stance, "food buffer");
+      const tree = this.mem(w, "tree");
+      const pond = this.mem(w, "pond");
       if (w.rawFish > 0) {
         if (!w.hasFire && w.hasLogs) host.lightFireOnce();
-        else if (!w.hasFire && ((_b = w.seen) == null ? void 0 : _b.tree) && host.hasTool("hatchet")) {
-          if (this.walkToTile(host, w.seen.tree.x, w.seen.tree.y)) return true;
+        else if (!w.hasFire && tree && host.hasTool("hatchet")) {
+          if (this.walkToTile(host, tree.x, tree.y)) return true;
           return this.tryGather(host, w, stance, "chop for fire");
         }
         host.cookOnce();
         return true;
       }
-      if (!host.hasTool("rod") && (w.pondKnown || ((_c = w.seen) == null ? void 0 : _c.pond))) {
+      if (!host.hasTool("rod") && (w.pondKnown || pond)) {
         if (host.acquireTool("rod")) return true;
       }
-      if (((_d = w.seen) == null ? void 0 : _d.pond) && host.hasTool("rod")) {
-        this.lastFoodFarm = { depth: w.depth, x: w.seen.pond.x, y: w.seen.pond.y };
-        if (this.walkToTile(host, w.seen.pond.x, w.seen.pond.y)) return true;
+      if (pond && host.hasTool("rod")) {
+        this.lastFoodFarm = { depth: w.depth, x: pond.x, y: pond.y };
+        if (this.walkToTile(host, pond.x, pond.y)) return true;
         return this.tryGather(host, w, stance, "fish buffer");
       }
       host.buyFoodIfCritical();
@@ -1600,6 +1647,7 @@
       return false;
     }
     runCalm1001(host, w, stance) {
+      var _a, _b;
       const chain = buildRoundTrip(this.h1001.nodes, w);
       if (chain.length >= 2) {
         this.h1001.topEvent = "camp_chain";
@@ -1608,7 +1656,7 @@
         this.setStatus1001(host, w, stance, `round-trip ${next.kind}`);
         return this.visitNode1001(host, w, stance, next.kind, next.x, next.y);
       }
-      const opts = calmUtilOptions(w, stance).filter((o) => {
+      const opts = calmUtilOptions(w, stance, this.h1001.nodes).filter((o) => {
         if (o.id === "mine") return host.hasTool("pickaxe");
         if (o.id === "chop") return host.hasTool("hatchet");
         if (o.id === "fish") return host.hasTool("rod");
@@ -1620,13 +1668,15 @@
       this.setStatus1001(host, w, stance, best.label);
       void UTILITY_WEIGHTS;
       void lookupGear;
+      const kind = best.id === "anvil" ? "anvil" : best.id === "shop" ? "shop" : best.id === "fletch" ? "fletch" : best.id === "mine" ? "rock" : best.id === "chop" ? "tree" : best.id === "fish" ? "pond" : best.id;
+      const tile = best.id === "mine" ? this.mem(w, "rock") : best.id === "chop" ? this.mem(w, "tree") : best.id === "fish" ? this.mem(w, "pond") : best.id === "anvil" ? this.mem(w, "anvil") : best.id === "shop" ? this.mem(w, "shop") : null;
       return this.visitNode1001(
         host,
         w,
         stance,
-        best.id === "anvil" ? "anvil" : best.id === "shop" ? "shop" : best.id === "fletch" ? "fletch" : best.id,
-        best.id === "mine" ? w.seen.rock.x : best.id === "chop" ? w.seen.tree.x : best.id === "fish" ? w.seen.pond.x : best.id === "anvil" ? w.seen.anvil.x : best.id === "shop" ? w.seen.shop.x : w.tile.x,
-        best.id === "mine" ? w.seen.rock.y : best.id === "chop" ? w.seen.tree.y : best.id === "fish" ? w.seen.pond.y : best.id === "anvil" ? w.seen.anvil.y : best.id === "shop" ? w.seen.shop.y : w.tile.y
+        kind,
+        (_a = tile == null ? void 0 : tile.x) != null ? _a : w.tile.x,
+        (_b = tile == null ? void 0 : tile.y) != null ? _b : w.tile.y
       );
     }
     visitNode1001(host, w, stance, kind, x, y) {
@@ -1658,6 +1708,14 @@
       }
       host.walkTo(x, y);
       return true;
+    }
+    /**
+     * Remembered farm-node coords for this depth (h1001.nodes), else live w.seen.
+     * Only nodes previously registered from tileSeen/lit — never invents uncleared fog.
+     * Host enroute walks cleared fog / compass toward the room; does not omniscient-A* unseen.
+     */
+    mem(w, kind) {
+      return memNode(this.h1001.nodes, kind, w);
     }
     /** True if a walk was issued (not yet adjacent). */
     walkToTile(host, x, y, adj = 1) {
