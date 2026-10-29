@@ -1,4 +1,4 @@
-/* phd auto-engine 1005 — pull via GET /api/auto-engine */
+/* phd auto-engine 1006 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -642,7 +642,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "1005";
+  var AUTO_ENGINE_VERSION = "1006";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1174,18 +1174,51 @@
       const tag = statusTag(this.h1001);
       this.setStatus(host, w, stance, `${desire} | ${tag}`);
     }
+    /**
+     * Soft engage gate via host.fightOutlook (1006).
+     * Favorable → engage. Low winRate or hpLoss > heal/HP buffer → skip/kite.
+     * No host API → fall back to danger prey/even (or allowThreat for sudden melee).
+     */
+    outlookOk(host, w, foe, opts = {}) {
+      var _a, _b, _c;
+      const o = (_b = (_a = host.fightOutlook) == null ? void 0 : _a.call(host, foe)) != null ? _b : null;
+      if (!o) {
+        if (foe.danger === "prey" || foe.danger === "even") return true;
+        return !!opts.allowThreat && (foe.danger === "threat" || foe.danger === "deadly");
+      }
+      const minRate = (_c = opts.minWinRate) != null ? _c : 0.42;
+      const healBuf = Math.max(0, w.healReserve) + Math.max(0, w.hp - w.maxHp * 0.35);
+      if (o.winRate < minRate) return false;
+      if (o.danger === "deadly" && o.winRate < 0.55) return false;
+      if (o.hpLossExpected > healBuf && o.winRate < 0.7) return false;
+      if (!o.win && !opts.allowThreat) return false;
+      return true;
+    }
+    /** Prefer engage when outlook favorable; else false (caller kites / skips). */
+    preferEngage(host, w, foe) {
+      return this.outlookOk(host, w, foe, { minWinRate: 0.48 });
+    }
     evLethal(host, w, stance) {
-      var _a;
+      var _a, _b;
       const hpPct = w.maxHp > 0 ? w.hp / w.maxHp : 1;
       const pressing = w.foes.some(
         (f) => f.alive && f.lit && (f.danger === "deadly" || f.danger === "threat" && f.dist <= 3 || f.dist <= 1 && f.danger !== "prey")
       );
       if (!pressing) return false;
+      const pressFoe = w.foes.filter(
+        (f) => f.alive && f.lit && (f.danger === "deadly" || f.danger === "threat" && f.dist <= 3 || f.dist <= 1 && f.danger !== "prey")
+      ).sort((a, b) => a.dist - b.dist)[0];
+      if (pressFoe) {
+        const o = (_a = host.fightOutlook) == null ? void 0 : _a.call(host, pressFoe);
+        if (o && o.win && o.winRate >= 0.7 && o.hpLossExpected < w.hp * 0.5) {
+          return false;
+        }
+      }
       if (hpPct > 0.35 && !(hpPct < 0.55 && w.food > 0)) return false;
       this.h1001.topEvent = "lethal";
       host.clearEngage();
       if (w.food > 0 || w.healReserve > 0) {
-        if (!((_a = host.drinkOnce) == null ? void 0 : _a.call(host, "hurt"))) host.eat();
+        if (!((_b = host.drinkOnce) == null ? void 0 : _b.call(host, "hurt"))) host.eat();
         this.setStatus1001(host, w, stance, "lethal run+eat");
       } else {
         this.setStatus1001(host, w, stance, "lethal kite");
@@ -1255,10 +1288,14 @@
       if (!melee) return false;
       this.h1001.topEvent = "mob_sudden";
       const worn = w.hasMetalWeapon || w.hasStyleWeapon || w.hasArmour;
-      if (!worn && melee.danger !== "prey" && melee.danger !== "even") {
+      const ok = this.outlookOk(host, w, melee, {
+        allowThreat: worn,
+        minWinRate: worn ? 0.4 : 0.5
+      });
+      if (!ok) {
         host.clearEngage();
         if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-        this.setStatus1001(host, w, stance, "mob kite");
+        this.setStatus1001(host, w, stance, host.fightOutlook ? "mob kite outlook" : "mob kite");
         return true;
       }
       host.engage(melee);
@@ -1526,8 +1563,14 @@
         const nearElite = w.foes.some(
           (f) => f.alive && f.lit && (f.elite || f.danger === "threat" || f.danger === "deadly") && cheb(f.x, f.y, anvil.x, anvil.y) <= 6
         );
-        if (nearElite && !stance.stocked) {
-          this.setStatus1001(host, w, stance, "prepare before anvil");
+        const outlookHungry = w.foes.some((f) => {
+          var _a2;
+          if (!f.alive || !f.lit || cheb(f.x, f.y, anvil.x, anvil.y) > 6) return false;
+          const o = (_a2 = host.fightOutlook) == null ? void 0 : _a2.call(host, f);
+          return !!(o && o.hpLossExpected > Math.max(8, w.healReserve) && o.winRate < 0.75);
+        });
+        if ((nearElite || outlookHungry) && !stance.stocked) {
+          this.setStatus1001(host, w, stance, outlookHungry && !nearElite ? "outlook food buffer" : "prepare before anvil");
           this.h1001.phaseResume = "GEAR_FARM";
           this.h1001.phase = "FOOD_BUFFER";
           return false;
@@ -1607,7 +1650,9 @@
         if (this.walkToTile(host, tree.x, tree.y)) return true;
         return this.tryGather(host, w, stance, "fund chop");
       }
-      const prey = w.foes.filter((f) => f.alive && f.lit && (f.danger === "prey" || f.danger === "even") && f.dist <= 8).sort((a, b) => a.dist - b.dist)[0];
+      const prey = w.foes.filter(
+        (f) => f.alive && f.lit && f.dist <= 8 && (f.danger === "prey" || f.danger === "even") && this.preferEngage(host, w, f)
+      ).sort((a, b) => a.dist - b.dist)[0];
       if (prey && (w.hasMetalWeapon || w.hasStyleWeapon || w.hasArmour)) {
         host.engage(prey);
         this.setStatus1001(host, w, stance, "fund mobs");
