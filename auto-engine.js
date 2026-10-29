@@ -2186,6 +2186,59 @@
       }
       return false;
     }
+    /**
+     * 2003 / t1591–t1597: score bag + smithable by offense → equip or smith+equip.
+     * No piece-name hardcode. Falls through when host APIs missing (<0.5.716) or worn wins.
+     */
+    tryScoreSmithEquip(host, w, stance, label) {
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+      if (!host.offenseScore || !host.listSmithable || !host.equipIfBetterOffense) return false;
+      const wornW = (_b = (_a = host.wornOffense) == null ? void 0 : _a.call(host, "weapon")) != null ? _b : 0;
+      const wornA = (_d = (_c = host.wornOffense) == null ? void 0 : _c.call(host, "armour")) != null ? _d : 0;
+      const bag = (_f = (_e = host.listBagCombatGear) == null ? void 0 : _e.call(host)) != null ? _f : [];
+      const smith = host.listSmithable();
+      const bestOf = (slot, worn) => {
+        let best = null;
+        for (const b of bag) {
+          if (b.slot !== slot) continue;
+          if (b.offense <= worn) continue;
+          if (!best || b.offense > best.offense) {
+            best = { src: "bag", id: b.id, offense: b.offense, slotIndex: b.slotIndex };
+          }
+        }
+        for (const s of smith) {
+          if (s.slot !== slot || !s.canMakeNow) continue;
+          if (s.offense <= worn) continue;
+          if (!best || s.offense > best.offense) {
+            best = { src: "smith", id: s.id, offense: s.offense };
+          }
+        }
+        return best;
+      };
+      const wep = bestOf("weapon", wornW);
+      if (wep) {
+        this.setStatus1001(host, w, stance, `${label} score wep`);
+        if (wep.src === "bag") {
+          if (host.equipIfBetterOffense(wep.id)) return true;
+          if (wep.slotIndex != null && ((_g = host.equipBagItem) == null ? void 0 : _g.call(host, wep.slotIndex))) return true;
+        } else if ((_h = host.smithItemOnce) == null ? void 0 : _h.call(host, wep.id)) {
+          host.equipIfBetterOffense(wep.id);
+          return true;
+        }
+      }
+      const arm = bestOf("armour", wornA);
+      if (arm) {
+        this.setStatus1001(host, w, stance, `${label} score armour`);
+        if (arm.src === "bag") {
+          if (host.equipIfBetterOffense(arm.id)) return true;
+          if (arm.slotIndex != null && ((_i = host.equipBagItem) == null ? void 0 : _i.call(host, arm.slotIndex))) return true;
+        } else if ((_j = host.smithItemOnce) == null ? void 0 : _j.call(host, arm.id)) {
+          host.equipIfBetterOffense(arm.id);
+          return true;
+        }
+      }
+      return false;
+    }
     phaseFirstWep1001(host, w, stance) {
       if (w.hasMetalWeapon || w.hasStyleWeapon) {
         this.h1001.phase = "GEAR_FARM";
@@ -2195,13 +2248,17 @@
       const anvil = this.mem(w, "anvil");
       const rock = this.mem(w, "rock");
       const tree = this.mem(w, "tree");
+      if (this.tryScoreSmithEquip(host, w, stance, "first wep")) return true;
       if ((anvil || w.anvilNearby) && w.oreCount > 0 && host.smithKitOnce()) return true;
       if (rock && host.hasTool("pickaxe")) {
         this.h1001.lockedMats = true;
         if (this.walkToTile(host, rock.x, rock.y)) return true;
         return this.tryGather(host, w, stance, "mine first wep");
       }
-      if (w.logCount > 0 && host.fletchStyleOnce()) return true;
+      if (w.logCount > 0 && host.fletchStyleOnce()) {
+        this.tryScoreSmithEquip(host, w, stance, "first wep fletch");
+        return true;
+      }
       if (tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y)) {
         if (this.walkToTile(host, tree.x, tree.y)) return true;
         if (this.tryGather(host, w, stance, "chop first wep")) return true;
@@ -2221,7 +2278,7 @@
       return false;
     }
     phaseGear1001(host, w, stance) {
-      var _a, _b;
+      var _a, _b, _c, _d;
       this.h1001.phase = "GEAR_FARM";
       const foodLow = w.food <= Math.max(2, Math.floor(stance.minFood * 0.5));
       const matsFull = w.bagFree <= 1 && (w.oreCount >= 2 || w.logCount >= 2);
@@ -2244,20 +2301,25 @@
           return false;
         }
       }
+      if (anvil || w.anvilNearby || ((_b = (_a = host.listBagCombatGear) == null ? void 0 : _a.call(host)) != null ? _b : []).some((b) => b.slot === "weapon" || b.slot === "armour")) {
+        if (this.tryScoreSmithEquip(host, w, stance, "gear score")) return true;
+      }
       if ((foodLow || matsFull) && (anvil || w.hub)) {
         this.setStatus1001(host, w, stance, "hub forge/clean");
+        if (this.tryScoreSmithEquip(host, w, stance, "hub score")) return true;
         if (host.forgeWieldedOnce()) {
           this.lastImproveTick = this.runTicks;
           return true;
         }
         if (host.smithKitOnce()) return true;
         if (host.craftGemRingOnce()) return true;
-        if ((_a = host.craftClothesOnce) == null ? void 0 : _a.call(host)) return true;
-        if ((_b = host.craftShieldOnce) == null ? void 0 : _b.call(host)) return true;
+        if ((_c = host.craftClothesOnce) == null ? void 0 : _c.call(host)) return true;
+        if ((_d = host.craftShieldOnce) == null ? void 0 : _d.call(host)) return true;
         this.h1001.phase = "SELL_TRIM";
         return this.phaseSellTrim1001(host, w, stance);
       }
       if (w.anvilNearby || anvil && cheb(w.tile.x, w.tile.y, anvil.x, anvil.y) <= 2) {
+        if (this.tryScoreSmithEquip(host, w, stance, "anvil score")) return true;
         if (host.forgeWieldedOnce()) {
           this.h1001.forgeMissStreak = 0;
           this.lastImproveTick = this.runTicks;
@@ -2275,6 +2337,7 @@
       if (!w.hasArmour || !w.hasMetalWeapon) {
         if (w.oreCount >= 3 && (anvil || w.anvilNearby)) {
           this.setStatus1001(host, w, stance, "smith kit");
+          if (this.tryScoreSmithEquip(host, w, stance, "kit score")) return true;
           if (host.smithKitOnce()) return true;
           if (anvil) {
             host.walkTo(anvil.x, anvil.y);
