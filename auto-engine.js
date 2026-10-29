@@ -1,4 +1,4 @@
-/* phd auto-engine 2009 — pull via GET /api/auto-engine */
+/* phd auto-engine 2010 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -927,7 +927,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2009";
+  var AUTO_ENGINE_VERSION = "2010";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2038,39 +2038,61 @@
       }
       return false;
     }
+    /**
+     * t1622/t1624: altar act only when essence>0 (craft) or imbueable worn piece.
+     * `false` = host says no; `null` = older host omitted fields → probe via runecraftOnce.
+     */
+    altarActReady(w) {
+      if (typeof w.essenceCount !== "number") return null;
+      if (w.essenceCount > 0) return true;
+      return w.canImbueWorn === true;
+    }
     evAltar(host, w, stance) {
-      var _a;
       const altar = this.mem(w, "altar");
       if (!altar) return false;
       const d = cheb(w.tile.x, w.tile.y, altar.x, altar.y);
       if (d > 3) return false;
-      this.h1001.topEvent = "altar";
+      const ready = this.altarActReady(w);
+      if (ready === false) return false;
       const anvil = this.mem(w, "anvil");
       const opts = [
-        { id: "runecraft", label: "altar rune", value: 8, cost: 0, risk: 0, travel: d, progress: 1 },
-        {
+        { id: "runecraft", label: "altar rune", value: 8, cost: 0, risk: 0, travel: d, progress: 1 }
+      ];
+      if (anvil && w.oreCount > 0) {
+        opts.push({
           id: "forge",
           label: "forge instead",
           value: 7,
           cost: 1,
           risk: 0,
-          travel: anvil ? cheb(w.tile.x, w.tile.y, anvil.x, anvil.y) : 4,
+          travel: cheb(w.tile.x, w.tile.y, anvil.x, anvil.y),
           progress: 1.2
-        }
-      ];
-      const best = pickUtility(opts);
-      this.h1001.utilityPick = (_a = best == null ? void 0 : best.id) != null ? _a : "";
-      if ((best == null ? void 0 : best.id) === "runecraft") {
-        this.setStatus1001(host, w, stance, "altar runecraft");
-        return host.runecraftOnce();
+        });
       }
-      this.setStatus1001(host, w, stance, "altar\u2192forge");
-      if (host.forgeWieldedOnce() || host.smithKitOnce()) return true;
-      if (anvil) {
+      if (!opts.length) return false;
+      const best = pickUtility(opts);
+      if (!best) return false;
+      if (best.id === "runecraft") {
+        if (!host.runecraftOnce()) return false;
+        this.h1001.topEvent = "altar";
+        this.h1001.utilityPick = "runecraft";
+        this.setStatus1001(host, w, stance, "altar runecraft");
+        return true;
+      }
+      if (host.forgeWieldedOnce() || host.smithKitOnce()) {
+        this.h1001.topEvent = "altar";
+        this.h1001.utilityPick = "forge";
+        this.setStatus1001(host, w, stance, "altar\u2192forge");
+        return true;
+      }
+      if (anvil && w.oreCount > 0) {
+        this.h1001.topEvent = "altar";
+        this.h1001.utilityPick = "forge";
+        this.setStatus1001(host, w, stance, "altar\u2192forge");
         host.walkTo(anvil.x, anvil.y);
         return true;
       }
-      return host.runecraftOnce();
+      return false;
     }
     runPhase1001(host, w, stance) {
       var _a;
@@ -2501,29 +2523,34 @@
     }
     runCalm1001(host, w, stance) {
       var _a, _b;
-      const chain = buildRoundTrip(this.h1001.nodes, w);
+      const chain = buildRoundTrip(this.h1001.nodes, w).filter((n) => {
+        if (n.kind === "altar") return this.altarActReady(w) !== false;
+        if (n.kind === "anvil") return w.oreCount > 0;
+        return true;
+      });
       if (chain.length >= 2) {
-        this.h1001.topEvent = "camp_chain";
         const next = chain[0];
+        const ok2 = this.visitNode1001(host, w, stance, next.kind, next.x, next.y);
+        if (!ok2) return false;
+        this.h1001.topEvent = "camp_chain";
         this.h1001.utilityPick = `chain:${next.kind}`;
         this.setStatus1001(host, w, stance, `round-trip ${next.kind}`);
-        return this.visitNode1001(host, w, stance, next.kind, next.x, next.y);
+        return true;
       }
       const opts = calmUtilOptions(w, stance, this.h1001.nodes).filter((o) => {
         if (o.id === "mine") return host.hasTool("pickaxe");
         if (o.id === "chop") return host.hasTool("hatchet");
         if (o.id === "fish") return host.hasTool("rod");
+        if (o.id === "anvil") return w.oreCount > 0;
         return true;
       });
       const best = pickUtility(opts);
       if (!best) return false;
-      this.h1001.utilityPick = best.id;
-      this.setStatus1001(host, w, stance, best.label);
       void UTILITY_WEIGHTS;
       void lookupGear;
       const kind = best.id === "anvil" ? "anvil" : best.id === "shop" ? "shop" : best.id === "fletch" ? "fletch" : best.id === "mine" ? "rock" : best.id === "chop" ? "tree" : best.id === "fish" ? "pond" : best.id;
       const tile = best.id === "mine" ? this.mem(w, "rock") : best.id === "chop" ? this.mem(w, "tree") : best.id === "fish" ? this.mem(w, "pond") : best.id === "anvil" ? this.mem(w, "anvil") : best.id === "shop" ? this.mem(w, "shop") : null;
-      return this.visitNode1001(
+      const ok = this.visitNode1001(
         host,
         w,
         stance,
@@ -2531,6 +2558,10 @@
         (_a = tile == null ? void 0 : tile.x) != null ? _a : w.tile.x,
         (_b = tile == null ? void 0 : tile.y) != null ? _b : w.tile.y
       );
+      if (!ok) return false;
+      this.h1001.utilityPick = best.id;
+      this.setStatus1001(host, w, stance, best.label);
+      return true;
     }
     visitNode1001(host, w, stance, kind, x, y) {
       if (kind === "fletch") return host.craftWoodForValueOnce() || host.fletchStyleOnce();
@@ -2542,7 +2573,10 @@
         if (this.walkToTile(host, x, y, 1)) return true;
         return host.sellUnusedOnce() || host.sellOreKeep(2);
       }
-      if (kind === "altar") return host.runecraftOnce();
+      if (kind === "altar") {
+        if (this.altarActReady(w) === false) return false;
+        return host.runecraftOnce();
+      }
       if (kind === "chest") {
         host.walkTo(x, y);
         return this.tryOpenChestOnce(host, w, stance, { needBag: false, cool: 2 });
