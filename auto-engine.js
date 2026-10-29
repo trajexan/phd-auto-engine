@@ -1,4 +1,4 @@
-/* phd auto-engine 2002 — pull via GET /api/auto-engine */
+/* phd auto-engine 2003 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -927,7 +927,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2002";
+  var AUTO_ENGINE_VERSION = "2003";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
