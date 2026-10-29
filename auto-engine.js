@@ -1,4 +1,4 @@
-/* phd auto-engine 2005 — pull via GET /api/auto-engine */
+/* phd auto-engine 2006 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -927,7 +927,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2005";
+  var AUTO_ENGINE_VERSION = "2006";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2099,6 +2099,7 @@
       return false;
     }
     phaseTools1001(host, w, stance) {
+      var _a, _b;
       const rock = this.mem(w, "rock");
       const tree = this.mem(w, "tree");
       const pond = this.mem(w, "pond");
@@ -2127,12 +2128,14 @@
         }
         if (tool === "pickaxe" && (anvil || w.anvilNearby) && host.smithKitOnce()) return true;
       }
-      if (rock && host.hasTool("pickaxe")) {
+      const liveRock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : null;
+      if (liveRock && host.hasTool("pickaxe") && !this.isGatherTileBlocked(liveRock.x, liveRock.y)) {
         this.setStatus1001(host, w, stance, "tools mine");
-        if (this.walkToTile(host, rock.x, rock.y)) return true;
-        return this.tryGather(host, w, stance, "tools mine");
+        if (this.walkToTile(host, liveRock.x, liveRock.y)) return true;
+        if (this.tryGather(host, w, stance, "tools mine")) return true;
+        this.blockGatherTile(liveRock.x, liveRock.y);
       }
-      if (pond && host.hasTool("rod")) {
+      if (pond && host.hasTool("rod") && !this.isGatherTileBlocked(pond.x, pond.y)) {
         this.setStatus1001(host, w, stance, "tools fish");
         this.lastFoodFarm = { depth: w.depth, x: pond.x, y: pond.y };
         if (this.walkToTile(host, pond.x, pond.y)) return true;
@@ -2168,12 +2171,22 @@
           return true;
         }
       }
+      if (host.hasTool("pickaxe") && !liveRock && w.explore) {
+        this.setStatus1001(host, w, stance, "tools find rock");
+        host.walkTo(w.explore.x, w.explore.y);
+        return true;
+      }
       if (!rock && !host.hasTool("pickaxe") && w.explore) {
         this.setStatus1001(host, w, stance, "tools find rock");
         host.walkTo(w.explore.x, w.explore.y);
         return true;
       }
       if (!tool) {
+        if ((host.hasTool("pickaxe") || host.hasTool("hatchet") || host.hasTool("rod")) && w.explore) {
+          this.setStatus1001(host, w, stance, "tools explore");
+          host.walkTo(w.explore.x, w.explore.y);
+          return true;
+        }
         if (!w.hasMetalWeapon && !w.hasStyleWeapon) {
           this.h1001.phase = "FIRST_WEP";
           return false;
@@ -2182,6 +2195,7 @@
         return false;
       }
       if (w.explore) {
+        this.setStatus1001(host, w, stance, "tools explore");
         host.walkTo(w.explore.x, w.explore.y);
         return true;
       }
