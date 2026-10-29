@@ -1,4 +1,4 @@
-/* phd auto-engine 2014 — pull via GET /api/auto-engine */
+/* phd auto-engine 2015 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -927,7 +927,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2014";
+  var AUTO_ENGINE_VERSION = "2015";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2048,11 +2048,16 @@
       if (w.essenceCount > 0) return true;
       return w.canImbueWorn === true;
     }
+    /** True while pick/hatchet/rod kit still incomplete — tool bootstrap beats altar. */
+    beginnerToolsIncomplete(host) {
+      return !host.hasTool("pickaxe") || !host.hasTool("hatchet") || !host.hasTool("rod");
+    }
     evAltar(host, w, stance) {
       const altar = this.mem(w, "altar");
       if (!altar) return false;
       const d = cheb(w.tile.x, w.tile.y, altar.x, altar.y);
       if (d > 3) return false;
+      if (this.beginnerToolsIncomplete(host) || this.h1001.phase === "TOOLS") return false;
       const ready = this.altarActReady(w);
       if (ready === false) return false;
       const anvil = this.mem(w, "anvil");
@@ -2615,7 +2620,10 @@
     runCalm1001(host, w, stance) {
       var _a, _b;
       const chain = buildRoundTrip(this.h1001.nodes, w).filter((n) => {
-        if (n.kind === "altar") return this.altarActReady(w) !== false;
+        if (n.kind === "altar") {
+          if (this.beginnerToolsIncomplete(host) || this.h1001.phase === "TOOLS") return false;
+          return this.altarActReady(w) !== false;
+        }
         if (n.kind === "anvil") return w.oreCount > 0;
         return true;
       });
@@ -2633,6 +2641,9 @@
         if (o.id === "chop") return host.hasTool("hatchet");
         if (o.id === "fish") return host.hasTool("rod");
         if (o.id === "anvil") return w.oreCount > 0;
+        if (o.id === "altar" || o.id === "runecraft") {
+          if (this.beginnerToolsIncomplete(host) || this.h1001.phase === "TOOLS") return false;
+        }
         return true;
       });
       const best = pickUtility(opts);
@@ -2665,6 +2676,7 @@
         return host.sellUnusedOnce() || host.sellOreKeep(2);
       }
       if (kind === "altar") {
+        if (this.beginnerToolsIncomplete(host) || this.h1001.phase === "TOOLS") return false;
         if (this.altarActReady(w) === false) return false;
         return host.runecraftOnce();
       }
