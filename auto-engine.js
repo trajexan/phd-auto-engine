@@ -1,4 +1,4 @@
-/* phd auto-engine 2013 — pull via GET /api/auto-engine */
+/* phd auto-engine 2014 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -927,7 +927,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2013";
+  var AUTO_ENGINE_VERSION = "2014";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1957,10 +1957,11 @@
       this.bagFullUntil = this.runTicks + 600;
       this.setStatus1001(host, w, stance, "bag forge\u2192trim");
       if (host.forgeWieldedOnce()) return true;
-      if (host.smithKitOnce()) return true;
+      const flooded = this.bagFloodedWeps(host, w);
+      if (!flooded && this.wantSmithKit(w) && host.smithKitOnce()) return true;
       if (host.craftGemRingOnce()) return true;
-      if (host.craftWoodForValueOnce()) return true;
-      if (host.fletchStyleOnce()) return true;
+      if (!flooded && host.craftWoodForValueOnce()) return true;
+      if (!flooded && host.fletchStyleOnce()) return true;
       if (host.sellUnusedOnce()) return true;
       if (host.sellOreKeep(this.h1001.lockedMats ? 2 : 0)) return true;
       if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) return true;
@@ -2079,7 +2080,7 @@
         this.setStatus1001(host, w, stance, "altar runecraft");
         return true;
       }
-      if (host.forgeWieldedOnce() || host.smithKitOnce()) {
+      if (host.forgeWieldedOnce() || this.wantSmithKit(w) && host.smithKitOnce()) {
         this.h1001.topEvent = "altar";
         this.h1001.utilityPick = "forge";
         this.setStatus1001(host, w, stance, "altar\u2192forge");
@@ -2157,6 +2158,23 @@
     /** Bag has ore/logs sellMatsForCoins can cash (proxy; host also gates walk in 0.5.721+). */
     hasSellableMats(w) {
       return w.oreCount > 0 || w.logCount > 0 || w.hasLogs;
+    }
+    /**
+     * 2014: host smithKitOnce smiths dagger whenever !hasMetalWeapon — even with wand/bow worn
+     * and a bag full of bronze daggers. Only call when ore can pay and style kit is not worn.
+     */
+    wantSmithKit(w) {
+      if (w.oreCount <= 0) return false;
+      if (w.hasStyleWeapon) return false;
+      if (w.hasMetalWeapon && w.hasArmour) return false;
+      return true;
+    }
+    /** Worn kit + bag still holding weapon pieces → trim/sell, don't remake. */
+    bagFloodedWeps(host, w) {
+      var _a, _b;
+      if (!w.hasStyleWeapon && !w.hasMetalWeapon) return false;
+      const bag = (_b = (_a = host.listBagCombatGear) == null ? void 0 : _a.call(host)) != null ? _b : [];
+      return bag.some((b) => b.slot === "weapon");
     }
     /**
      * t1630–t1633 nncz96: fund beginner shop tool (30c) with owned hatchet/rod on
@@ -2237,7 +2255,7 @@
             }
             return true;
           }
-          if (tool === "pickaxe" && (anvil || w.anvilNearby) && host.smithKitOnce()) return true;
+          if (tool === "pickaxe" && (anvil || w.anvilNearby) && this.wantSmithKit(w) && host.smithKitOnce()) return true;
         } else {
           this.setStatus1001(host, w, stance, `tools fund ${tool}`);
           if (this.tryFundBeginnerToolFarm(host, w, stance, tree, pond)) return true;
@@ -2385,7 +2403,7 @@
       const rock = this.mem(w, "rock");
       const tree = this.mem(w, "tree");
       if (this.tryScoreSmithEquip(host, w, stance, "first wep")) return true;
-      if ((anvil || w.anvilNearby) && w.oreCount > 0 && host.smithKitOnce()) return true;
+      if ((anvil || w.anvilNearby) && this.wantSmithKit(w) && host.smithKitOnce()) return true;
       if (rock && host.hasTool("pickaxe")) {
         this.h1001.lockedMats = true;
         if (this.walkToTile(host, rock.x, rock.y)) return true;
@@ -2447,7 +2465,7 @@
           this.lastImproveTick = this.runTicks;
           return true;
         }
-        if (host.smithKitOnce()) return true;
+        if (this.wantSmithKit(w) && host.smithKitOnce()) return true;
         if (host.craftGemRingOnce()) return true;
         if ((_c = host.craftClothesOnce) == null ? void 0 : _c.call(host)) return true;
         if ((_d = host.craftShieldOnce) == null ? void 0 : _d.call(host)) return true;
@@ -2474,8 +2492,8 @@
         if (w.oreCount >= 3 && (anvil || w.anvilNearby)) {
           this.setStatus1001(host, w, stance, "smith kit");
           if (this.tryScoreSmithEquip(host, w, stance, "kit score")) return true;
-          if (host.smithKitOnce()) return true;
-          if (anvil) {
+          if (this.wantSmithKit(w) && host.smithKitOnce()) return true;
+          if (anvil && w.oreCount > 0) {
             host.walkTo(anvil.x, anvil.y);
             return true;
           }
@@ -2640,7 +2658,7 @@
       if (kind === "fletch") return host.craftWoodForValueOnce() || host.fletchStyleOnce();
       if (kind === "anvil") {
         if (this.walkToTile(host, x, y, 2)) return true;
-        return host.forgeWieldedOnce() || host.smithKitOnce() || host.craftGemRingOnce();
+        return host.forgeWieldedOnce() || this.wantSmithKit(w) && host.smithKitOnce() || host.craftGemRingOnce();
       }
       if (kind === "shop") {
         if (this.walkToTile(host, x, y, 1)) return true;
@@ -4643,10 +4661,14 @@
         return true;
       }
       if (/smith/i.test(s.label)) {
-        if (host.smithKitOnce()) {
+        if (this.wantSmithKit(w) && host.smithKitOnce()) {
           this.setStatus(host, w, stance, s.label);
           this.cool = 3;
           return true;
+        }
+        if (w.oreCount <= 0 || w.hasStyleWeapon) {
+          this.clearAnvilStrive();
+          return false;
         }
         if (this.walkHub(host, w, stance, "hub to smith")) return true;
         this.setStatus(host, w, stance, s.label);
