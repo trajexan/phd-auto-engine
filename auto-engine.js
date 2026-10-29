@@ -1,4 +1,4 @@
-/* phd auto-engine 1002 — pull via GET /api/auto-engine */
+/* phd auto-engine 1003 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -642,7 +642,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "1002";
+  var AUTO_ENGINE_VERSION = "1003";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1194,8 +1194,28 @@
       this.cool = 2;
       return true;
     }
+    /**
+     * Darren t1540/t1541 food urgency gate.
+     * Urgency ONLY when:
+     *   (1) low HP (~<72%) AND no food/heal, OR
+     *   (2) chased by lit threat/deadly (or melee non-prey) with empty food.
+     * NOT urgency → never panic (no emerg find pond / FOOD_BUFFER rush).
+     * Calm healthy start (full-ish HP, nothing pressing) → kit/TOOLS as normal.
+     * stance.hungry / food=0 alone is NOT urgency.
+     */
+    foodUrgency(w) {
+      const hpPct = w.maxHp > 0 ? w.hp / w.maxHp : 1;
+      const emptyFood = w.food <= 0 && w.healReserve <= 0;
+      const chased = w.foes.some(
+        (f) => f.alive && f.lit && (f.danger === "deadly" || f.danger === "threat" && f.dist <= 3 || f.dist <= 1 && f.danger !== "prey")
+      );
+      if (hpPct < 0.72 && emptyFood) return true;
+      if (chased && emptyFood) return true;
+      return false;
+    }
     evEmergFood(host, w, stance) {
-      if (!stance.hungry) return false;
+      if (!this.foodUrgency(w)) return false;
+      if (!stance.hungry && w.food > 0 && w.healReserve > 0) return false;
       this.h1001.topEvent = "emerg_food";
       if (this.h1001.phase !== "FOOD_BUFFER" && this.h1001.phase !== "BOOT" && this.h1001.phase !== "TOOLS") {
         this.h1001.phaseResume = this.h1001.phase;
@@ -1609,11 +1629,25 @@
         host.walkTo(shop.x, shop.y);
         return true;
       }
-      this.h1001.phase = stance.hungry || w.food < stance.minFood ? "FOOD_BUFFER" : "GEAR_FARM";
+      if (this.foodUrgency(w)) this.h1001.phase = "FOOD_BUFFER";
+      else if (stance.hungry || w.food < stance.minFood) {
+        const tool = bootstrapTool(host, w, this.h1001.nodes);
+        this.h1001.phase = tool ? "TOOLS" : "GEAR_FARM";
+      } else {
+        this.h1001.phase = "GEAR_FARM";
+      }
       return false;
     }
     phaseFood1001(host, w, stance) {
       var _a;
+      if (!this.foodUrgency(w)) {
+        const tool = bootstrapTool(host, w, this.h1001.nodes);
+        if (tool || !w.hasMetalWeapon && !w.hasStyleWeapon && !w.kitReady && (this.mem(w, "tree") || this.mem(w, "rock") || this.mem(w, "shop") || this.mem(w, "pond"))) {
+          this.h1001.phase = "TOOLS";
+          this.h1001.phaseResume = null;
+          return false;
+        }
+      }
       if (stance.stocked && w.food >= stance.minFood) {
         this.h1001.phase = (_a = this.h1001.phaseResume) != null ? _a : "GEAR_FARM";
         this.h1001.phaseResume = null;
