@@ -1,4 +1,4 @@
-/* phd auto-engine 2012 — pull via GET /api/auto-engine */
+/* phd auto-engine 2013 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -927,7 +927,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2012";
+  var AUTO_ENGINE_VERSION = "2013";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1963,7 +1963,7 @@
       if (host.fletchStyleOnce()) return true;
       if (host.sellUnusedOnce()) return true;
       if (host.sellOreKeep(this.h1001.lockedMats ? 2 : 0)) return true;
-      if (host.sellMatsForCoins(1)) return true;
+      if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) return true;
       this.bagFullFails++;
       if (this.bagFullFails >= 3) {
         this.bagFullUntil = 0;
@@ -2154,6 +2154,10 @@
       if (tool === "rod") return this.canFundRodNow(w);
       return this.canFundPlainToolNow(tool, w, anvil);
     }
+    /** Bag has ore/logs sellMatsForCoins can cash (proxy; host also gates walk in 0.5.721+). */
+    hasSellableMats(w) {
+      return w.oreCount > 0 || w.logCount > 0 || w.hasLogs;
+    }
     /**
      * t1630–t1633 nncz96: fund beginner shop tool (30c) with owned hatchet/rod on
      * registered mem tree/pond — cook → sell → gather. Prefer farm over explore loot.
@@ -2170,7 +2174,7 @@
         this.setStatus1001(host, w, stance, "tools fund sell");
         return true;
       }
-      if (host.sellMatsForCoins(need)) {
+      if (this.hasSellableMats(w) && host.sellMatsForCoins(need)) {
         this.setStatus1001(host, w, stance, "tools fund sell mats");
         return true;
       }
@@ -2277,7 +2281,7 @@
           this.setStatus1001(host, w, stance, "tools sell wood");
           return true;
         }
-        if (host.sellMatsForCoins(1)) {
+        if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) {
           this.setStatus1001(host, w, stance, "tools sell mats");
           return true;
         }
@@ -2398,7 +2402,7 @@
         if (attempt.ok || /^enroute$/i.test(attempt.reason || "")) return true;
       }
       if (host.acquireTool("pickaxe")) return true;
-      if (host.sellUnusedOnce() || host.sellMatsForCoins(1)) return true;
+      if (host.sellUnusedOnce() || this.hasSellableMats(w) && host.sellMatsForCoins(1)) return true;
       if (anvil && w.oreCount > 0) {
         host.walkTo(anvil.x, anvil.y);
         return true;
@@ -2533,7 +2537,7 @@
       if (host.craftGemRingOnce()) return true;
       if (host.sellUnusedOnce()) return true;
       if (host.sellOreKeep(this.h1001.lockedMats && !w.hasArmour ? 2 : 0)) return true;
-      if (host.sellMatsForCoins(1)) return true;
+      if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) return true;
       const shop = this.mem(w, "shop");
       if (shop && cheb(w.tile.x, w.tile.y, shop.x, shop.y) > 1) {
         host.walkTo(shop.x, shop.y);
@@ -3077,7 +3081,7 @@
         this.bagFullFails = 0;
         return true;
       }
-      if (this.sellJunk(host, w) || host.sellOreKeep(0) || host.sellMatsForCoins(30)) {
+      if (this.sellJunk(host, w) || host.sellOreKeep(0) || this.hasSellableMats(w) && host.sellMatsForCoins(30)) {
         this.bagFullFails = 0;
         this.setStatus(host, w, stance, "sell for loot space");
         this.cool = 3;
@@ -3202,7 +3206,7 @@
           }
           this.bagFullUntil = this.runTicks + 600;
           this.sameTargetHits = SAME_TARGET_MAX;
-          if (this.sellJunk(host, w) || host.sellOreKeep(0) || host.sellMatsForCoins(30)) {
+          if (this.sellJunk(host, w) || host.sellOreKeep(0) || this.hasSellableMats(w) && host.sellMatsForCoins(30)) {
             this.setStatus(host, w, stance, "sell for loot space");
             this.cool = 3;
             return true;
