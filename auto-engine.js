@@ -1,4 +1,4 @@
-/* phd auto-engine 2001 — pull via GET /api/auto-engine */
+/* phd auto-engine 2002 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -927,7 +927,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2001";
+  var AUTO_ENGINE_VERSION = "2002";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2162,24 +2162,22 @@
       const anvil = this.mem(w, "anvil");
       const rock = this.mem(w, "rock");
       const tree = this.mem(w, "tree");
-      if (anvil || w.anvilNearby) {
-        if ((w.oreCount > 0 || w.coins >= 20) && host.smithKitOnce()) return true;
-        if (rock && host.hasTool("pickaxe")) {
-          this.h1001.lockedMats = true;
-          if (this.walkToTile(host, rock.x, rock.y)) return true;
-          return this.tryGather(host, w, stance, "mine first wep");
-        }
-        if (anvil) {
-          host.walkTo(anvil.x, anvil.y);
-          return true;
-        }
+      if ((anvil || w.anvilNearby) && w.oreCount > 0 && host.smithKitOnce()) return true;
+      if (rock && host.hasTool("pickaxe")) {
+        this.h1001.lockedMats = true;
+        if (this.walkToTile(host, rock.x, rock.y)) return true;
+        return this.tryGather(host, w, stance, "mine first wep");
       }
+      if (host.acquireTool("pickaxe")) return true;
       if (w.logCount > 0 && host.fletchStyleOnce()) return true;
       if (tree && host.hasTool("hatchet")) {
         if (this.walkToTile(host, tree.x, tree.y)) return true;
         return this.tryGather(host, w, stance, "chop first wep");
       }
-      if (host.acquireTool("pickaxe")) return true;
+      if (anvil && w.oreCount > 0) {
+        host.walkTo(anvil.x, anvil.y);
+        return true;
+      }
       if (w.explore) {
         host.walkTo(w.explore.x, w.explore.y);
         return true;
