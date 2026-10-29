@@ -1,4 +1,4 @@
-/* phd auto-engine 2004 — pull via GET /api/auto-engine */
+/* phd auto-engine 2005 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -927,7 +927,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2004";
+  var AUTO_ENGINE_VERSION = "2005";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1937,6 +1937,7 @@
       this.setStatus1001(host, w, stance, "bag forge\u2192trim");
       if (host.forgeWieldedOnce()) return true;
       if (host.smithKitOnce()) return true;
+      if (host.craftGemRingOnce()) return true;
       if (host.craftWoodForValueOnce()) return true;
       if (host.fletchStyleOnce()) return true;
       if (host.sellUnusedOnce()) return true;
@@ -2398,6 +2399,7 @@
     }
     phaseSellTrim1001(host, w, stance) {
       this.setStatus1001(host, w, stance, "sell trim");
+      if (host.craftGemRingOnce()) return true;
       if (host.sellUnusedOnce()) return true;
       if (host.sellOreKeep(this.h1001.lockedMats && !w.hasArmour ? 2 : 0)) return true;
       if (host.sellMatsForCoins(1)) return true;
