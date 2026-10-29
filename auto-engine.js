@@ -1,4 +1,4 @@
-/* phd auto-engine 1003 — pull via GET /api/auto-engine */
+/* phd auto-engine 1004 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -642,7 +642,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "1003";
+  var AUTO_ENGINE_VERSION = "1004";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1177,10 +1177,11 @@
     evLethal(host, w, stance) {
       var _a;
       const hpPct = w.maxHp > 0 ? w.hp / w.maxHp : 1;
-      const deadly = w.foes.some(
-        (f) => f.alive && f.lit && (f.danger === "deadly" || f.danger === "threat" && f.dist <= 2)
+      const pressing = w.foes.some(
+        (f) => f.alive && f.lit && (f.danger === "deadly" || f.danger === "threat" && f.dist <= 3 || f.dist <= 1 && f.danger !== "prey")
       );
-      if (hpPct > 0.35 && !(hpPct < 0.55 && deadly && w.food > 0)) return false;
+      if (!pressing) return false;
+      if (hpPct > 0.35 && !(hpPct < 0.55 && w.food > 0)) return false;
       this.h1001.topEvent = "lethal";
       host.clearEngage();
       if (w.food > 0 || w.healReserve > 0) {
