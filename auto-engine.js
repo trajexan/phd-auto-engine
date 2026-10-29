@@ -1,4 +1,4 @@
-/* phd auto-engine 1006 — pull via GET /api/auto-engine */
+/* phd auto-engine 2001 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -641,8 +641,293 @@
     return opts;
   }
 
+  // src/systems/autoplayScan2001.ts
+  var SCAN_PERIOD = 8;
+  var ENROUTE_STOPS_MAX = 8;
+  var ON_WAY_CHEB = 4;
+  var NEAR_FORGE_CHEB = 6;
+  var SHRIMP_ENROUTE_CHEB = 6;
+  var SCAN_FLIP = {
+    none: 0,
+    chest_safe: 1,
+    loot_hv: 2,
+    soft_exp: 3,
+    depleted: 4,
+    stairs_open: 5,
+    fire: 6,
+    pond_safe: 7,
+    door: 8,
+    pit: 9,
+    station: 10,
+    corpse: 11,
+    bag_pressure: 12
+  };
+  function freshScanState() {
+    return {
+      lastScanTick: -9999,
+      lastFlip: SCAN_FLIP.none,
+      prevStatus: /* @__PURE__ */ new Map(),
+      enrouteStops: [],
+      wantLootQueue: [],
+      pendingHighFlip: null,
+      atTileLoot: null,
+      layer2UsedTick: -9999
+    };
+  }
+  function scanAge(scan, runTicks) {
+    if (scan.lastScanTick < 0) return 255;
+    return Math.min(255, Math.max(0, runTicks - scan.lastScanTick));
+  }
+  function pathOnWay(target, desire, hero, k = ON_WAY_CHEB) {
+    if (cheb(target.x, target.y, hero.x, hero.y) <= 1) return true;
+    if (!desire) return cheb(target.x, target.y, hero.x, hero.y) <= k;
+    const ax = hero.x;
+    const ay = hero.y;
+    const bx = desire.x;
+    const by = desire.y;
+    const steps = Math.max(1, cheb(ax, ay, bx, by));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const sx = Math.round(ax + (bx - ax) * t);
+      const sy = Math.round(ay + (by - ay) * t);
+      if (cheb(target.x, target.y, sx, sy) <= k) return true;
+    }
+    return false;
+  }
+  function nearForgeOrShop(target, nodes, depth, k = NEAR_FORGE_CHEB) {
+    for (const kind of ["anvil", "shop"]) {
+      const n = nodes.get(`${depth}:${kind}`);
+      if (n && cheb(target.x, target.y, n.x, n.y) <= k) return true;
+    }
+    return false;
+  }
+  function softBlockBypass(chestAdj, softActive, desire, hero, nodes, depth) {
+    if (!softActive) return true;
+    if (pathOnWay(chestAdj, desire, hero)) return true;
+    if (nearForgeOrShop(chestAdj, nodes, depth)) return true;
+    return false;
+  }
+  function phaseAllowsChestEvent(phase, onWay) {
+    if (phase === "TOOLS" || phase === "FIRST_WEP") return "event";
+    if (phase === "GEAR_FARM" || phase === "MAP_HUB" || phase === "PUSH") {
+      return onWay ? "event" : "queue";
+    }
+    if (phase === "FOOD_BUFFER" || phase === "CEILING" || phase === "SELL_TRIM" || phase === "GATHER_FUND") {
+      return onWay ? "event" : "suppress";
+    }
+    return onWay ? "event" : "queue";
+  }
+  function wantPickItem(opts) {
+    if (opts.markedSpecial) return true;
+    const { bagFree, kindBand, value, bestBagJunkValue, foodNeeded, shopAhead } = opts;
+    if (bagFree > 0) {
+      if (kindBand === 3) return true;
+      if (kindBand === 1 && foodNeeded) return true;
+      if (kindBand === 2) return true;
+      if (kindBand === 4 && shopAhead && value > 0) return true;
+      if (value > 0) return true;
+      return false;
+    }
+    if (kindBand === 2 && value > bestBagJunkValue) return true;
+    if (kindBand === 3 && value > bestBagJunkValue) return true;
+    if (value > bestBagJunkValue && value > 0) return true;
+    return false;
+  }
+  function pushEnrouteStop(scan, stop) {
+    if (scan.enrouteStops.some((s) => s.id === stop.id)) return;
+    if (scan.enrouteStops.length >= ENROUTE_STOPS_MAX) {
+      const dropIdx = scan.enrouteStops.findIndex((s) => !s.hv);
+      if (dropIdx >= 0 && stop.hv) scan.enrouteStops.splice(dropIdx, 1);
+      else if (scan.enrouteStops.length >= ENROUTE_STOPS_MAX) return;
+    }
+    scan.enrouteStops.push(stop);
+  }
+  function pushWantLoot(scan, loot) {
+    if (scan.wantLootQueue.some((s) => s.id === loot.id)) return;
+    scan.wantLootQueue.push(loot);
+    scan.wantLootQueue.sort((a, b) => b.value - a.value);
+    if (scan.wantLootQueue.length > ENROUTE_STOPS_MAX) {
+      scan.wantLootQueue.length = ENROUTE_STOPS_MAX;
+    }
+  }
+  function dropChestRegister(nodes, depth, x, y) {
+    nodes.delete(`${depth}:chest:${x},${y}`);
+    const soft = nodes.get(`${depth}:chest`);
+    if (soft && soft.x === x && soft.y === y) nodes.delete(`${depth}:chest`);
+  }
+  function runScanPass(opts) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+    const { scan, w, nodes, runTicks, chestBlockUntil, desire, bestBagJunkValue, skipHeavy } = opts;
+    scan.lastScanTick = runTicks;
+    scan.lastFlip = SCAN_FLIP.none;
+    scan.pendingHighFlip = null;
+    if (skipHeavy) return;
+    const softActive = runTicks < chestBlockUntil;
+    const foodNeeded = w.food <= 0 && w.healReserve <= 0 || w.hp < w.maxHp * 0.85;
+    const shopAhead = !!nodes.get(`${w.depth}:shop`) || !!((_a = w.seen) == null ? void 0 : _a.shop);
+    const hero = w.tile;
+    const seenExact = /* @__PURE__ */ new Set();
+    for (const [key, n] of nodes) {
+      if (n.depth !== w.depth) continue;
+      if (!key.includes(":")) continue;
+      const parts = key.split(":");
+      if (parts.length < 3) continue;
+      if (n.kind !== "chest") continue;
+      const id = key;
+      if (seenExact.has(id)) continue;
+      seenExact.add(id);
+      const safe = !nodeThreat(w, n.x, n.y);
+      const openable = !!(((_b = w.seen) == null ? void 0 : _b.chestOpenable) && w.seen.chest && cheb(w.seen.chest.x, w.seen.chest.y, n.x, n.y) <= 2);
+      const liveChest = (_e = (_c = w.seen) == null ? void 0 : _c.chestAdj) != null ? _e : (_d = w.seen) == null ? void 0 : _d.chest;
+      const liveMatch = liveChest && cheb(liveChest.x, liveChest.y, n.x, n.y) <= 2;
+      const canOpen = openable || !!(liveMatch && ((_f = w.seen) == null ? void 0 : _f.chestOpenable));
+      const bypass = softBlockBypass(n, softActive, desire, hero, nodes, w.depth);
+      const softBlocked = softActive && !bypass;
+      const blob = { safe, softBlocked, openable: canOpen, present: true };
+      const prev = scan.prevStatus.get(id);
+      scan.prevStatus.set(id, blob);
+      const flippedSafe = (!prev || !prev.safe) && safe && canOpen && !softBlocked;
+      const softExpired = (prev == null ? void 0 : prev.softBlocked) && !softBlocked && safe && canOpen;
+      if (flippedSafe || softExpired) {
+        const onWay = pathOnWay(n, desire, hero);
+        const gate = phaseAllowsChestEvent(
+          // phase passed via desire proxy — caller sets pending with phase check
+          "GEAR_FARM",
+          onWay
+        );
+        if (!scan.pendingHighFlip) {
+          scan.pendingHighFlip = {
+            kind: softExpired && !flippedSafe ? "softblock_chest_exp" : "chest_safe",
+            id,
+            x: n.x,
+            y: n.y
+          };
+          scan.lastFlip = softExpired && !flippedSafe ? SCAN_FLIP.soft_exp : SCAN_FLIP.chest_safe;
+        } else if (gate === "queue" || onWay) {
+          pushEnrouteStop(scan, { id, kind: "chest", x: n.x, y: n.y, want: true, hv: true });
+        }
+        void gate;
+      }
+    }
+    const liveAdj = (_i = (_g = w.seen) == null ? void 0 : _g.chestAdj) != null ? _i : (_h = w.seen) == null ? void 0 : _h.chest;
+    if (liveAdj && ((_j = w.seen) == null ? void 0 : _j.chestOpenable)) {
+      const id = `${w.depth}:chest:${liveAdj.x},${liveAdj.y}`;
+      if (!scan.prevStatus.has(id) || !nodes.has(id)) {
+        const safe = !nodeThreat(w, liveAdj.x, liveAdj.y);
+        const bypass = softBlockBypass(liveAdj, softActive, desire, hero, nodes, w.depth);
+        const softBlocked = softActive && !bypass;
+        const prev = scan.prevStatus.get(id);
+        const blob = {
+          safe,
+          softBlocked,
+          openable: true,
+          present: true
+        };
+        scan.prevStatus.set(id, blob);
+        const flippedSafe = (!prev || !prev.safe) && safe && !softBlocked;
+        if (flippedSafe && !scan.pendingHighFlip) {
+          scan.pendingHighFlip = { kind: "chest_safe", id, x: liveAdj.x, y: liveAdj.y };
+          scan.lastFlip = SCAN_FLIP.chest_safe;
+        }
+      }
+    }
+    if (w.loot) {
+      const id = `${w.depth}:loot:${w.loot.x},${w.loot.y}`;
+      const value = 10;
+      const kindBand = 2;
+      const want = wantPickItem({
+        bagFree: w.bagFree,
+        kindBand,
+        value,
+        bestBagJunkValue,
+        foodNeeded,
+        shopAhead
+      });
+      const hv = want && (value > bestBagJunkValue || w.bagFree <= 0);
+      const prev = scan.prevStatus.get(id);
+      scan.prevStatus.set(id, {
+        safe: !nodeThreat(w, w.loot.x, w.loot.y),
+        softBlocked: false,
+        openable: false,
+        present: true,
+        wantPick: want,
+        hv,
+        value,
+        kindBand
+      });
+      const pathClear = !nodeThreat(w, w.loot.x, w.loot.y);
+      const newlyClear = pathClear && (!prev || !prev.safe || !prev.wantPick);
+      if (want && pathClear) {
+        if (hv && newlyClear && !scan.pendingHighFlip) {
+          scan.pendingHighFlip = {
+            kind: "loot_hv",
+            id,
+            x: w.loot.x,
+            y: w.loot.y,
+            hv: true
+          };
+          scan.lastFlip = SCAN_FLIP.loot_hv;
+        } else if (w.bagFree > 0) {
+          pushEnrouteStop(scan, {
+            id,
+            kind: "loot",
+            x: w.loot.x,
+            y: w.loot.y,
+            want: true,
+            hv: !!hv
+          });
+        } else if (hv) {
+          pushWantLoot(scan, { id, x: w.loot.x, y: w.loot.y, value, kindBand });
+        }
+      }
+    }
+    const pond = nodes.get(`${w.depth}:pond`);
+    if (pond) {
+      const id = `${w.depth}:pond:${pond.x},${pond.y}`;
+      const safe = !nodeThreat(w, pond.x, pond.y);
+      const prev = scan.prevStatus.get(id);
+      scan.prevStatus.set(id, { safe, softBlocked: false, openable: false, present: true });
+      if (safe && prev && !prev.safe) {
+        if (scan.lastFlip === SCAN_FLIP.none) scan.lastFlip = SCAN_FLIP.pond_safe;
+        pushEnrouteStop(scan, {
+          id,
+          kind: "pond",
+          x: pond.x,
+          y: pond.y,
+          want: true,
+          hv: false
+        });
+      }
+    }
+    if (w.loot && foodNeeded && cheb(hero.x, hero.y, w.loot.x, w.loot.y) <= SHRIMP_ENROUTE_CHEB && w.bagFree > 0) {
+      pushEnrouteStop(scan, {
+        id: `${w.depth}:loot:${w.loot.x},${w.loot.y}`,
+        kind: "loot",
+        x: w.loot.x,
+        y: w.loot.y,
+        want: true,
+        hv: false
+      });
+    }
+    if (w.bagFree <= 0 && scan.lastFlip === SCAN_FLIP.none) {
+      scan.lastFlip = SCAN_FLIP.bag_pressure;
+    }
+    if (scan.enrouteStops.length > ENROUTE_STOPS_MAX) {
+      scan.enrouteStops.length = ENROUTE_STOPS_MAX;
+    }
+  }
+  function exportScanSit(scan, runTicks) {
+    return {
+      scanAge: scanAge(scan, runTicks),
+      scanFlip: scan.lastFlip | 0,
+      enrouteStops: Math.min(8, scan.enrouteStops.length),
+      lootQueued: scan.wantLootQueue.length > 0 ? 1 : 0,
+      wantPickPending: scan.atTileLoot || scan.wantLootQueue.length > 0 ? 1 : 0
+    };
+  }
+
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "1006";
+  var AUTO_ENGINE_VERSION = "2001";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -873,6 +1158,10 @@
       __publicField(this, "chestFailStreak", 0);
       /** e42: runTicks until new chest open allowed after thrash soft-block. */
       __publicField(this, "chestBlockUntil", 0);
+      /** Eng 2001 Layer 0 ScanState — status-diff + enroute / wantLoot queues. */
+      __publicField(this, "scan", freshScanState());
+      /** Desire tile for on-way Cheb sample (updated when walk issued). */
+      __publicField(this, "desireXY", null);
       __publicField(this, "doorSeenUntil", 0);
       /** e42: last coins+bag fingerprint — reset fail streak on loot gain. */
       __publicField(this, "chestProgKey", "");
@@ -1027,6 +1316,8 @@
         this.lastOreCount = -1;
         this.chestFailStreak = 0;
         this.chestBlockUntil = 0;
+        this.scan = freshScanState();
+        this.desireXY = null;
         this.doorSeenUntil = 0;
         this.chestProgKey = "";
         this.anvilStrive = null;
@@ -1148,9 +1439,15 @@
       const h = this.h1001;
       h.topEvent = "none";
       h.utilityPick = "";
+      this.maybeScan(host, w);
+      if (this.drainAtTileLoot(host, w, stance)) return true;
       if (this.evLethal(host, w, stance)) return true;
+      if (this.sevenBChestEligible(w) && this.evScanChestSafe(host, w, stance)) return true;
       if (this.evEmergFood(host, w, stance)) return true;
       if (this.evMobSudden(host, w, stance)) return true;
+      if (this.evScanChestSafe(host, w, stance)) return true;
+      if (this.evScanLootHv(host, w, stance)) return true;
+      if (this.drainWantLootQueue(host, w, stance)) return true;
       if (this.evBagFull(host, w, stance)) return true;
       if (this.evHighCeiling(host, w, stance)) return true;
       if (this.evFloorLoot(host, w, stance)) return true;
@@ -1162,6 +1459,7 @@
         host.cookOnce();
       }
       host.equipUp();
+      if (this.drainEnrouteStop(host, w, stance)) return true;
       if (this.runPhase1001(host, w, stance)) return true;
       if (this.runCalm1001(host, w, stance)) return true;
       this.setStatus1001(host, w, stance, "explore");
@@ -1197,6 +1495,321 @@
     /** Prefer engage when outlook favorable; else false (caller kites / skips). */
     preferEngage(host, w, foe) {
       return this.outlookOk(host, w, foe, { minWinRate: 0.48 });
+    }
+    // --- Eng 2001 Layer 0 / 2 helpers -------------------------------------------------
+    maybeScan(host, w) {
+      if (this.runTicks - this.scan.lastScanTick < SCAN_PERIOD) return;
+      const lethalPress = w.foes.some(
+        (f) => f.alive && f.lit && (f.danger === "deadly" || f.danger === "threat" && f.dist <= 2 || f.dist <= 1 && f.danger !== "prey")
+      );
+      const junk = this.bestBagJunkValue(w);
+      runScanPass({
+        scan: this.scan,
+        w,
+        nodes: this.h1001.nodes,
+        runTicks: this.runTicks,
+        chestBlockUntil: this.chestBlockUntil,
+        desire: this.desireXY,
+        bestBagJunkValue: junk,
+        skipHeavy: lethalPress && w.hp * 2 < w.maxHp
+      });
+      const flip = this.scan.pendingHighFlip;
+      if (flip && (flip.kind === "chest_safe" || flip.kind === "softblock_chest_exp")) {
+        const onWay = pathOnWay(flip, this.desireXY, w.tile);
+        const gate = phaseAllowsChestEvent(this.h1001.phase, onWay);
+        if (gate === "suppress") {
+          this.scan.pendingHighFlip = null;
+        } else if (gate === "queue") {
+          pushEnrouteStop(this.scan, {
+            id: flip.id,
+            kind: "chest",
+            x: flip.x,
+            y: flip.y,
+            want: true,
+            hv: true
+          });
+          this.scan.pendingHighFlip = null;
+          if (this.scan.lastFlip === SCAN_FLIP.chest_safe) this.scan.lastFlip = SCAN_FLIP.none;
+        }
+      }
+      void host;
+    }
+    bestBagJunkValue(w) {
+      var _a, _b;
+      const spare = (_b = (_a = w.seen) == null ? void 0 : _a.spareRoom) != null ? _b : -1;
+      if (spare >= 0) return Math.max(0, spare);
+      return 5;
+    }
+    afterChestOpened(host, w, stance) {
+      var _a, _b, _c;
+      const adj = (_c = (_a = w.seen) == null ? void 0 : _a.chestAdj) != null ? _c : (_b = w.seen) == null ? void 0 : _b.chest;
+      if (adj) dropChestRegister(this.h1001.nodes, w.depth, adj.x, adj.y);
+      const soft = this.h1001.nodes.get(`${w.depth}:chest`);
+      if (soft) dropChestRegister(this.h1001.nodes, w.depth, soft.x, soft.y);
+      this.scan.layer2UsedTick = this.runTicks;
+      this.scan.pendingHighFlip = null;
+      if (w.bagFree <= 0) {
+        this.bagFullUntil = this.runTicks + 600;
+      } else if (this.h1001.phaseResume) {
+      }
+      void stance;
+      void host;
+    }
+    drainAtTileLoot(host, w, stance) {
+      const at = this.scan.atTileLoot;
+      if (!at) return false;
+      if (this.runTicks > at.untilTick) {
+        this.scan.atTileLoot = null;
+        return false;
+      }
+      if (cheb(w.tile.x, w.tile.y, at.x, at.y) > 1) {
+        this.scan.atTileLoot = null;
+        return false;
+      }
+      if (host.pickupLoot()) {
+        this.h1001.topEvent = "floor_loot";
+        this.setStatus1001(host, w, stance, "at-tile loot");
+        host.equipUp();
+        return true;
+      }
+      if (w.bagFree <= 0 && w.loot) {
+        const value = 10;
+        const kindBand = 2;
+        const want = wantPickItem({
+          bagFree: 0,
+          kindBand,
+          value,
+          bestBagJunkValue: this.bestBagJunkValue(w),
+          foodNeeded: w.food <= 0 || w.hp < w.maxHp * 0.85,
+          shopAhead: !!this.mem(w, "shop")
+        });
+        if (want) {
+          pushWantLoot(this.scan, {
+            id: `${w.depth}:loot:${w.loot.x},${w.loot.y}`,
+            x: w.loot.x,
+            y: w.loot.y,
+            value,
+            kindBand
+          });
+          this.bagFullUntil = this.runTicks + 600;
+        }
+        this.scan.atTileLoot = null;
+        return false;
+      }
+      this.scan.atTileLoot = null;
+      return false;
+    }
+    drainWantLootQueue(host, w, stance) {
+      if (!this.scan.wantLootQueue.length) return false;
+      if (w.bagFree <= 0) return false;
+      const next = this.scan.wantLootQueue[0];
+      if (nodeThreat(w, next.x, next.y)) {
+        this.scan.wantLootQueue.shift();
+        return false;
+      }
+      if (cheb(w.tile.x, w.tile.y, next.x, next.y) <= 1) {
+        if (host.pickupLoot()) {
+          this.scan.wantLootQueue.shift();
+          this.h1001.topEvent = "loot_hv";
+          this.setStatus1001(host, w, stance, "queued loot");
+          host.equipUp();
+          return true;
+        }
+        this.scan.wantLootQueue.shift();
+        return false;
+      }
+      this.desireXY = { x: next.x, y: next.y };
+      host.walkTo(next.x, next.y);
+      this.h1001.topEvent = "loot_hv";
+      this.setStatus1001(host, w, stance, "walk queued loot");
+      return true;
+    }
+    evScanChestSafe(host, w, stance) {
+      var _a;
+      const flip = this.scan.pendingHighFlip;
+      if (!flip || flip.kind !== "chest_safe" && flip.kind !== "softblock_chest_exp") return false;
+      if (this.runTicks - this.scan.layer2UsedTick < SCAN_PERIOD && this.scan.layer2UsedTick >= 0) {
+        return false;
+      }
+      if (this.chestExposed(w)) return false;
+      const softActive = this.runTicks < this.chestBlockUntil;
+      const bypass = softBlockBypass(flip, softActive, this.desireXY, w.tile, this.h1001.nodes, w.depth);
+      if (!bypass) {
+        pushEnrouteStop(this.scan, {
+          id: flip.id,
+          kind: "chest",
+          x: flip.x,
+          y: flip.y,
+          want: true,
+          hv: true
+        });
+        this.scan.pendingHighFlip = null;
+        return false;
+      }
+      const onWay = pathOnWay(flip, this.desireXY, w.tile);
+      const gate = phaseAllowsChestEvent(this.h1001.phase, onWay);
+      if (gate !== "event") {
+        if (gate === "queue") {
+          pushEnrouteStop(this.scan, {
+            id: flip.id,
+            kind: "chest",
+            x: flip.x,
+            y: flip.y,
+            want: true,
+            hv: true
+          });
+        }
+        this.scan.pendingHighFlip = null;
+        return false;
+      }
+      const d = cheb(w.tile.x, w.tile.y, flip.x, flip.y);
+      this.h1001.topEvent = "chest_safe";
+      if (this.h1001.phase !== "TOOLS" && this.h1001.phase !== "FIRST_WEP" && this.h1001.phase !== "BOOT") {
+        this.h1001.phaseResume = (_a = this.h1001.phaseResume) != null ? _a : this.h1001.phase;
+      }
+      if (d > 1) {
+        this.desireXY = { x: flip.x, y: flip.y };
+        host.walkTo(flip.x, flip.y);
+        this.setStatus1001(host, w, stance, "scan chest");
+        return true;
+      }
+      if (this.tryOpenChestOnce(host, w, stance, { needBag: false, cool: 2, bypassSoft: true })) {
+        this.afterChestOpened(host, w, stance);
+        if (host.world().bagFree > 0 && this.h1001.phaseResume) {
+          this.h1001.phase = this.h1001.phaseResume;
+          this.h1001.phaseResume = null;
+        }
+        return true;
+      }
+      return false;
+    }
+    evScanLootHv(host, w, stance) {
+      const flip = this.scan.pendingHighFlip;
+      if (!flip || flip.kind !== "loot_hv") return false;
+      if (this.runTicks - this.scan.layer2UsedTick < SCAN_PERIOD && this.scan.layer2UsedTick >= 0) {
+        return false;
+      }
+      if (nodeThreat(w, flip.x, flip.y)) {
+        this.scan.pendingHighFlip = null;
+        return false;
+      }
+      const onWay = pathOnWay(flip, this.desireXY, w.tile);
+      const gate = phaseAllowsChestEvent(this.h1001.phase, onWay);
+      if (gate === "suppress") {
+        this.scan.pendingHighFlip = null;
+        return false;
+      }
+      if (gate === "queue") {
+        pushEnrouteStop(this.scan, {
+          id: flip.id,
+          kind: "loot",
+          x: flip.x,
+          y: flip.y,
+          want: true,
+          hv: true
+        });
+        this.scan.pendingHighFlip = null;
+        return false;
+      }
+      this.h1001.topEvent = "loot_hv";
+      if (w.bagFree <= 0) {
+        pushWantLoot(this.scan, {
+          id: flip.id,
+          x: flip.x,
+          y: flip.y,
+          value: 20,
+          kindBand: 2
+        });
+        this.scan.pendingHighFlip = null;
+        this.bagFullUntil = this.runTicks + 600;
+        return false;
+      }
+      const d = cheb(w.tile.x, w.tile.y, flip.x, flip.y);
+      if (d <= 1) {
+        if (host.pickupLoot()) {
+          this.scan.pendingHighFlip = null;
+          this.scan.layer2UsedTick = this.runTicks;
+          this.setStatus1001(host, w, stance, "scan HV loot");
+          host.equipUp();
+          if (this.h1001.phaseResume) {
+            this.h1001.phase = this.h1001.phaseResume;
+            this.h1001.phaseResume = null;
+          }
+          return true;
+        }
+        this.scan.pendingHighFlip = null;
+        return false;
+      }
+      this.desireXY = { x: flip.x, y: flip.y };
+      host.walkTo(flip.x, flip.y);
+      this.setStatus1001(host, w, stance, "walk HV loot");
+      return true;
+    }
+    /** Calm / phase consume: take next enroute stop if free. */
+    drainEnrouteStop(host, w, stance) {
+      if (!this.scan.enrouteStops.length) return false;
+      if (this.h1001.topEvent === "lethal" || this.h1001.topEvent === "emerg_food") return false;
+      const stop = this.scan.enrouteStops[0];
+      if (nodeThreat(w, stop.x, stop.y) && stop.kind !== "chest") {
+        this.scan.enrouteStops.shift();
+        return false;
+      }
+      const d = cheb(w.tile.x, w.tile.y, stop.x, stop.y);
+      if (stop.kind === "chest") {
+        if (d <= 1) {
+          this.scan.enrouteStops.shift();
+          if (this.tryOpenChestOnce(host, w, stance, { needBag: false, cool: 2, bypassSoft: true })) {
+            this.afterChestOpened(host, w, stance);
+            return true;
+          }
+          return false;
+        }
+        this.desireXY = { x: stop.x, y: stop.y };
+        host.walkTo(stop.x, stop.y);
+        this.setStatus1001(host, w, stance, "enroute chest");
+        return true;
+      }
+      if (stop.kind === "loot") {
+        if (w.bagFree <= 0) {
+          pushWantLoot(this.scan, {
+            id: stop.id,
+            x: stop.x,
+            y: stop.y,
+            value: stop.hv ? 20 : 1,
+            kindBand: stop.hv ? 2 : 4
+          });
+          this.scan.enrouteStops.shift();
+          return false;
+        }
+        if (d <= 1) {
+          this.scan.enrouteStops.shift();
+          if (host.pickupLoot()) {
+            this.setStatus1001(host, w, stance, "enroute loot");
+            return true;
+          }
+          return false;
+        }
+        if (!stop.hv && d > SHRIMP_ENROUTE_CHEB) {
+          this.scan.enrouteStops.shift();
+          return false;
+        }
+        this.desireXY = { x: stop.x, y: stop.y };
+        host.walkTo(stop.x, stop.y);
+        this.setStatus1001(host, w, stance, "enroute loot");
+        return true;
+      }
+      if (stop.kind === "pond") {
+        this.scan.enrouteStops.shift();
+        this.desireXY = { x: stop.x, y: stop.y };
+        host.walkTo(stop.x, stop.y);
+        this.setStatus1001(host, w, stance, "enroute pond");
+        return true;
+      }
+      this.scan.enrouteStops.shift();
+      this.desireXY = { x: stop.x, y: stop.y };
+      host.walkTo(stop.x, stop.y);
+      this.setStatus1001(host, w, stance, `enroute ${stop.kind}`);
+      return true;
     }
     evLethal(host, w, stance) {
       var _a, _b;
@@ -1243,9 +1856,24 @@
       const chased = w.foes.some(
         (f) => f.alive && f.lit && (f.danger === "deadly" || f.danger === "threat" && f.dist <= 3 || f.dist <= 1 && f.danger !== "prey")
       );
-      if (hpPct < 0.72 && emptyFood) return true;
       if (chased && emptyFood) return true;
+      if (hpPct < 0.25 && emptyFood) return true;
       return false;
+    }
+    /** True when ~30% empty unchased and a Layer-2 chest candidate is outlook-safe (7B). */
+    sevenBChestEligible(w) {
+      const hpPct = w.maxHp > 0 ? w.hp / w.maxHp : 1;
+      const emptyFood = w.food <= 0 && w.healReserve <= 0;
+      if (!emptyFood) return false;
+      if (hpPct >= 0.45 || hpPct < 0.25) return false;
+      const chased = w.foes.some(
+        (f) => f.alive && f.lit && (f.danger === "deadly" || f.danger === "threat" && f.dist <= 3 || f.dist <= 1 && f.danger !== "prey")
+      );
+      if (chased) return false;
+      const flip = this.scan.pendingHighFlip;
+      if (!flip || flip.kind !== "chest_safe" && flip.kind !== "softblock_chest_exp") return false;
+      if (this.chestExposed(w)) return false;
+      return true;
     }
     evEmergFood(host, w, stance) {
       if (!this.foodUrgency(w)) return false;
@@ -1349,7 +1977,7 @@
       return true;
     }
     evFloorLoot(host, w, stance) {
-      var _a;
+      var _a, _b;
       if (host.pickupLoot()) {
         this.h1001.topEvent = "floor_loot";
         this.setStatus1001(host, w, stance, "pickup");
@@ -1361,13 +1989,19 @@
         host.walkTo(w.loot.x, w.loot.y);
         return true;
       }
-      if (((_a = w.seen) == null ? void 0 : _a.chest) && w.seen.chestOpenable && !w.seen.chestBlocked && w.bagFree > 0 && this.runTicks >= this.chestBlockUntil) {
-        const threat = w.foes.some(
-          (f) => f.alive && f.lit && f.dist <= 2 && (f.danger === "threat" || f.danger === "deadly")
-        );
-        if (!threat && this.tryOpenChestOnce(host, w, stance, { needBag: false, cool: 2 })) {
-          this.h1001.topEvent = "floor_loot";
-          return true;
+      if (((_a = w.seen) == null ? void 0 : _a.chest) && w.seen.chestOpenable && !w.seen.chestBlocked) {
+        const adj = (_b = w.seen.chestAdj) != null ? _b : w.seen.chest;
+        const softActive = this.runTicks < this.chestBlockUntil;
+        const bypass = adj ? softBlockBypass(adj, softActive, this.desireXY, w.tile, this.h1001.nodes, w.depth) : !softActive;
+        if (bypass) {
+          const threat = w.foes.some(
+            (f) => f.alive && f.lit && f.dist <= 2 && (f.danger === "threat" || f.danger === "deadly")
+          );
+          if (!threat && this.tryOpenChestOnce(host, w, stance, { needBag: false, cool: 2, bypassSoft: true })) {
+            this.h1001.topEvent = "floor_loot";
+            this.afterChestOpened(host, w, stance);
+            return true;
+          }
         }
       }
       return false;
@@ -2591,6 +3225,14 @@
     chestBlockRemaining() {
       return Math.max(0, this.chestBlockUntil - this.runTicks);
     }
+    /** Format-8 SIT: remaining forge/anvil soft-block ticks (0 if clear). */
+    forgeBlockRemaining() {
+      return Math.max(0, this.forgeBlockUntil - this.runTicks);
+    }
+    /** Format-8 SIT: ScanState-backed cadence / queue ints (eng 2001). */
+    scanSit() {
+      return exportScanSit(this.scan, this.runTicks);
+    }
     /** Format-7 SIT: remaining tile soft-block ticks for (x,y). */
     tileBlockRemaining(x, y) {
       const until = this.tileBlock.get(`${x},${y}`);
@@ -3348,7 +3990,7 @@
       if (s.camp && !w.kitReady && w.depth <= 4 && s.anvil && w.oreCount > 0 && !w.anvilNearby) {
         return this.walkSeen(host, w, stance, s.anvil, "remembered camp");
       }
-      if (!starving && s.chest && !this.chestExposed(w) && this.runTicks >= this.chestBlockUntil && !s.chestBlocked) {
+      if (!starving && s.chest && !this.chestExposed(w) && !s.chestBlocked) {
         const reach = typeof s.chestReach === "number" ? s.chestReach : -1;
         const path = (_a = s.chestPath) != null ? _a : -1;
         const openable = !!s.chestOpenable;
@@ -3363,26 +4005,23 @@
             this.cool = 2;
             return true;
           }
-          if (host.world().bagFree <= 0) {
-          } else {
-          }
         }
-        const bagOk = host.world().bagFree > 0 || openable || dChest <= 1;
-        if (bagOk) {
-          if (openable || dChest <= 1) {
-          } else if (reach < 0 && path < 0) {
-            this.softBlockChest(host, w, s.chest.x, s.chest.y, "chest unreachable");
-          } else if (reach < 0 && (!adj || path >= 0 && path > 16)) {
-            this.softBlockChest(host, w, s.chest.x, s.chest.y, "chest no adj");
-          } else if (reach >= 0 && reach <= 16 || path >= 0 && path <= 16) {
-            const target = adj || s.chest;
-            if (adj && (w.tile.x !== adj.x || w.tile.y !== adj.y)) {
-              return this.walkSeen(host, w, stance, adj, "remembered chest");
-            }
-            if (!adj && dChest > 1) {
-              if (target.x !== w.tile.x || target.y !== w.tile.y) {
-                return this.walkSeen(host, w, stance, target, "remembered chest");
-              }
+        const softActive = this.runTicks < this.chestBlockUntil;
+        const bypass = adj ? softBlockBypass(adj, softActive, this.desireXY, w.tile, this.h1001.nodes, w.depth) : this.runTicks >= this.chestBlockUntil;
+        if (!bypass && softActive) {
+        } else if (openable || dChest <= 1) {
+        } else if (reach < 0 && path < 0) {
+          this.softBlockChest(host, w, s.chest.x, s.chest.y, "chest unreachable");
+        } else if (reach < 0 && (!adj || path >= 0 && path > 16)) {
+          this.softBlockChest(host, w, s.chest.x, s.chest.y, "chest no adj");
+        } else if (reach >= 0 && reach <= 16 || path >= 0 && path <= 16) {
+          const target = adj || s.chest;
+          if (adj && (w.tile.x !== adj.x || w.tile.y !== adj.y)) {
+            return this.walkSeen(host, w, stance, adj, "remembered chest");
+          }
+          if (!adj && dChest > 1) {
+            if (target.x !== w.tile.x || target.y !== w.tile.y) {
+              return this.walkSeen(host, w, stance, target, "remembered chest");
             }
           }
         }
@@ -3580,7 +4219,7 @@
      * Soft-block falls through (false) — do NOT keep status open chest.
      */
     tryOpenChestOnce(host, w, stance, opts) {
-      if (this.runTicks < this.chestBlockUntil) return false;
+      if (this.runTicks < this.chestBlockUntil && !opts.bypassSoft) return false;
       if (opts.needBag && w.bagFree <= 0) return false;
       if (!host.openChestOnce()) return false;
       const fp = `c${w.coins}|bf${w.bagFree}|f${w.food}|h${w.healReserve}`;
@@ -3599,6 +4238,7 @@
       }
       this.setStatus(host, w, stance, "open chest");
       this.cool = opts.cool;
+      this.scan.atTileLoot = { x: w.tile.x, y: w.tile.y, untilTick: this.runTicks + 6 };
       return true;
     }
     /**
