@@ -1,4 +1,4 @@
-/* phd auto-engine 2003 — pull via GET /api/auto-engine */
+/* phd auto-engine 2004 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -927,7 +927,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2003";
+  var AUTO_ENGINE_VERSION = "2004";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2114,7 +2114,7 @@
       if (tool) {
         this.setStatus1001(host, w, stance, `tools ${tool}`);
         if (host.acquireTool(tool)) {
-          if (tool === "rod" && (pond || w.pondKnown)) {
+          if (tool === "rod" && host.hasTool("rod") && (pond || w.pondKnown)) {
             const t = pond != null ? pond : w.gather;
             if (t) {
               this.lastFoodFarm = { depth: w.depth, x: t.x, y: t.y };
