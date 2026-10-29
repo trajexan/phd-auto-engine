@@ -1,4 +1,4 @@
-/* phd auto-engine 2015 — pull via GET /api/auto-engine */
+/* phd auto-engine 2016 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -733,14 +733,54 @@
     if (value > bestBagJunkValue && value > 0) return true;
     return false;
   }
+  function enroutePri(stop) {
+    if (stop.pri != null) return stop.pri;
+    if (stop.hv) return stop.kind === "chest" || stop.kind === "loot" ? 70 : 60;
+    switch (stop.kind) {
+      case "pond":
+        return 80;
+      // food high-pri calm — next, not emerg (t1648/t1650)
+      case "chest":
+        return 50;
+      case "loot":
+        return 30;
+      case "tree":
+      case "rock":
+        return 25;
+      case "shop":
+      case "anvil":
+        return 40;
+      case "altar":
+        return 15;
+      case "stairs":
+        return 20;
+      default:
+        return 10;
+    }
+  }
   function pushEnrouteStop(scan, stop) {
     if (scan.enrouteStops.some((s) => s.id === stop.id)) return;
+    const pri = enroutePri(stop);
+    stop = { ...stop, pri };
     if (scan.enrouteStops.length >= ENROUTE_STOPS_MAX) {
-      const dropIdx = scan.enrouteStops.findIndex((s) => !s.hv);
-      if (dropIdx >= 0 && stop.hv) scan.enrouteStops.splice(dropIdx, 1);
-      else if (scan.enrouteStops.length >= ENROUTE_STOPS_MAX) return;
+      let dropIdx = -1;
+      let dropScore = Infinity;
+      for (let i = 0; i < scan.enrouteStops.length; i++) {
+        const s = scan.enrouteStops[i];
+        const sp = enroutePri(s) + (s.hv ? 0.1 : 0);
+        if (sp < dropScore) {
+          dropScore = sp;
+          dropIdx = i;
+        }
+      }
+      if (dropIdx < 0) return;
+      const weakest = scan.enrouteStops[dropIdx];
+      if (pri < enroutePri(weakest) && (stop.hv || weakest.hv)) return;
+      scan.enrouteStops.splice(dropIdx, 1);
     }
-    scan.enrouteStops.push(stop);
+    let at = scan.enrouteStops.findIndex((s) => enroutePri(s) < pri);
+    if (at < 0) at = scan.enrouteStops.length;
+    scan.enrouteStops.splice(at, 0, stop);
   }
   function pushWantLoot(scan, loot) {
     if (scan.wantLootQueue.some((s) => s.id === loot.id)) return;
@@ -927,7 +967,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2015";
+  var AUTO_ENGINE_VERSION = "2016";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1000,8 +1040,13 @@
       if (id === "enter" || id === "eat_enter") s *= w.descendSafe && stance.stocked && hpPct > 0.7 ? 0.7 : 0.12;
     }
     if (ev.id === "pack_vs_pull") {
+      const chased = w.foes.some(
+        (f) => f.alive && f.lit && (f.watch === 3 || f.dist <= 2)
+      );
       if (id === "pull") s += 2;
       if (id === "fight_pack") s *= stance.hungry || hpPct < 0.6 ? 0.15 : 0.4;
+      if (id === "flee" && !chased) s *= 0.05;
+      if (id === "flee" && chased && (stance.hungry || hpPct < 0.35)) s += 1.2;
     }
     if (ev.id === "gold_low_food" || ev.id === "gold_fleeing" && (stance.hungry || food <= 2)) {
       if (id === "ignore") s += 2.5;
@@ -1059,8 +1104,16 @@
     if (t.gold && !w.foes.some((f) => f.alive && f.gold && f.lit)) return false;
     if (t.elite && !w.foes.some((f) => f.alive && (f.elite || f.alpha) && f.lit && !f.gold)) return false;
     if (t.trash_gte != null) {
-      const trash = w.foes.filter((f) => f.alive && f.lit && !f.gold && !f.elite && !f.alpha && !f.gateBoss && !f.boss).length;
+      const trash = w.foes.filter(
+        (f) => f.alive && f.lit && !f.gold && !f.elite && !f.alpha && !f.gateBoss && !f.boss && (f.dist <= 4 || f.watch === 3 || f.reach != null && f.reach >= 0 && f.reach <= 5)
+      ).length;
       if (trash < t.trash_gte) return false;
+      if (ev.id === "pack_vs_pull") {
+        const chased = w.foes.some(
+          (f) => f.alive && f.lit && (f.watch === 3 || f.dist <= 2)
+        );
+        if (!chased) return false;
+      }
     }
     if (t.food_lte != null && !(w.food <= t.food_lte)) return false;
     if (t.food_gt != null && !(w.food > t.food_gt)) return false;
@@ -1441,7 +1494,8 @@
       h.utilityPick = "";
       this.maybeScan(host, w);
       if (this.drainAtTileLoot(host, w, stance)) return true;
-      if (this.heroAtkRange(w) > 1) {
+      if (this.trySwapMeleeFromBag(host, w, stance)) return true;
+      if (!this.foodUrgency(w) && this.heroAtkRange(w) > 1) {
         const press = w.foes.filter((f) => f.alive && f.lit && f.dist <= this.heroAtkRange(w) + 1).sort((a, b) => a.dist - b.dist)[0];
         if (press && this.heroAtkRange(w) > this.foeAtkRange(press) && press.dist <= this.foeAtkRange(press)) {
           if (this.tryMaintainKiteBand(host, w, stance, press, "safe kite")) return true;
@@ -1466,6 +1520,7 @@
       }
       host.equipUp();
       if (this.drainEnrouteStop(host, w, stance)) return true;
+      if (this.evCalmFoodHighPri(host, w, stance)) return true;
       if (this.runPhase1001(host, w, stance)) return true;
       if (this.runCalm1001(host, w, stance)) return true;
       this.setStatus1001(host, w, stance, "explore");
@@ -1806,6 +1861,7 @@
       }
       if (stop.kind === "pond") {
         this.scan.enrouteStops.shift();
+        if (!host.hasTool("rod")) return false;
         this.desireXY = { x: stop.x, y: stop.y };
         host.walkTo(stop.x, stop.y);
         this.setStatus1001(host, w, stance, "enroute pond");
@@ -1867,18 +1923,24 @@
      * Urgency ONLY when:
      *   (1) low HP (~<72%) AND no food/heal, OR
      *   (2) chased by lit threat/deadly (or melee non-prey) with empty food.
-     * NOT urgency → never panic (no emerg find pond / FOOD_BUFFER rush).
-     * Calm healthy start (full-ish HP, nothing pressing) → kit/TOOLS as normal.
-     * stance.hungry / food=0 alone is NOT urgency.
+     * t1648: Layer-1 emerg ONLY chased+empty. Unchased empty/hungry → calm high-pri
+     * (evCalmFoodHighPri), not emerg find-pond interrupt.
+     * Calm healthy start → kit/TOOLS as normal. stance.hungry / food=0 alone ≠ emerg.
      */
     foodUrgency(w) {
-      const hpPct = w.maxHp > 0 ? w.hp / w.maxHp : 1;
       const emptyFood = w.food <= 0 && w.healReserve <= 0;
       const chased = w.foes.some(
-        (f) => f.alive && f.lit && (f.danger === "deadly" || f.danger === "threat" && f.dist <= 3 || f.dist <= 1 && f.danger !== "prey")
+        (f) => f.alive && f.lit && (f.danger === "deadly" || f.danger === "threat" && f.dist <= 3 || f.dist <= 1 && f.danger !== "prey" || f.watch === 3)
       );
       if (chased && emptyFood) return true;
-      if (hpPct < 0.25 && emptyFood) return true;
+      return false;
+    }
+    /** Unchased empty heal / hungry — calm high-pri food, not Layer-1 emerg (t1648). */
+    calmFoodHighPri(w, stance) {
+      if (this.foodUrgency(w)) return false;
+      const emptyFood = w.food <= 0 && w.healReserve <= 0;
+      if (emptyFood) return true;
+      if (stance.hungry && w.food < stance.minFood) return true;
       return false;
     }
     /** True when ~30% empty unchased and a Layer-2 chest candidate is outlook-safe (7B). */
@@ -1903,34 +1965,90 @@
       if (this.h1001.phase !== "FOOD_BUFFER" && this.h1001.phase !== "BOOT" && this.h1001.phase !== "TOOLS") {
         this.h1001.phaseResume = this.h1001.phase;
       }
+      return this.runFoodSeek(host, w, stance, "emerg");
+    }
+    /**
+     * Shared food-seek body for true emerg (chased) and calm high-pri (unchased).
+     * t1645/t1648: never fish / find-pond without rod — fund chop·sell·buy or yield.
+     * labelPrefix 'emerg' | 'food' for status (unchased never says emerg find pond).
+     */
+    runFoodSeek(host, w, stance, labelPrefix) {
       if (w.food > 0 && w.hp < w.maxHp * 0.85) host.eat();
       if (w.food <= 0) host.buyFoodIfCritical();
       if (w.rawFish > 0) {
         if (!w.hasFire && w.hasLogs) host.lightFireOnce();
         host.cookOnce();
-        this.setStatus1001(host, w, stance, "emerg cook");
+        this.setStatus1001(host, w, stance, `${labelPrefix} cook`);
         return true;
       }
       const pond = this.mem(w, "pond");
-      if (!host.hasTool("rod") && (w.pondKnown || pond) && this.canFundRodNow(w)) {
-        this.setStatus1001(host, w, stance, "emerg rod");
-        if (host.acquireTool("rod")) return true;
+      const tree = this.mem(w, "tree");
+      const hasRod = host.hasTool("rod");
+      if (!hasRod) {
+        if ((w.pondKnown || pond) && this.canFundRodNow(w)) {
+          this.setStatus1001(host, w, stance, `${labelPrefix} rod`);
+          if (host.acquireTool("rod")) return true;
+        }
+        if (this.tryFundBeginnerToolFarm(host, w, stance, tree, pond)) return true;
+        if (labelPrefix === "emerg" && w.hub) {
+          this.desireXY = { x: w.hub.x, y: w.hub.y };
+          host.walkTo(w.hub.x, w.hub.y);
+          this.setStatus1001(host, w, stance, "emerg hub fund");
+          return true;
+        }
+        if (labelPrefix === "food") {
+          this.h1001.phase = this.beginnerToolsIncomplete(host) ? "TOOLS" : "FOOD_BUFFER";
+          return false;
+        }
+        this.h1001.topEvent = "none";
+        return false;
       }
       if (pond || w.gather && w.pondKnown) {
         const t = pond != null ? pond : w.gather;
-        this.setStatus1001(host, w, stance, "emerg fish");
+        this.setStatus1001(host, w, stance, `${labelPrefix} fish`);
         this.lastFoodFarm = { depth: w.depth, x: t.x, y: t.y };
-        return this.tryGather(host, w, stance, "emerg fish") || this.walkToTile(host, t.x, t.y);
+        this.desireXY = { x: t.x, y: t.y };
+        return this.tryGather(host, w, stance, `${labelPrefix} fish`) || this.walkToTile(host, t.x, t.y);
       }
       if (this.lastFoodFarm && this.lastFoodFarm.depth === w.depth) {
-        this.setStatus1001(host, w, stance, "emerg last farm");
+        this.setStatus1001(host, w, stance, `${labelPrefix} last farm`);
+        this.desireXY = { x: this.lastFoodFarm.x, y: this.lastFoodFarm.y };
         host.walkTo(this.lastFoodFarm.x, this.lastFoodFarm.y);
         return true;
       }
       this.h1001.phase = "FOOD_BUFFER";
-      this.setStatus1001(host, w, stance, "emerg find pond");
-      if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+      this.setStatus1001(host, w, stance, `${labelPrefix} find pond`);
+      if (w.explore) {
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
+        host.walkTo(w.explore.x, w.explore.y);
+      }
       return true;
+    }
+    /**
+     * t1648: unchased food-seek as calm high-priority (before phase skills, after
+     * enrouteStops) — not Layer-1 emerg. Lets calm queue drain first.
+     */
+    evCalmFoodHighPri(host, w, stance) {
+      var _a;
+      if (!this.calmFoodHighPri(w, stance)) return false;
+      if (this.h1001.phase !== "FOOD_BUFFER" && this.h1001.phase !== "BOOT" && this.h1001.phase !== "TOOLS") {
+        this.h1001.phaseResume = (_a = this.h1001.phaseResume) != null ? _a : this.h1001.phase;
+      }
+      this.h1001.phase = "FOOD_BUFFER";
+      this.h1001.topEvent = "none";
+      const pond = this.mem(w, "pond");
+      if (host.hasTool("rod") && pond) {
+        pushEnrouteStop(this.scan, {
+          id: `${w.depth}:pond:${pond.x},${pond.y}`,
+          kind: "pond",
+          x: pond.x,
+          y: pond.y,
+          want: true,
+          hv: false,
+          pri: 90
+        });
+      }
+      return this.runFoodSeek(host, w, stance, "food");
     }
     evMobSudden(host, w, stance) {
       const melee = w.foes.filter((f) => f.alive && f.lit && f.dist <= 1).sort((a, b) => a.dist - b.dist)[0];
@@ -2602,20 +2720,7 @@
         host.cookOnce();
         return true;
       }
-      if (!host.hasTool("rod") && (w.pondKnown || pond) && this.canFundRodNow(w)) {
-        if (host.acquireTool("rod")) return true;
-      }
-      if (pond && host.hasTool("rod")) {
-        this.lastFoodFarm = { depth: w.depth, x: pond.x, y: pond.y };
-        if (this.walkToTile(host, pond.x, pond.y)) return true;
-        return this.tryGather(host, w, stance, "fish buffer");
-      }
-      host.buyFoodIfCritical();
-      if (w.explore) {
-        host.walkTo(w.explore.x, w.explore.y);
-        return true;
-      }
-      return false;
+      return this.runFoodSeek(host, w, stance, "food");
     }
     runCalm1001(host, w, stance) {
       var _a, _b;
@@ -2693,6 +2798,7 @@
         return this.tryGather(host, w, stance, "util chop");
       }
       if (kind === "fish" || kind === "pond") {
+        if (!host.hasTool("rod")) return false;
         if (this.walkToTile(host, x, y)) return true;
         return this.tryGather(host, w, stance, "util fish");
       }
@@ -3735,6 +3841,35 @@
       this.cool = 1;
       return true;
     }
+    /**
+     * t1645/t1649: style wand/bow + adjacent foe → equip bag melee so MM doesn't
+     * fizzle / refuse to fight (sword in bag). Uses gearStats.style when present.
+     */
+    trySwapMeleeFromBag(host, w, stance) {
+      var _a, _b, _c, _d;
+      if (!w.hasStyleWeapon) return false;
+      const adj = w.foes.some((f) => f.alive && f.lit && f.dist <= 1);
+      if (!adj) return false;
+      const bag = (_b = (_a = host.listBagCombatGear) == null ? void 0 : _a.call(host)) != null ? _b : [];
+      const weps = bag.filter((b) => b.slot === "weapon");
+      if (!weps.length) return false;
+      let best = null;
+      for (const b of weps) {
+        const g2 = lookupGear(host, b.id);
+        const style = (_c = g2 == null ? void 0 : g2.style) != null ? _c : "none";
+        if (style === "ranged" || style === "magic") continue;
+        if (style === "melee" || style === "none" || !g2) {
+          if (!best || b.offense > best.offense) best = { slotIndex: b.slotIndex, offense: b.offense };
+        }
+      }
+      if (!best) return false;
+      if ((_d = host.equipBagItem) == null ? void 0 : _d.call(host, best.slotIndex)) {
+        this.setStatus1001(host, w, stance, "swap melee");
+        this.cool = 1;
+        return true;
+      }
+      return false;
+    }
     /** Engage, but first open safe kite band when we out-range them (t1619). */
     engageSmart(host, w, stance, foe, label = "safe kite") {
       if (this.tryMaintainKiteBand(host, w, stance, foe, label)) return;
@@ -3917,8 +4052,8 @@
       if (/pond|fish|farm food|hoard food|enroute pond/i.test(st) && w.gather) {
         return { key: `gather:${w.gather.x},${w.gather.y}`, x: w.gather.x, y: w.gather.y };
       }
-      if (/find pond/i.test(st) && !w.gather && w.explore) {
-        return { key: `explore:${w.explore.x},${w.explore.y}`, x: w.explore.x, y: w.explore.y };
+      if (/find pond/i.test(st) && !w.gather && this.desireXY && w.explore) {
+        return { key: `explore:${this.desireXY.x},${this.desireXY.y}`, x: this.desireXY.x, y: this.desireXY.y };
       }
       if (/remembered chest|open chest/i.test(st) && ((_a = w.seen) == null ? void 0 : _a.chest)) {
         const adj = w.seen.chestAdj;
@@ -4111,7 +4246,7 @@
         if (w.gather && host.hasTool("pickaxe") && w.bagFree > 0 && this.tryGather(host, w, stance, "mine ore")) {
           return;
         }
-        if (w.food === 0 && w.healReserve === 0 && w.pondKnown && w.gather && this.tryGather(host, w, stance, "farm food")) {
+        if (w.food === 0 && w.healReserve === 0 && host.hasTool("rod") && w.pondKnown && w.gather && this.tryGather(host, w, stance, "farm food")) {
           this.rememberFoodFarm(w);
           return;
         }
