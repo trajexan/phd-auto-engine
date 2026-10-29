@@ -1,4 +1,4 @@
-/* phd auto-engine 2008 — pull via GET /api/auto-engine */
+/* phd auto-engine 2009 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -927,7 +927,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2008";
+  var AUTO_ENGINE_VERSION = "2009";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1441,6 +1441,12 @@
       h.utilityPick = "";
       this.maybeScan(host, w);
       if (this.drainAtTileLoot(host, w, stance)) return true;
+      if (this.heroAtkRange(w) > 1) {
+        const press = w.foes.filter((f) => f.alive && f.lit && f.dist <= this.heroAtkRange(w) + 1).sort((a, b) => a.dist - b.dist)[0];
+        if (press && this.heroAtkRange(w) > this.foeAtkRange(press) && press.dist <= this.foeAtkRange(press)) {
+          if (this.tryMaintainKiteBand(host, w, stance, press, "safe kite")) return true;
+        }
+      }
       if (this.evLethal(host, w, stance)) return true;
       if (this.sevenBChestEligible(w) && this.evScanChestSafe(host, w, stance)) return true;
       if (this.evEmergFood(host, w, stance)) return true;
@@ -1838,6 +1844,11 @@
         this.cool = 2;
         return true;
       }
+      if (w.hasStyleWeapon && pressFoe) {
+        this.engageSmart(host, w, stance, pressFoe, "lethal kite");
+        this.cool = 1;
+        return true;
+      }
       if (!w.hasStyleWeapon && (pressFoe == null ? void 0 : pressFoe.ranged)) {
         if (this.tryCoverBreakLos(host, w, stance, pressFoe, "lethal cover")) return true;
         host.engage(pressFoe);
@@ -1936,7 +1947,7 @@
         this.setStatus1001(host, w, stance, host.fightOutlook ? "mob kite outlook" : "mob kite");
         return true;
       }
-      host.engage(melee);
+      this.engageSmart(host, w, stance, melee, "melee");
       this.setStatus1001(host, w, stance, "mob engage");
       return true;
     }
@@ -2415,7 +2426,7 @@
         (f) => f.alive && f.lit && f.dist <= 8 && (f.danger === "prey" || f.danger === "even") && this.preferEngage(host, w, f)
       ).sort((a, b) => a.dist - b.dist)[0];
       if (prey && (w.hasMetalWeapon || w.hasStyleWeapon || w.hasArmour)) {
-        host.engage(prey);
+        this.engageSmart(host, w, stance, prey, "prey");
         this.setStatus1001(host, w, stance, "fund mobs");
         return true;
       }
@@ -2716,7 +2727,7 @@
       if (combatOpen && !w.anvilNearby) mobUrge += 0.2;
       const preferMobs = this.wornEnough(w) && mobUrge >= craftUrge && combatOpen;
       if (preferMobs) {
-        host.engage(trash);
+        this.engageSmart(host, w, stance, trash, "trash");
         this.setStatus(host, w, stance, "farm coins \u2192 mobs");
         this.cool = 1;
         return true;
@@ -2743,7 +2754,7 @@
         if (this.tryGather(host, w, stance, "farm coins \u2192 craft sell")) return true;
       }
       if (combatOpen && this.wornEnough(w)) {
-        host.engage(trash);
+        this.engageSmart(host, w, stance, trash, "trash");
         this.setStatus(host, w, stance, "farm coins \u2192 mobs");
         this.cool = 1;
         return true;
@@ -2816,7 +2827,7 @@
         (f) => f.alive && f.lit && !f.gold && !f.elite && !f.alpha && !f.gateBoss && !f.boss && (f.danger === "prey" || f.danger === "even") && f.dist <= 7 && !(emptyHeal && f.danger === "even" && f.dist > 2)
       ).sort((a, b) => a.dist - b.dist)[0];
       if (trash && this.wornEnough(w) && hpPct >= 0.5) {
-        host.engage(trash);
+        this.engageSmart(host, w, stance, trash, "trash");
         this.setStatus(host, w, stance, "farm ceiling \u2192 mob XP");
         this.cool = 1;
         return true;
@@ -2902,7 +2913,7 @@
         return da - db || a.dist - b.dist;
       })[0];
       if (push && this.wornEnough(w)) {
-        host.engage(push);
+        this.engageSmart(host, w, stance, push, "push");
         this.setStatus(host, w, stance, push.danger === "prey" ? "fight past elite" : "push elite");
         this.cool = 2;
         this.eliteThrash = 0;
@@ -3213,16 +3224,16 @@
         const foe = this.pickForEvent(w, ev, stance);
         if (foe && foe.dist > 1 && !this.wornEnough(w)) {
           host.clearEngage();
-        } else if (foe) host.engage(foe);
+        } else if (foe) this.engageSmart(host, w, stance, foe, "fight");
         else if (id.includes("enter") || id === "clear" || id === "eat_clear") {
           const t = this.pickThreat(w, w.descendSafe && !stance.hungry, !stance.hungry);
-          if (t && (t.dist <= 1 || this.wornEnough(w))) host.engage(t);
+          if (t && (t.dist <= 1 || this.wornEnough(w))) this.engageSmart(host, w, stance, t, "fork");
         }
       }
       if (id === "ignore" || id === "flee" || id === "retreat" || id === "save") {
         const melee = w.foes.filter((f) => f.alive && f.lit && f.dist <= 2).sort((a, b) => a.dist - b.dist)[0];
         if (melee && (id === "flee" || id === "retreat" || id === "ignore") && (melee.dist <= 1 || this.wornEnough(w))) {
-          host.engage(melee);
+          this.engageSmart(host, w, stance, melee, "melee");
         } else {
           host.clearEngage();
           const hpPctF = w.maxHp > 0 ? w.hp / w.maxHp : 1;
@@ -3246,17 +3257,17 @@
         const meleeReach = this.wornEnough(w) ? 2 : 1;
         const melee = w.foes.filter((f) => f.alive && f.lit && f.dist <= meleeReach).sort((a, b) => a.dist - b.dist)[0];
         if (melee && (!canStairs || melee.danger === "deadly" || melee.danger === "threat")) {
-          host.engage(melee);
+          this.engageSmart(host, w, stance, melee, "melee");
         } else if (canStairs) {
           if (!this.walkStairsStrive(host, w, stance, "fork stairs")) {
-            if (melee) host.engage(melee);
+            if (melee) this.engageSmart(host, w, stance, melee, "melee");
             else if (w.explore) {
               host.clearEngage();
               host.walkTo(w.explore.x, w.explore.y);
             }
           }
         } else if (melee) {
-          host.engage(melee);
+          this.engageSmart(host, w, stance, melee, "melee");
         } else if (w.explore) {
           host.clearEngage();
           host.walkTo(w.explore.x, w.explore.y);
@@ -3264,7 +3275,7 @@
       }
       if (id === "pull") {
         const trash = w.foes.filter((f) => f.alive && f.lit && !f.gold && !f.elite && !f.alpha && !f.gateBoss && !f.boss && f.danger !== "deadly").sort((a, b) => a.dist - b.dist);
-        if (trash[0] && (trash[0].dist <= 1 || this.wornEnough(w))) host.engage(trash[0]);
+        if (trash[0] && (trash[0].dist <= 1 || this.wornEnough(w))) this.engageSmart(host, w, stance, trash[0], "trash");
         else if (w.explore) {
           host.clearEngage();
           host.walkTo(w.explore.x, w.explore.y);
@@ -3520,13 +3531,90 @@
       this.cool = 1;
       return true;
     }
+    /** Hero vs foe reach. Missing atkRange (pre-0.5.719 host): style→4, else 1. */
+    heroAtkRange(w) {
+      if (w.atkRange != null && w.atkRange >= 1) return w.atkRange;
+      return w.hasStyleWeapon ? 4 : 1;
+    }
+    foeAtkRange(foe) {
+      var _a;
+      return Math.max(1, (_a = foe.atkRange) != null ? _a : 1);
+    }
+    /**
+     * t1619: if myRange > foeRange, safe band is foeRange+1 .. myRange.
+     * Both 1 → melee kite (no safe band). Returns true when a walk was issued.
+     */
+    tryMaintainKiteBand(host, w, stance, foe, label) {
+      const myR = this.heroAtkRange(w);
+      const foeR = this.foeAtkRange(foe);
+      if (myR <= foeR) return false;
+      const ideal = foeR + 1;
+      const hx = w.tile.x;
+      const hy = w.tile.y;
+      const dist = Math.max(Math.abs(hx - foe.x), Math.abs(hy - foe.y));
+      if (dist >= ideal && dist <= myR) {
+        if (foe.ranged && typeof host.hasLos === "function" && !host.hasLos(hx, hy, foe.x, foe.y)) {
+        } else {
+          return false;
+        }
+      }
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+      let best = null;
+      for (const [dx, dy] of dirs) {
+        const nx = hx + dx;
+        const ny = hy + dy;
+        if (!host.isWalkable(nx, ny)) continue;
+        if (w.foes.some((f) => f.alive && f.x === nx && f.y === ny)) continue;
+        const nd = Math.max(Math.abs(nx - foe.x), Math.abs(ny - foe.y));
+        if (nd > myR && dist <= myR) continue;
+        let score = 0;
+        if (dist < ideal) {
+          if (nd <= dist) continue;
+          score += (nd - dist) * 40;
+          score -= Math.abs(nd - ideal) * 15;
+          if (nd >= ideal) score += 30;
+          if (nd <= foeR) score -= 50;
+        } else if (dist > myR) {
+          if (nd >= dist) continue;
+          score += (dist - nd) * 40;
+          score -= Math.abs(nd - ideal) * 15;
+          if (nd >= ideal && nd <= myR) score += 30;
+          if (nd <= foeR) score -= 40;
+        } else {
+          if (nd < ideal || nd > myR) continue;
+          score += 20;
+        }
+        if (typeof host.hasLos === "function") {
+          if (host.hasLos(nx, ny, foe.x, foe.y)) score += 25;
+          else score -= 20;
+        }
+        score += this.chokeScore(host, nx, ny);
+        if (!best || score > best.score) best = { x: nx, y: ny, score };
+      }
+      if (!best) return false;
+      host.engage(foe);
+      host.walkTo(best.x, best.y);
+      this.setStatus1001(host, w, stance, label);
+      this.cool = 1;
+      return true;
+    }
+    /** Engage, but first open safe kite band when we out-range them (t1619). */
+    engageSmart(host, w, stance, foe, label = "safe kite") {
+      if (this.tryMaintainKiteBand(host, w, stance, foe, label)) return;
+      host.engage(foe);
+    }
     /**
      * One walkable step that increases Chebyshev distance from nearby press foes,
-     * biased toward hub. Returns true if a walk was issued.
+     * biased toward hub. Style with range advantage uses safe band (t1619).
+     * Returns true if a walk was issued.
      */
     stepAway(host, w, stance, label) {
       const press = w.foes.filter((f) => f.alive && f.lit && f.dist <= 2);
       if (!press.length) return false;
+      const keep = press.slice().sort((a, b) => a.dist - b.dist)[0];
+      if (this.heroAtkRange(w) > this.foeAtkRange(keep)) {
+        if (this.tryMaintainKiteBand(host, w, stance, keep, label)) return true;
+      }
       const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
       let best = null;
       const curMin = Math.min(...press.map((f) => f.dist));
@@ -3554,9 +3642,7 @@
       }
       if (!best) return false;
       if (w.hasStyleWeapon) {
-        const keep = press.slice().sort((a, b) => a.dist - b.dist)[0];
-        if (keep) host.engage(keep);
-        else host.clearEngage();
+        host.engage(keep);
       } else {
         host.clearEngage();
       }
@@ -4253,7 +4339,7 @@
       const foe = w.foes.filter((f) => f.alive && f.lit && !f.boss && !f.gateBoss && f.dist <= 5).sort((a, b) => a.dist - b.dist)[0];
       const packed = foe ? (s.ways || []).some((wy) => wy.mobs >= 3 && wy.dx === Math.sign(foe.x - w.tile.x) && wy.dy === Math.sign(foe.y - w.tile.y)) : false;
       if (foe && !packed && ((_a = s.drag) != null ? _a : 0) < 100 && this.wornEnough(w)) {
-        host.engage(foe);
+        this.engageSmart(host, w, stance, foe, "fight");
         this.setStatus(host, w, stance, "camp fight");
         this.cool = 2;
         return true;
