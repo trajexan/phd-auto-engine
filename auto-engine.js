@@ -1,4 +1,4 @@
-/* phd auto-engine 2006 — pull via GET /api/auto-engine */
+/* phd auto-engine 2007 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -927,7 +927,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2006";
+  var AUTO_ENGINE_VERSION = "2007";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1891,7 +1891,7 @@
         return true;
       }
       const pond = this.mem(w, "pond");
-      if (!host.hasTool("rod") && (w.pondKnown || pond)) {
+      if (!host.hasTool("rod") && (w.pondKnown || pond) && this.canFundRodNow(w)) {
         this.setStatus1001(host, w, stance, "emerg rod");
         if (host.acquireTool("rod")) return true;
       }
@@ -2098,6 +2098,10 @@
       }
       return false;
     }
+    /** Rod shop is 30c; fletch needs ≥1 spare log. Else acquireTool only walks shop (t1612). */
+    canFundRodNow(w) {
+      return w.coins >= 30 || w.logCount >= 1;
+    }
     phaseTools1001(host, w, stance) {
       var _a, _b;
       const rock = this.mem(w, "rock");
@@ -2115,7 +2119,8 @@
       }
       if (tool) {
         this.setStatus1001(host, w, stance, `tools ${tool}`);
-        if (host.acquireTool(tool)) {
+        const tryAcquire = tool !== "rod" || host.hasTool("rod") || this.canFundRodNow(w);
+        if (tryAcquire && host.acquireTool(tool)) {
           if (tool === "rod" && host.hasTool("rod") && (pond || w.pondKnown)) {
             const t = pond != null ? pond : w.gather;
             if (t) {
@@ -2458,7 +2463,7 @@
         host.cookOnce();
         return true;
       }
-      if (!host.hasTool("rod") && (w.pondKnown || pond)) {
+      if (!host.hasTool("rod") && (w.pondKnown || pond) && this.canFundRodNow(w)) {
         if (host.acquireTool("rod")) return true;
       }
       if (pond && host.hasTool("rod")) {
