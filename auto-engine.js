@@ -1,4 +1,4 @@
-/* phd auto-engine 2023 — pull via GET /api/auto-engine */
+/* phd auto-engine 2024 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -967,7 +967,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2023";
+  var AUTO_ENGINE_VERSION = "2024";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2330,6 +2330,23 @@
     beginnerToolsIncomplete(host) {
       return !host.hasTool("pickaxe") || !host.hasTool("hatchet") || !host.hasTool("rod");
     }
+    /**
+     * t1708 s5djrb: shop round-trip / util only when a sell can actually fund.
+     * Mirrors trySellUnusedOnce gates so calm does not claim shop with a no-op.
+     */
+    shopVisitWorth(host, w) {
+      if (this.runTicks < this.sellUnusedBlockUntil) {
+        return w.oreCount > 2;
+      }
+      if (this.hasBagCookables(w) && this.canCookBagCookables(host, w)) return false;
+      const pond = this.resolvePond(w);
+      const farmOk = !!pond || w.pondKnown || !!this.lastFoodFarm && this.lastFoodFarm.depth === w.depth;
+      if (this.foodPathEmpty(w) && host.hasTool("rod") && farmOk) return false;
+      if (this.foodPathEmpty(w) && host.hasTool("rod") && !this.hasSellableMats(w) && !this.hasBagCookables(w)) {
+        return false;
+      }
+      return this.hasSellableMats(w) || this.hasBagCookables(w) || w.logCount > 1 || w.oreCount > 2;
+    }
     evAltar(host, w, stance) {
       const altar = this.mem(w, "altar");
       if (!altar) return false;
@@ -3024,12 +3041,14 @@
     }
     runCalm1001(host, w, stance) {
       var _a, _b;
-      const chain = buildRoundTrip(this.h1001.nodes, w).filter((n) => {
+      const toolsBootstrap = this.h1001.phase === "TOOLS" && this.beginnerToolsIncomplete(host);
+      const chain = toolsBootstrap ? [] : buildRoundTrip(this.h1001.nodes, w).filter((n) => {
         if (n.kind === "altar") {
           if (this.beginnerToolsIncomplete(host) || this.h1001.phase === "TOOLS") return false;
           return this.altarActReady(w) !== false;
         }
         if (n.kind === "anvil") return w.oreCount > 0;
+        if (n.kind === "shop" && !this.shopVisitWorth(host, w)) return false;
         return true;
       });
       if (chain.length >= 2) {
@@ -3048,6 +3067,10 @@
         if (o.id === "anvil") return w.oreCount > 0;
         if (o.id === "altar" || o.id === "runecraft") {
           if (this.beginnerToolsIncomplete(host) || this.h1001.phase === "TOOLS") return false;
+        }
+        if (o.id === "shop") {
+          if (toolsBootstrap) return false;
+          if (!this.shopVisitWorth(host, w)) return false;
         }
         return true;
       });
@@ -3077,6 +3100,7 @@
         return host.forgeWieldedOnce() || this.wantSmithKit(w) && host.smithKitOnce() || host.craftGemRingOnce();
       }
       if (kind === "shop") {
+        if (!this.shopVisitWorth(host, w)) return false;
         if (this.walkToTile(host, x, y, 1)) return true;
         return this.trySellUnusedOnce(host, w) || host.sellOreKeep(2);
       }
