@@ -1,4 +1,4 @@
-/* phd auto-engine 2025 — pull via GET /api/auto-engine */
+/* phd auto-engine 2026 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -971,7 +971,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2025";
+  var AUTO_ENGINE_VERSION = "2026";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1552,8 +1552,8 @@
       }
       if (this.evLethal(host, w, stance)) return true;
       if (this.sevenBChestEligible(w) && this.evScanChestSafe(host, w, stance)) return true;
-      if (this.evEmergFood(host, w, stance)) return true;
       if (this.evMobSudden(host, w, stance)) return true;
+      if (this.evEmergFood(host, w, stance)) return true;
       if (this.evScanChestSafe(host, w, stance)) return true;
       if (this.evScanLootHv(host, w, stance)) return true;
       if (this.drainWantLootQueue(host, w, stance)) return true;
@@ -2065,6 +2065,28 @@
         }
         this.h1001.topEvent = "none";
         return false;
+      }
+      if (!host.hasTool("hatchet")) {
+        const anvil = this.mem(w, "anvil");
+        if (this.canFundToolNow("hatchet", w, anvil) && host.acquireTool("hatchet")) {
+          this.setStatus1001(host, w, stance, `${labelPrefix} hatchet`);
+          return true;
+        }
+        if (this.hasBagCookables(w) && !this.canCookBagCookables(host, w)) {
+          if (this.trySellUnusedOnce(host, w)) {
+            this.setStatus1001(host, w, stance, `${labelPrefix} sell raw`);
+            return true;
+          }
+          const shop = this.mem(w, "shop");
+          if (shop) {
+            this.setStatus1001(host, w, stance, `${labelPrefix} sell raw`);
+            this.desireXY = { x: shop.x, y: shop.y };
+            host.walkTo(shop.x, shop.y);
+            return true;
+          }
+          this.setStatus1001(host, w, stance, `${labelPrefix} sell raw`);
+          return true;
+        }
       }
       if (pond || w.gather && w.pondKnown) {
         const t = pond != null ? pond : w.gather;
