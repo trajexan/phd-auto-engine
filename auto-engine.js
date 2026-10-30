@@ -1,4 +1,4 @@
-/* phd auto-engine 2016 — pull via GET /api/auto-engine */
+/* phd auto-engine 2017 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -967,7 +967,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2016";
+  var AUTO_ENGINE_VERSION = "2017";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1246,6 +1246,10 @@
       __publicField(this, "lastImproveTick", 0);
       /** Last successful food-farm tile (depth + xy) — food fell → walk back (e18). */
       __publicField(this, "lastFoodFarm", null);
+      /** Eng 2017: sellUnusedOnce walk thrash — no coin/bag progress → cool-down. */
+      __publicField(this, "sellUnusedFailStreak", 0);
+      __publicField(this, "sellUnusedBlockUntil", 0);
+      __publicField(this, "sellUnusedProgKey", "");
       /**
        * e44: last tree chop tile (cook-fuel fallback when raw waits and bag has no logs).
        * Remembered across floors like lastFoodFarm; not cleared on every stuck rethink.
@@ -1981,7 +1985,7 @@
         this.setStatus1001(host, w, stance, `${labelPrefix} cook`);
         return true;
       }
-      const pond = this.mem(w, "pond");
+      const pond = this.resolvePond(w);
       const tree = this.mem(w, "tree");
       const hasRod = host.hasTool("rod");
       if (!hasRod) {
@@ -2008,7 +2012,11 @@
         this.setStatus1001(host, w, stance, `${labelPrefix} fish`);
         this.lastFoodFarm = { depth: w.depth, x: t.x, y: t.y };
         this.desireXY = { x: t.x, y: t.y };
-        return this.tryGather(host, w, stance, `${labelPrefix} fish`) || this.walkToTile(host, t.x, t.y);
+        if (this.walkToTile(host, t.x, t.y)) return true;
+        if (this.tryGather(host, w, stance, `${labelPrefix} fish`)) return true;
+        const attempt = host.gatherAt(t.x, t.y);
+        if (attempt.ok || /^enroute$/i.test(attempt.reason || "")) return true;
+        return true;
       }
       if (this.lastFoodFarm && this.lastFoodFarm.depth === w.depth) {
         this.setStatus1001(host, w, stance, `${labelPrefix} last farm`);
@@ -2018,9 +2026,10 @@
       }
       this.h1001.phase = "FOOD_BUFFER";
       this.setStatus1001(host, w, stance, `${labelPrefix} find pond`);
-      if (w.explore) {
-        this.desireXY = { x: w.explore.x, y: w.explore.y };
-        host.walkTo(w.explore.x, w.explore.y);
+      const spot = w.wander || w.explore;
+      if (spot) {
+        this.desireXY = { x: spot.x, y: spot.y };
+        host.walkTo(spot.x, spot.y);
       }
       return true;
     }
@@ -2036,7 +2045,7 @@
       }
       this.h1001.phase = "FOOD_BUFFER";
       this.h1001.topEvent = "none";
-      const pond = this.mem(w, "pond");
+      const pond = this.resolvePond(w);
       if (host.hasTool("rod") && pond) {
         pushEnrouteStop(this.scan, {
           id: `${w.depth}:pond:${pond.x},${pond.y}`,
@@ -2080,7 +2089,7 @@
       if (host.craftGemRingOnce()) return true;
       if (!flooded && host.craftWoodForValueOnce()) return true;
       if (!flooded && host.fletchStyleOnce()) return true;
-      if (host.sellUnusedOnce()) return true;
+      if (this.trySellUnusedOnce(host, w)) return true;
       if (host.sellOreKeep(this.h1001.lockedMats ? 2 : 0)) return true;
       if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) return true;
       this.bagFullFails++;
@@ -2103,7 +2112,7 @@
       if (d > 2 && w.bagFree > 1) return false;
       this.h1001.topEvent = "high_ceiling";
       if (w.bagFree <= 0) {
-        if (!host.freeCookSlot() && !host.sellUnusedOnce()) {
+        if (!host.freeCookSlot() && !this.trySellUnusedOnce(host, w)) {
           this.setStatus1001(host, w, stance, "ceiling need slot");
           return false;
         }
@@ -2282,6 +2291,50 @@
     hasSellableMats(w) {
       return w.oreCount > 0 || w.logCount > 0 || w.hasLogs;
     }
+    /** Eng 2017: pond tile from mem register or live FOV seen.pond. */
+    resolvePond(w) {
+      var _a, _b, _c;
+      return (_c = (_b = this.mem(w, "pond")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.pond) != null ? _c : null;
+    }
+    /**
+     * Eng 2017 (t1652 ujvnep): gate host.sellUnusedOnce.
+     * Host walks shop when hasPlain (e.g. bag Sword) even with 0 mats — door thrash if
+     * path stalls; returns true every walk tick with no sell. Stall after no progress;
+     * skip entirely when empty-food + rod + known pond/farm (fish first).
+     */
+    trySellUnusedOnce(host, w) {
+      if (this.runTicks < this.sellUnusedBlockUntil) return false;
+      const emptyFood = w.food <= 0 && w.healReserve <= 0;
+      const pond = this.resolvePond(w);
+      const farmOk = !!pond || w.pondKnown || !!this.lastFoodFarm && this.lastFoodFarm.depth === w.depth;
+      if (emptyFood && host.hasTool("rod") && farmOk) return false;
+      if (emptyFood && host.hasTool("rod") && !this.hasSellableMats(w)) return false;
+      const before = `${w.coins}|${w.bagFree}|${w.logCount}|${w.oreCount}|${w.progressFp || ""}`;
+      const acted = host.sellUnusedOnce();
+      if (!acted) {
+        this.sellUnusedFailStreak = 0;
+        this.sellUnusedProgKey = before;
+        return false;
+      }
+      const afterW = host.world();
+      const after = `${afterW.coins}|${afterW.bagFree}|${afterW.logCount}|${afterW.oreCount}|${afterW.progressFp || ""}`;
+      if (after !== before) {
+        this.sellUnusedFailStreak = 0;
+        this.sellUnusedProgKey = after;
+        return true;
+      }
+      if (before === this.sellUnusedProgKey) this.sellUnusedFailStreak++;
+      else {
+        this.sellUnusedProgKey = before;
+        this.sellUnusedFailStreak = 1;
+      }
+      if (this.sellUnusedFailStreak >= 6) {
+        this.sellUnusedBlockUntil = this.runTicks + 48;
+        this.sellUnusedFailStreak = 0;
+        return false;
+      }
+      return true;
+    }
     /**
      * 2014: host smithKitOnce smiths dagger whenever !hasMetalWeapon — even with wand/bow worn
      * and a bag full of bronze daggers. Only call when ore can pay and style kit is not worn.
@@ -2310,21 +2363,13 @@
         this.setStatus1001(host, w, stance, "tools fund cook");
         return true;
       }
-      const need = Math.max(1, 30 - w.coins);
-      if (host.sellUnusedOnce()) {
-        this.setStatus1001(host, w, stance, "tools fund sell");
-        return true;
-      }
-      if (this.hasSellableMats(w) && host.sellMatsForCoins(need)) {
-        this.setStatus1001(host, w, stance, "tools fund sell mats");
-        return true;
-      }
-      if (pond && host.hasTool("rod") && !this.isGatherTileBlocked(pond.x, pond.y)) {
+      const pondTile = pond != null ? pond : this.resolvePond(w);
+      if (pondTile && host.hasTool("rod") && !this.isGatherTileBlocked(pondTile.x, pondTile.y)) {
         this.setStatus1001(host, w, stance, "tools fund fish");
-        this.lastFoodFarm = { depth: w.depth, x: pond.x, y: pond.y };
-        if (this.walkToTile(host, pond.x, pond.y)) return true;
+        this.lastFoodFarm = { depth: w.depth, x: pondTile.x, y: pondTile.y };
+        if (this.walkToTile(host, pondTile.x, pondTile.y)) return true;
         if (this.tryGather(host, w, stance, "tools fund fish")) return true;
-        const attempt = host.gatherAt(pond.x, pond.y);
+        const attempt = host.gatherAt(pondTile.x, pondTile.y);
         if (attempt.ok || /^enroute$/i.test(attempt.reason || "")) return true;
       }
       if (tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y)) {
@@ -2336,6 +2381,15 @@
           this.setStatus1001(host, w, stance, "tools fund chop mem");
           return true;
         }
+      }
+      const need = Math.max(1, 30 - w.coins);
+      if (this.trySellUnusedOnce(host, w)) {
+        this.setStatus1001(host, w, stance, "tools fund sell");
+        return true;
+      }
+      if (this.hasSellableMats(w) && host.sellMatsForCoins(need)) {
+        this.setStatus1001(host, w, stance, "tools fund sell mats");
+        return true;
       }
       return false;
     }
@@ -2418,7 +2472,16 @@
             return true;
           }
         }
-        if (host.sellUnusedOnce()) {
+        if (host.hasTool("rod")) {
+          const p = this.resolvePond(w);
+          if (p && !this.isGatherTileBlocked(p.x, p.y)) {
+            this.setStatus1001(host, w, stance, "tools fish");
+            this.lastFoodFarm = { depth: w.depth, x: p.x, y: p.y };
+            if (this.walkToTile(host, p.x, p.y)) return true;
+            if (this.tryGather(host, w, stance, "tools fish")) return true;
+          }
+        }
+        if (this.trySellUnusedOnce(host, w)) {
           this.setStatus1001(host, w, stance, "tools sell wood");
           return true;
         }
@@ -2543,7 +2606,7 @@
         if (attempt.ok || /^enroute$/i.test(attempt.reason || "")) return true;
       }
       if (host.acquireTool("pickaxe")) return true;
-      if (host.sellUnusedOnce() || this.hasSellableMats(w) && host.sellMatsForCoins(1)) return true;
+      if (this.trySellUnusedOnce(host, w) || this.hasSellableMats(w) && host.sellMatsForCoins(1)) return true;
       if (anvil && w.oreCount > 0) {
         host.walkTo(anvil.x, anvil.y);
         return true;
@@ -2666,7 +2729,7 @@
         this.setStatus1001(host, w, stance, "fund mobs");
         return true;
       }
-      if (host.sellUnusedOnce()) return true;
+      if (this.trySellUnusedOnce(host, w)) return true;
       if (w.explore) {
         host.walkTo(w.explore.x, w.explore.y);
         return true;
@@ -2676,7 +2739,7 @@
     phaseSellTrim1001(host, w, stance) {
       this.setStatus1001(host, w, stance, "sell trim");
       if (host.craftGemRingOnce()) return true;
-      if (host.sellUnusedOnce()) return true;
+      if (this.trySellUnusedOnce(host, w)) return true;
       if (host.sellOreKeep(this.h1001.lockedMats && !w.hasArmour ? 2 : 0)) return true;
       if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) return true;
       const shop = this.mem(w, "shop");
@@ -2778,7 +2841,7 @@
       }
       if (kind === "shop") {
         if (this.walkToTile(host, x, y, 1)) return true;
-        return host.sellUnusedOnce() || host.sellOreKeep(2);
+        return this.trySellUnusedOnce(host, w) || host.sellOreKeep(2);
       }
       if (kind === "altar") {
         if (this.beginnerToolsIncomplete(host) || this.h1001.phase === "TOOLS") return false;
@@ -4644,7 +4707,7 @@
         host.equipUp();
         return false;
       }
-      return host.sellUnusedOnce();
+      return this.trySellUnusedOnce(host, w);
     }
     /**
      * Gather nodes already close to the hero. 12 tiles is the camp around the shop.
