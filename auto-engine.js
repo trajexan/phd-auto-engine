@@ -1,4 +1,4 @@
-/* phd auto-engine 2026 — pull via GET /api/auto-engine */
+/* phd auto-engine 2027 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -971,7 +971,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2026";
+  var AUTO_ENGINE_VERSION = "2027";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1257,6 +1257,12 @@
       __publicField(this, "stuckMeterGear", "");
       __publicField(this, "stuckMeterHp", -1);
       __publicField(this, "stuckMeterMp", -1);
+      /**
+       * Eng 2027 / t1722: nearest lit foe dist last tick — closing-over-ticks instinct.
+       * Snapshot chase already exists; this catches dist decreasing before adj.
+       */
+      __publicField(this, "nearFoePrevDist", 999);
+      __publicField(this, "nearFoeClosing", false);
       /** Recent status lines for repeated-action thrash (≥2 same in ring). */
       __publicField(this, "stuckRecentStatus", []);
       /**
@@ -1429,6 +1435,8 @@
         this.stuckMeterGear = "";
         this.stuckMeterHp = -1;
         this.stuckMeterMp = -1;
+        this.nearFoePrevDist = 999;
+        this.nearFoeClosing = false;
         this.stuckRecentStatus = [];
         this.markThrash = false;
         this.markClash = false;
@@ -1552,7 +1560,9 @@
       }
       if (this.evLethal(host, w, stance)) return true;
       if (this.sevenBChestEligible(w) && this.evScanChestSafe(host, w, stance)) return true;
+      this.noteFoeApproach(w);
       if (this.evMobSudden(host, w, stance)) return true;
+      if (this.evMobApproach(host, w, stance)) return true;
       if (this.evEmergFood(host, w, stance)) return true;
       if (this.evScanChestSafe(host, w, stance)) return true;
       if (this.evScanLootHv(host, w, stance)) return true;
@@ -2197,6 +2207,46 @@
       this.setStatus1001(host, w, stance, "mob engage");
       return true;
     }
+    /**
+     * Eng 2027 / t1722: track nearest lit foe dist across ticks.
+     * Closing (dist decreasing) arms early act — instinct before adj.
+     */
+    noteFoeApproach(w) {
+      const near = w.foes.filter((f) => f.alive && f.lit).sort((a, b) => a.dist - b.dist)[0];
+      if (!near) {
+        this.nearFoePrevDist = 999;
+        this.nearFoeClosing = false;
+        return;
+      }
+      this.nearFoeClosing = this.nearFoePrevDist < 900 && near.dist < this.nearFoePrevDist && near.dist <= 4;
+      this.nearFoePrevDist = near.dist;
+    }
+    /**
+     * Eng 2027 / t1722: foe closing at dist 2–3 (not yet adj) → engage or kite early.
+     * evMobSudden still owns dist≤1. Snapshot watch===3 chase remains elsewhere.
+     */
+    evMobApproach(host, w, stance) {
+      if (!this.nearFoeClosing) return false;
+      const foe = w.foes.filter((f) => f.alive && f.lit && f.dist >= 2 && f.dist <= 3).sort((a, b) => a.dist - b.dist)[0];
+      if (!foe) return false;
+      const pressing = foe.watch === 3 || foe.danger === "threat" || foe.danger === "deadly" || this.nearFoeClosing;
+      if (!pressing) return false;
+      this.h1001.topEvent = "mob_approach";
+      const worn = w.hasMetalWeapon || w.hasStyleWeapon || w.hasArmour;
+      const ok = this.outlookOk(host, w, foe, {
+        allowThreat: worn,
+        minWinRate: worn ? 0.4 : 0.5
+      });
+      if (!ok) {
+        host.clearEngage();
+        if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        this.setStatus1001(host, w, stance, host.fightOutlook ? "approach kite" : "approach kite");
+        return true;
+      }
+      this.engageSmart(host, w, stance, foe, "approach");
+      this.setStatus1001(host, w, stance, "approach engage");
+      return true;
+    }
     evBagFull(host, w, stance) {
       if (w.bagFree > 0) return false;
       this.h1001.topEvent = "bag_full";
@@ -2514,6 +2564,7 @@
     tryCookBagCookables(host, w, stance, statusLabel) {
       var _a, _b, _c;
       if (!this.hasBagCookables(w)) return false;
+      if (!this.cookOwed(w, stance)) return false;
       if (!w.hasFire && w.hasLogs) {
         host.lightFireOnce();
       } else if (!w.hasFire && !w.hasLogs) {
@@ -2571,7 +2622,8 @@
       if (this.runTicks < this.sellUnusedBlockUntil) return false;
       const pond = this.resolvePond(w);
       const farmOk = !!pond || w.pondKnown || !!this.lastFoodFarm && this.lastFoodFarm.depth === w.depth;
-      if (this.hasBagCookables(w) && this.canCookBagCookables(host, w)) return false;
+      const stanceSell = foodStance(w.healReserve, w.floorHealNeed, this.traits, w.food);
+      if (this.hasBagCookables(w) && this.canCookBagCookables(host, w) && this.cookOwed(w, stanceSell)) return false;
       if (this.foodPathEmpty(w) && host.hasTool("rod") && farmOk) return false;
       if (this.foodPathEmpty(w) && host.hasTool("rod") && !this.hasSellableMats(w) && !this.hasBagCookables(w)) return false;
       const before = `${w.coins}|${w.bagFree}|${w.logCount}|${w.oreCount}|${w.progressFp || ""}`;
