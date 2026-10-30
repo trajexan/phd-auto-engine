@@ -1,4 +1,4 @@
-/* phd auto-engine 2018 — pull via GET /api/auto-engine */
+/* phd auto-engine 2019 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -803,7 +803,7 @@
     scan.pendingHighFlip = null;
     if (skipHeavy) return;
     const softActive = runTicks < chestBlockUntil;
-    const foodNeeded = w.food <= 0 && w.healReserve <= 0 || w.hp < w.maxHp * 0.85;
+    const foodNeeded = w.food <= 0 && w.healReserve <= 0 && w.rawFish <= 0 || w.hp < w.maxHp * 0.85;
     const shopAhead = !!nodes.get(`${w.depth}:shop`) || !!((_a = w.seen) == null ? void 0 : _a.shop);
     const hero = w.tile;
     const seenExact = /* @__PURE__ */ new Set();
@@ -922,7 +922,7 @@
       }
     }
     const pond = nodes.get(`${w.depth}:pond`);
-    if (pond) {
+    if (pond && w.rawFish <= 0) {
       const id = `${w.depth}:pond:${pond.x},${pond.y}`;
       const safe = !nodeThreat(w, pond.x, pond.y);
       const prev = scan.prevStatus.get(id);
@@ -967,7 +967,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2018";
+  var AUTO_ENGINE_VERSION = "2019";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1517,11 +1517,7 @@
       if (this.evFloorLoot(host, w, stance)) return true;
       if (this.evForgeMiss(host, w, stance)) return true;
       if (this.evAltar(host, w, stance)) return true;
-      if (w.rawFish > 0 && (w.hasFire || w.hasLogs)) {
-        if (!w.hasFire && w.hasLogs) host.lightFireOnce();
-        if (w.bagFree <= 0) host.freeCookSlot();
-        host.cookOnce();
-      }
+      if (this.tryCookBagCookables(host, w, stance, "cook")) return true;
       host.equipUp();
       if (this.drainEnrouteStop(host, w, stance)) return true;
       if (this.evCalmFoodHighPri(host, w, stance)) return true;
@@ -1864,6 +1860,7 @@
         return true;
       }
       if (stop.kind === "pond") {
+        if (this.hasBagCookables(w)) return false;
         this.scan.enrouteStops.shift();
         if (!host.hasTool("rod")) return false;
         this.desireXY = { x: stop.x, y: stop.y };
@@ -1939,11 +1936,14 @@
       if (chased && emptyFood) return true;
       return false;
     }
-    /** Unchased empty heal / hungry — calm high-pri food, not Layer-1 emerg (t1648). */
+    /** Unchased empty heal / hungry — calm high-pri food, not Layer-1 emerg (t1648).
+     *  2019: bag cookables ≠ empty for SEEK; still high-pri when hungry so cook runs. */
     calmFoodHighPri(w, stance) {
       if (this.foodUrgency(w)) return false;
-      const emptyFood = w.food <= 0 && w.healReserve <= 0;
-      if (emptyFood) return true;
+      if (this.foodPathEmpty(w)) return true;
+      if (this.hasBagCookables(w) && (stance.hungry || w.food < stance.minFood || w.healReserve <= 0)) {
+        return true;
+      }
       if (stance.hungry && w.food < stance.minFood) return true;
       return false;
     }
@@ -1979,12 +1979,7 @@
     runFoodSeek(host, w, stance, labelPrefix) {
       if (w.food > 0 && w.hp < w.maxHp * 0.85) host.eat();
       if (w.food <= 0 && w.coins > 0) host.buyFoodIfCritical();
-      if (w.rawFish > 0) {
-        if (!w.hasFire && w.hasLogs) host.lightFireOnce();
-        host.cookOnce();
-        this.setStatus1001(host, w, stance, `${labelPrefix} cook`);
-        return true;
-      }
+      if (this.tryCookBagCookables(host, w, stance, `${labelPrefix} cook`)) return true;
       const pond = this.resolvePond(w);
       const tree = this.mem(w, "tree");
       const hasRod = host.hasTool("rod");
@@ -2082,7 +2077,7 @@
       this.h1001.phase = "FOOD_BUFFER";
       this.h1001.topEvent = "none";
       const pond = this.resolvePond(w);
-      if (host.hasTool("rod") && pond) {
+      if (host.hasTool("rod") && pond && !this.hasBagCookables(w)) {
         pushEnrouteStop(this.scan, {
           id: `${w.depth}:pond:${pond.x},${pond.y}`,
           kind: "pond",
@@ -2333,6 +2328,47 @@
       return (_c = (_b = this.mem(w, "pond")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.pond) != null ? _c : null;
     }
     /**
+     * Eng 2019: bag cookable raw (host `rawFish` = cookable count — any raw_* food
+     * the host reports). Counts toward the food path; not "empty buffer".
+     */
+    hasBagCookables(w) {
+      return w.rawFish > 0;
+    }
+    /**
+     * Eng 2019: truly empty for SEEK more gather (fish/pond/buy). Cooked pieces,
+     * heal reserve, OR bag cookables all count — cookables → cook first, don't seek.
+     * Combat emerg (foodUrgency) still uses cooked-only empty (raw can't be eaten mid-fight).
+     */
+    foodPathEmpty(w) {
+      return w.food <= 0 && w.healReserve <= 0 && !this.hasBagCookables(w);
+    }
+    /**
+     * Eng 2019: cook / light / chop-fuel when bag has cookables.
+     * Shared by maintain layer, food-seek, FOOD_BUFFER, fund farm — one rule.
+     */
+    tryCookBagCookables(host, w, stance, statusLabel) {
+      var _a, _b, _c;
+      if (!this.hasBagCookables(w)) return false;
+      if (!w.hasFire && w.hasLogs) host.lightFireOnce();
+      else if (!w.hasFire && !w.hasLogs) {
+        const tree = (_c = (_b = this.mem(w, "tree")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.tree) != null ? _c : null;
+        if (tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y)) {
+          if (this.walkToTile(host, tree.x, tree.y)) {
+            this.setStatus1001(host, w, stance, statusLabel);
+            return true;
+          }
+          if (this.tryGather(host, w, stance, "chop for fire")) {
+            this.setStatus1001(host, w, stance, statusLabel);
+            return true;
+          }
+        }
+      }
+      if (w.bagFree <= 0) host.freeCookSlot();
+      host.cookOnce();
+      this.setStatus1001(host, w, stance, statusLabel);
+      return true;
+    }
+    /**
      * Eng 2017 (t1652 ujvnep): gate host.sellUnusedOnce.
      * Host walks shop when hasPlain (e.g. bag Sword) even with 0 mats — door thrash if
      * path stalls; returns true every walk tick with no sell. Stall after no progress;
@@ -2340,11 +2376,12 @@
      */
     trySellUnusedOnce(host, w) {
       if (this.runTicks < this.sellUnusedBlockUntil) return false;
-      const emptyFood = w.food <= 0 && w.healReserve <= 0;
+      const needFoodPath = this.foodPathEmpty(w) || this.hasBagCookables(w);
       const pond = this.resolvePond(w);
       const farmOk = !!pond || w.pondKnown || !!this.lastFoodFarm && this.lastFoodFarm.depth === w.depth;
-      if (emptyFood && host.hasTool("rod") && farmOk) return false;
-      if (emptyFood && host.hasTool("rod") && !this.hasSellableMats(w)) return false;
+      if (needFoodPath && this.hasBagCookables(w)) return false;
+      if (needFoodPath && host.hasTool("rod") && farmOk) return false;
+      if (this.foodPathEmpty(w) && host.hasTool("rod") && !this.hasSellableMats(w)) return false;
       const before = `${w.coins}|${w.bagFree}|${w.logCount}|${w.oreCount}|${w.progressFp || ""}`;
       const acted = host.sellUnusedOnce();
       if (!acted) {
@@ -2393,12 +2430,7 @@
      * registered mem tree/pond — cook → sell → gather. Prefer farm over explore loot.
      */
     tryFundBeginnerToolFarm(host, w, stance, tree, pond) {
-      if (w.rawFish > 0) {
-        if (!w.hasFire && w.hasLogs) host.lightFireOnce();
-        host.cookOnce();
-        this.setStatus1001(host, w, stance, "tools fund cook");
-        return true;
-      }
+      if (this.tryCookBagCookables(host, w, stance, "tools fund cook")) return true;
       const pondTile = pond != null ? pond : this.resolvePond(w);
       if (pondTile && host.hasTool("rod") && !this.isGatherTileBlocked(pondTile.x, pondTile.y)) {
         this.setStatus1001(host, w, stance, "tools fund fish");
@@ -2431,7 +2463,7 @@
     }
     /** True when owned farm tools + registered/visible nodes (or bag mats) can raise 30c. */
     canFarmFundBeginnerTool(host, w, tree, pond) {
-      if (w.rawFish > 0 || w.logCount > 0) return true;
+      if (this.hasBagCookables(w) || w.logCount > 0) return true;
       if (pond && host.hasTool("rod") && !this.isGatherTileBlocked(pond.x, pond.y)) return true;
       if (tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y)) return true;
       if (host.hasTool("rod") && w.pondKnown) return true;
@@ -2808,17 +2840,7 @@
         return false;
       }
       this.setStatus1001(host, w, stance, "food buffer");
-      const tree = this.mem(w, "tree");
-      const pond = this.mem(w, "pond");
-      if (w.rawFish > 0) {
-        if (!w.hasFire && w.hasLogs) host.lightFireOnce();
-        else if (!w.hasFire && tree && host.hasTool("hatchet")) {
-          if (this.walkToTile(host, tree.x, tree.y)) return true;
-          return this.tryGather(host, w, stance, "chop for fire");
-        }
-        host.cookOnce();
-        return true;
-      }
+      if (this.tryCookBagCookables(host, w, stance, "food cook")) return true;
       return this.runFoodSeek(host, w, stance, "food");
     }
     runCalm1001(host, w, stance) {
@@ -2898,6 +2920,7 @@
       }
       if (kind === "fish" || kind === "pond") {
         if (!host.hasTool("rod")) return false;
+        if (this.tryCookBagCookables(host, w, stance, "util cook")) return true;
         if (this.walkToTile(host, x, y)) return true;
         return this.tryGather(host, w, stance, "util fish");
       }
