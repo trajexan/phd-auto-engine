@@ -1,4 +1,4 @@
-/* phd auto-engine 2022 — pull via GET /api/auto-engine */
+/* phd auto-engine 2023 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -967,7 +967,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2022";
+  var AUTO_ENGINE_VERSION = "2023";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1275,6 +1275,11 @@
       __publicField(this, "sellUnusedBlockUntil", 0);
       __publicField(this, "sellUnusedProgKey", "");
       /**
+       * Eng 2023 (t1703): shared fund-intent lock — TOOLS acquireTool/fund farm vs calm
+       * food-seek. Opposite kind yields while lock held; emerg food breaks it.
+       */
+      __publicField(this, "fundIntent", null);
+      /**
        * e44: last tree chop tile (cook-fuel fallback when raw waits and bag has no logs).
        * Remembered across floors like lastFoodFarm; not cleared on every stuck rethink.
        */
@@ -1389,6 +1394,7 @@
         this.foodFarmSoftBlocks = 0;
         this.hatchetRethinks = 0;
         this.bagFullFails = 0;
+        this.fundIntent = null;
         this.forgeBlockUntil = 0;
         this.forgeBlockCoins = 0;
         this.forgeBlockOre = 0;
@@ -1548,6 +1554,7 @@
       if (this.evScanLootHv(host, w, stance)) return true;
       if (this.drainWantLootQueue(host, w, stance)) return true;
       if (this.evBagFull(host, w, stance)) return true;
+      if (this.evRawNoCookFund(host, w, stance)) return true;
       if (this.evHighCeiling(host, w, stance)) return true;
       if (this.evFloorLoot(host, w, stance)) return true;
       if (this.evForgeMiss(host, w, stance)) return true;
@@ -2000,6 +2007,7 @@
     evEmergFood(host, w, stance) {
       if (!this.foodUrgency(w)) return false;
       if (!stance.hungry && w.food > 0 && w.healReserve > 0) return false;
+      this.clearFundIntent();
       this.h1001.topEvent = "emerg_food";
       if (this.h1001.phase !== "FOOD_BUFFER" && this.h1001.phase !== "BOOT" && this.h1001.phase !== "TOOLS") {
         this.h1001.phaseResume = this.h1001.phase;
@@ -2018,6 +2026,17 @@
       if (this.hasBagCookables(w) && !this.canCookBagCookables(host, w)) {
         if (this.trySellUnusedOnce(host, w)) {
           this.setStatus1001(host, w, stance, `${labelPrefix} sell raw`);
+          return true;
+        }
+        if (this.rawNoCookOverThresh(w, stance)) {
+          this.setStatus1001(host, w, stance, `${labelPrefix} sell raw`);
+          const shop = this.mem(w, "shop");
+          if (shop) {
+            this.desireXY = { x: shop.x, y: shop.y };
+            host.walkTo(shop.x, shop.y);
+            return true;
+          }
+          if (labelPrefix === "food") return false;
           return true;
         }
       }
@@ -2112,6 +2131,8 @@
     evCalmFoodHighPri(host, w, stance) {
       var _a;
       if (!this.calmFoodHighPri(w, stance)) return false;
+      if (this.fundIntentBlocks("food")) return false;
+      if (!this.claimFundIntent("food")) return false;
       if (this.h1001.phase !== "FOOD_BUFFER" && this.h1001.phase !== "BOOT" && this.h1001.phase !== "TOOLS") {
         this.h1001.phaseResume = (_a = this.h1001.phaseResume) != null ? _a : this.h1001.phase;
       }
@@ -2179,6 +2200,57 @@
       }
       const shop = this.mem(w, "shop");
       if (shop) {
+        host.walkTo(shop.x, shop.y);
+        return true;
+      }
+      return true;
+    }
+    /**
+     * Eng 2023: soft-block threshold for raw with no cook path (~8–12 / mealBatch).
+     * Below this, keep fishing a little; at/above → force sell/yield even if bagFree>0.
+     */
+    rawNoCookSellN(w, stance) {
+      const batch = this.mealBatch(w, stance);
+      return Math.max(8, Math.min(12, Math.max(batch, 8)));
+    }
+    rawNoCookOverThresh(w, stance) {
+      return w.rawFish >= this.rawNoCookSellN(w, stance);
+    }
+    needsRawNoCookSell(host, w, stance) {
+      if (!this.hasBagCookables(w)) return false;
+      if (this.canCookBagCookables(host, w)) return false;
+      return this.rawNoCookOverThresh(w, stance);
+    }
+    /** Eng 2023: claim fund-intent; false if opposite kind still holds. */
+    claimFundIntent(kind, hold = 12) {
+      if (this.fundIntent && this.runTicks < this.fundIntent.until && this.fundIntent.kind !== kind) {
+        return false;
+      }
+      this.fundIntent = { kind, until: this.runTicks + hold };
+      return true;
+    }
+    fundIntentBlocks(kind) {
+      return !!(this.fundIntent && this.runTicks < this.fundIntent.until && this.fundIntent.kind !== kind);
+    }
+    clearFundIntent(kind) {
+      if (!this.fundIntent) return;
+      if (!kind || this.fundIntent.kind === kind) this.fundIntent = null;
+    }
+    /**
+     * Eng 2023 (t1703): raw≥N + !canCook + bag still has free slots → sell/yield
+     * before calm fish / TOOLS fish stalls into a mountain of unsellable-by-path raw.
+     */
+    evRawNoCookFund(host, w, stance) {
+      if (w.bagFree <= 0) return false;
+      if (!this.needsRawNoCookSell(host, w, stance)) return false;
+      this.h1001.topEvent = "bag_full";
+      this.setStatus1001(host, w, stance, "raw sell fund");
+      this.claimFundIntent("food", 16);
+      if (this.trySellUnusedOnce(host, w)) return true;
+      if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) return true;
+      const shop = this.mem(w, "shop");
+      if (shop) {
+        this.desireXY = { x: shop.x, y: shop.y };
         host.walkTo(shop.x, shop.y);
         return true;
       }
@@ -2508,8 +2580,21 @@
      */
     tryFundBeginnerToolFarm(host, w, stance, tree, pond) {
       if (this.tryCookBagCookables(host, w, stance, "tools fund cook")) return true;
+      if (this.needsRawNoCookSell(host, w, stance)) {
+        if (this.trySellUnusedOnce(host, w)) {
+          this.setStatus1001(host, w, stance, "tools fund sell raw");
+          return true;
+        }
+        const shop = this.mem(w, "shop");
+        if (shop) {
+          this.setStatus1001(host, w, stance, "tools fund sell raw");
+          this.desireXY = { x: shop.x, y: shop.y };
+          host.walkTo(shop.x, shop.y);
+          return true;
+        }
+      }
       const pondTile = pond != null ? pond : this.resolvePond(w);
-      if (pondTile && host.hasTool("rod") && !this.isGatherTileBlocked(pondTile.x, pondTile.y)) {
+      if (!this.needsRawNoCookSell(host, w, stance) && pondTile && host.hasTool("rod") && !this.isGatherTileBlocked(pondTile.x, pondTile.y)) {
         this.setStatus1001(host, w, stance, "tools fund fish");
         this.lastFoodFarm = { depth: w.depth, x: pondTile.x, y: pondTile.y };
         if (this.walkToTile(host, pondTile.x, pondTile.y)) return true;
@@ -2551,6 +2636,8 @@
     }
     phaseTools1001(host, w, stance) {
       var _a, _b;
+      if (this.fundIntentBlocks("tool")) return false;
+      if (!this.claimFundIntent("tool")) return false;
       const rock = this.mem(w, "rock");
       const tree = this.mem(w, "tree");
       const pond = this.mem(w, "pond");
@@ -2593,7 +2680,7 @@
         if (this.tryGather(host, w, stance, "tools mine")) return true;
         this.blockGatherTile(liveRock.x, liveRock.y);
       }
-      if (!fundingTool && pond && host.hasTool("rod") && !this.isGatherTileBlocked(pond.x, pond.y)) {
+      if (!fundingTool && !this.needsRawNoCookSell(host, w, stance) && pond && host.hasTool("rod") && !this.isGatherTileBlocked(pond.x, pond.y)) {
         this.setStatus1001(host, w, stance, "tools fish");
         this.lastFoodFarm = { depth: w.depth, x: pond.x, y: pond.y };
         if (this.walkToTile(host, pond.x, pond.y)) return true;
@@ -2621,7 +2708,7 @@
           }
           this.noteGatherFail(tree.x, tree.y, attempt.tool);
         }
-        if (host.hasTool("rod")) {
+        if (host.hasTool("rod") && !this.needsRawNoCookSell(host, w, stance)) {
           const p = this.resolvePond(w);
           if (p && !this.isGatherTileBlocked(p.x, p.y)) {
             this.setStatus1001(host, w, stance, "tools fish");
@@ -2657,9 +2744,11 @@
           return true;
         }
         if (!w.hasMetalWeapon && !w.hasStyleWeapon) {
+          this.clearFundIntent("tool");
           this.h1001.phase = "FIRST_WEP";
           return false;
         }
+        this.clearFundIntent("tool");
         this.h1001.phase = "GEAR_FARM";
         return false;
       }
@@ -2924,6 +3013,7 @@
         }
       }
       if (stance.stocked && w.food >= stance.minFood) {
+        this.clearFundIntent("food");
         this.h1001.phase = (_a = this.h1001.phaseResume) != null ? _a : "GEAR_FARM";
         this.h1001.phaseResume = null;
         return false;
