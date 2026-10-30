@@ -1,4 +1,4 @@
-/* phd auto-engine 2017 — pull via GET /api/auto-engine */
+/* phd auto-engine 2018 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -967,7 +967,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2017";
+  var AUTO_ENGINE_VERSION = "2018";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1978,7 +1978,7 @@
      */
     runFoodSeek(host, w, stance, labelPrefix) {
       if (w.food > 0 && w.hp < w.maxHp * 0.85) host.eat();
-      if (w.food <= 0) host.buyFoodIfCritical();
+      if (w.food <= 0 && w.coins > 0) host.buyFoodIfCritical();
       if (w.rawFish > 0) {
         if (!w.hasFire && w.hasLogs) host.lightFireOnce();
         host.cookOnce();
@@ -2026,12 +2026,48 @@
       }
       this.h1001.phase = "FOOD_BUFFER";
       this.setStatus1001(host, w, stance, `${labelPrefix} find pond`);
-      const spot = w.wander || w.explore;
+      const spot = this.pickFindPondSpot(w);
       if (spot) {
         this.desireXY = { x: spot.x, y: spot.y };
         host.walkTo(spot.x, spot.y);
       }
       return true;
+    }
+    /**
+     * 2018 t1653: pick explore target for unknown pond.
+     * Prefer unvisited ways / explore frontier away from hub+shop; never prefer
+     * wander that sits on hub/shop (ujvnep walk_hub thrash while find pond).
+     */
+    pickFindPondSpot(w) {
+      var _a;
+      const hub = w.hub;
+      const shop = this.mem(w, "shop");
+      const nearMagnet = (x, y) => {
+        if (hub && cheb(x, y, hub.x, hub.y) <= 2) return true;
+        if (shop && cheb(x, y, shop.x, shop.y) <= 2) return true;
+        return false;
+      };
+      const ways = ((_a = w.seen) == null ? void 0 : _a.ways) || [];
+      let bestWay = null;
+      for (const wy of ways) {
+        if (wy.dx === -1 && wy.dy === -1) continue;
+        if (wy.been || wy.back) continue;
+        if (wy.mobs >= 3) continue;
+        const x = w.tile.x + wy.dx;
+        const y = w.tile.y + wy.dy;
+        if (nearMagnet(x, y)) continue;
+        const score = Math.abs(wy.dx) + Math.abs(wy.dy) - wy.mobs * 2;
+        if (!bestWay || score > bestWay.score) bestWay = { x, y, score };
+      }
+      if (bestWay) return { x: bestWay.x, y: bestWay.y };
+      const cands = [];
+      if (w.explore) cands.push(w.explore);
+      if (w.wander) cands.push(w.wander);
+      const away = cands.filter((c) => !nearMagnet(c.x, c.y));
+      if (away.length) return away[0];
+      if (w.explore) return w.explore;
+      if (w.wander) return w.wander;
+      return null;
     }
     /**
      * t1648: unchased food-seek as calm high-priority (before phase skills, after
