@@ -1,4 +1,4 @@
-/* phd auto-engine 2024 — pull via GET /api/auto-engine */
+/* phd auto-engine 2025 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -522,12 +522,16 @@
     const P = !!(s == null ? void 0 : s.pond) || w.pondKnown || has("pond");
     const A = !!(s == null ? void 0 : s.anvil) || w.anvilNearby || has("anvil");
     const S = !!(s == null ? void 0 : s.shop) || has("shop");
-    if (!R && !T && !P && !A) return null;
-    if (A && R && S && !host.hasTool("pickaxe")) return "pickaxe";
-    if (A && R && !host.hasTool("pickaxe")) return "pickaxe";
+    if (!R && !T && !P && !A && !S) return null;
+    if (A && !host.hasTool("pickaxe")) return "pickaxe";
+    if (R && !host.hasTool("pickaxe")) return "pickaxe";
     if (P && !host.hasTool("rod")) return "rod";
     if (T && !host.hasTool("hatchet")) return "hatchet";
-    if (R && !host.hasTool("pickaxe")) return "pickaxe";
+    if (S) {
+      if (!host.hasTool("hatchet")) return "hatchet";
+      if (!host.hasTool("pickaxe")) return "pickaxe";
+      if (!host.hasTool("rod")) return "rod";
+    }
     return null;
   }
   function canEarlyPush(w, stance) {
@@ -967,7 +971,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2024";
+  var AUTO_ENGINE_VERSION = "2025";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2660,7 +2664,12 @@
       const pond = this.mem(w, "pond");
       const anvil = this.mem(w, "anvil");
       const tool = bootstrapTool(host, w, this.h1001.nodes);
-      if (tool === null && !rock && !tree && !pond && !w.anvilNearby && !anvil) {
+      const shop = this.mem(w, "shop");
+      if (this.beginnerToolsIncomplete(host) && (shop || anvil || w.anvilNearby) && tool && !host.hasTool(tool) && this.canFundToolNow(tool, w, anvil)) {
+        this.setStatus1001(host, w, stance, `tools ${tool}`);
+        if (host.acquireTool(tool)) return true;
+      }
+      if (tool === null && !rock && !tree && !pond && !w.anvilNearby && !anvil && !shop) {
         this.setStatus1001(host, w, stance, "tools wait node");
         if (w.explore) {
           host.walkTo(w.explore.x, w.explore.y);
@@ -2772,6 +2781,11 @@
       if (fundingTool && canFarmFund) {
         if (this.tryFundBeginnerToolFarm(host, w, stance, tree, pond)) return true;
         this.setStatus1001(host, w, stance, `tools fund ${tool}`);
+        return true;
+      }
+      if (tool && !host.hasTool(tool) && this.canFundToolNow(tool, w, anvil)) {
+        this.setStatus1001(host, w, stance, `tools ${tool}`);
+        if (host.acquireTool(tool)) return true;
         return true;
       }
       if (w.explore) {
