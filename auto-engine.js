@@ -1,4 +1,4 @@
-/* phd auto-engine 2027 — pull via GET /api/auto-engine */
+/* phd auto-engine 2028 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -971,7 +971,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2027";
+  var AUTO_ENGINE_VERSION = "2028";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1013,7 +1013,7 @@
       caution = clamp01(caution * 0.7);
       bravery = clamp01(bravery + 0.1);
     }
-    return { hungry, stocked, caution, bravery, label, ratio, safetyLevel, minFood };
+    return { hungry, stocked, caution, bravery, label, ratio, safetyLevel, minFood, healRich };
   }
   var SAME_TARGET_MAX = 3;
   var TILE_BLOCK_TICKS = 200;
@@ -1284,6 +1284,10 @@
       __publicField(this, "sellUnusedFailStreak", 0);
       __publicField(this, "sellUnusedBlockUntil", 0);
       __publicField(this, "sellUnusedProgKey", "");
+      /** Eng 2028 / t1732: sellOreKeep walk thrash — same cool-down (was infinite shop walk). */
+      __publicField(this, "sellOreKeepFailStreak", 0);
+      __publicField(this, "sellOreKeepBlockUntil", 0);
+      __publicField(this, "sellOreKeepProgKey", "");
       /**
        * Eng 2023 (t1703): shared fund-intent lock — TOOLS acquireTool/fund farm vs calm
        * food-seek. Opposite kind yields while lock held; emerg food breaks it.
@@ -2251,23 +2255,24 @@
       if (w.bagFree > 0) return false;
       this.h1001.topEvent = "bag_full";
       this.bagFullUntil = this.runTicks + 600;
+      const healRich = stance.healRich;
+      const surplusFood = healRich && w.food > Math.max(2, stance.minFood);
       const flooded = this.bagFloodedWeps(host, w);
-      const canForge = flooded || this.wantSmithKit(w) || w.oreCount > 0 || w.logCount > 0 && !this.hasBagCookables(w);
+      const canForge = !surplusFood && (flooded || this.wantSmithKit(w) || w.oreCount > 0 && (!w.hasMetalWeapon || !w.hasArmour) || w.logCount > 0 && !this.hasBagCookables(w));
       const fishOnly = this.hasBagCookables(w) && w.oreCount <= 0 && !flooded;
-      this.setStatus1001(
-        host,
-        w,
-        stance,
-        fishOnly ? "bag sell trim" : canForge ? "bag forge\u2192trim" : "bag sell trim"
-      );
-      if (!fishOnly && host.forgeWieldedOnce()) return true;
-      if (!fishOnly && !flooded && this.wantSmithKit(w) && host.smithKitOnce()) return true;
-      if (!fishOnly && host.craftGemRingOnce()) return true;
-      if (!fishOnly && !flooded && host.craftWoodForValueOnce()) return true;
-      if (!fishOnly && !flooded && host.fletchStyleOnce()) return true;
+      const task = surplusFood ? "bag free food" : fishOnly ? "bag sell trim" : canForge ? "bag forge\u2192trim" : "bag sell trim";
+      this.setStatus1001(host, w, stance, task);
+      if (!surplusFood && !fishOnly && host.forgeWieldedOnce()) return true;
+      if (!surplusFood && !fishOnly && !flooded && this.wantSmithKit(w) && host.smithKitOnce()) return true;
+      if (!surplusFood && !fishOnly && host.craftGemRingOnce()) return true;
+      if (!surplusFood && !fishOnly && !flooded && host.craftWoodForValueOnce()) return true;
+      if (!surplusFood && !fishOnly && !flooded && host.fletchStyleOnce()) return true;
       if (this.trySellUnusedOnce(host, w)) return true;
-      if (host.sellOreKeep(this.h1001.lockedMats ? 2 : 0)) return true;
+      if (this.trySellOreKeep(host, w, this.h1001.lockedMats ? 2 : 0)) return true;
       if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) return true;
+      if (surplusFood || healRich) {
+        if (host.freeCookSlot()) return true;
+      }
       this.bagFullFails++;
       if (this.bagFullFails >= 3) {
         this.bagFullUntil = 0;
@@ -2275,7 +2280,8 @@
         if (host.freeCookSlot()) return true;
       }
       const shop = this.mem(w, "shop");
-      if (shop) {
+      const sellCool = this.runTicks < this.sellUnusedBlockUntil && this.runTicks < this.sellOreKeepBlockUntil;
+      if (shop && !sellCool && !surplusFood) {
         host.walkTo(shop.x, shop.y);
         return true;
       }
@@ -2626,7 +2632,7 @@
       if (this.hasBagCookables(w) && this.canCookBagCookables(host, w) && this.cookOwed(w, stanceSell)) return false;
       if (this.foodPathEmpty(w) && host.hasTool("rod") && farmOk) return false;
       if (this.foodPathEmpty(w) && host.hasTool("rod") && !this.hasSellableMats(w) && !this.hasBagCookables(w)) return false;
-      const before = `${w.coins}|${w.bagFree}|${w.logCount}|${w.oreCount}|${w.progressFp || ""}`;
+      const before = `${w.coins}|${w.bagFree}|${w.logCount}|${w.oreCount}|${w.food}|${w.progressFp || ""}`;
       const acted = host.sellUnusedOnce();
       if (!acted) {
         this.sellUnusedFailStreak = 0;
@@ -2634,7 +2640,7 @@
         return false;
       }
       const afterW = host.world();
-      const after = `${afterW.coins}|${afterW.bagFree}|${afterW.logCount}|${afterW.oreCount}|${afterW.progressFp || ""}`;
+      const after = `${afterW.coins}|${afterW.bagFree}|${afterW.logCount}|${afterW.oreCount}|${afterW.food}|${afterW.progressFp || ""}`;
       if (after !== before) {
         this.sellUnusedFailStreak = 0;
         this.sellUnusedProgKey = after;
@@ -2648,6 +2654,39 @@
       if (this.sellUnusedFailStreak >= 6) {
         this.sellUnusedBlockUntil = this.runTicks + 48;
         this.sellUnusedFailStreak = 0;
+        return false;
+      }
+      return true;
+    }
+    /**
+     * Eng 2028 / t1732: gate host.sellOreKeep like trySellUnusedOnce.
+     * Walk-to-shop returned true every tick with flat coins/bag/ore → infinite
+     * "walk to shop to free bag" while sellUnused was cool-blocked (w5te7f).
+     */
+    trySellOreKeep(host, w, keep) {
+      if (this.runTicks < this.sellOreKeepBlockUntil) return false;
+      const before = `${w.coins}|${w.bagFree}|${w.logCount}|${w.oreCount}|${w.food}|${w.progressFp || ""}`;
+      const acted = host.sellOreKeep(keep);
+      if (!acted) {
+        this.sellOreKeepFailStreak = 0;
+        this.sellOreKeepProgKey = before;
+        return false;
+      }
+      const afterW = host.world();
+      const after = `${afterW.coins}|${afterW.bagFree}|${afterW.logCount}|${afterW.oreCount}|${afterW.food}|${afterW.progressFp || ""}`;
+      if (after !== before) {
+        this.sellOreKeepFailStreak = 0;
+        this.sellOreKeepProgKey = after;
+        return true;
+      }
+      if (before === this.sellOreKeepProgKey) this.sellOreKeepFailStreak++;
+      else {
+        this.sellOreKeepProgKey = before;
+        this.sellOreKeepFailStreak = 1;
+      }
+      if (this.sellOreKeepFailStreak >= 6) {
+        this.sellOreKeepBlockUntil = this.runTicks + 48;
+        this.sellOreKeepFailStreak = 0;
         return false;
       }
       return true;
