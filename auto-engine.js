@@ -1,4 +1,4 @@
-/* phd auto-engine 2020 — pull via GET /api/auto-engine */
+/* phd auto-engine 2021 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -967,7 +967,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2020";
+  var AUTO_ENGINE_VERSION = "2021";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2378,14 +2378,17 @@
       return w.food <= 0 && w.healReserve <= 0 && !this.hasBagCookables(w);
     }
     /**
-     * Eng 2019: cook / light / chop-fuel when bag has cookables.
+     * Eng 2021 (t1671): cook / light / chop-fuel / fund-hatchet when bag has cookables.
      * Shared by maintain layer, food-seek, FOOD_BUFFER, fund farm — one rule.
+     * No forever-claim without a fuel path: if no fire/logs and cannot chop or fund
+     * hatchet, return false so fish/explore/fund farm can run.
      */
     tryCookBagCookables(host, w, stance, statusLabel) {
       var _a, _b, _c;
       if (!this.hasBagCookables(w)) return false;
-      if (!w.hasFire && w.hasLogs) host.lightFireOnce();
-      else if (!w.hasFire && !w.hasLogs) {
+      if (!w.hasFire && w.hasLogs) {
+        host.lightFireOnce();
+      } else if (!w.hasFire && !w.hasLogs) {
         const tree = (_c = (_b = this.mem(w, "tree")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.tree) != null ? _c : null;
         if (tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y)) {
           if (this.walkToTile(host, tree.x, tree.y)) {
@@ -2396,7 +2399,17 @@
             this.setStatus1001(host, w, stance, statusLabel);
             return true;
           }
+          return false;
         }
+        if (!host.hasTool("hatchet")) {
+          const anvil = this.mem(w, "anvil");
+          if (this.canFundToolNow("hatchet", w, anvil) && host.acquireTool("hatchet")) {
+            this.setStatus1001(host, w, stance, statusLabel);
+            return true;
+          }
+          return false;
+        }
+        return false;
       }
       if (w.bagFree <= 0) host.freeCookSlot();
       host.cookOnce();
