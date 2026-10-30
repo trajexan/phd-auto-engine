@@ -1,4 +1,4 @@
-/* phd auto-engine 2021 — pull via GET /api/auto-engine */
+/* phd auto-engine 2022 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -967,7 +967,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2021";
+  var AUTO_ENGINE_VERSION = "2022";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2015,6 +2015,12 @@
       if (w.food > 0 && w.hp < w.maxHp * 0.85) host.eat();
       if (w.food <= 0 && w.coins > 0) host.buyFoodIfCritical();
       if (this.tryCookBagCookables(host, w, stance, `${labelPrefix} cook`)) return true;
+      if (this.hasBagCookables(w) && !this.canCookBagCookables(host, w)) {
+        if (this.trySellUnusedOnce(host, w)) {
+          this.setStatus1001(host, w, stance, `${labelPrefix} sell raw`);
+          return true;
+        }
+      }
       const pond = this.resolvePond(w);
       const tree = this.mem(w, "tree");
       const hasRod = host.hasTool("rod");
@@ -2024,7 +2030,7 @@
           if (host.acquireTool("rod")) return true;
         }
         if (this.tryFundBeginnerToolFarm(host, w, stance, tree, pond)) return true;
-        if (labelPrefix === "emerg" && w.hub) {
+        if (labelPrefix === "emerg" && w.hub && this.foodUrgency(w) && (host.hasTool("hatchet") || host.hasTool("rod") || host.hasTool("pickaxe"))) {
           this.desireXY = { x: w.hub.x, y: w.hub.y };
           host.walkTo(w.hub.x, w.hub.y);
           this.setStatus1001(host, w, stance, "emerg hub fund");
@@ -2148,13 +2154,20 @@
       if (w.bagFree > 0) return false;
       this.h1001.topEvent = "bag_full";
       this.bagFullUntil = this.runTicks + 600;
-      this.setStatus1001(host, w, stance, "bag forge\u2192trim");
-      if (host.forgeWieldedOnce()) return true;
       const flooded = this.bagFloodedWeps(host, w);
-      if (!flooded && this.wantSmithKit(w) && host.smithKitOnce()) return true;
-      if (host.craftGemRingOnce()) return true;
-      if (!flooded && host.craftWoodForValueOnce()) return true;
-      if (!flooded && host.fletchStyleOnce()) return true;
+      const canForge = flooded || this.wantSmithKit(w) || w.oreCount > 0 || w.logCount > 0 && !this.hasBagCookables(w);
+      const fishOnly = this.hasBagCookables(w) && w.oreCount <= 0 && !flooded;
+      this.setStatus1001(
+        host,
+        w,
+        stance,
+        fishOnly ? "bag sell trim" : canForge ? "bag forge\u2192trim" : "bag sell trim"
+      );
+      if (!fishOnly && host.forgeWieldedOnce()) return true;
+      if (!fishOnly && !flooded && this.wantSmithKit(w) && host.smithKitOnce()) return true;
+      if (!fishOnly && host.craftGemRingOnce()) return true;
+      if (!fishOnly && !flooded && host.craftWoodForValueOnce()) return true;
+      if (!fishOnly && !flooded && host.fletchStyleOnce()) return true;
       if (this.trySellUnusedOnce(host, w)) return true;
       if (host.sellOreKeep(this.h1001.lockedMats ? 2 : 0)) return true;
       if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) return true;
@@ -2417,19 +2430,35 @@
       return true;
     }
     /**
+     * Eng 2022: true when bag cookables still have a live fuel/cook path (no side effects).
+     * Mirrors tryCookBagCookables gates — if false, raw is sellable fund (t1683/t1695).
+     */
+    canCookBagCookables(host, w) {
+      var _a, _b, _c;
+      if (!this.hasBagCookables(w)) return false;
+      if (w.hasFire || w.hasLogs) return true;
+      const tree = (_c = (_b = this.mem(w, "tree")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.tree) != null ? _c : null;
+      if (tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y)) return true;
+      if (!host.hasTool("hatchet")) {
+        const anvil = this.mem(w, "anvil");
+        if (this.canFundToolNow("hatchet", w, anvil)) return true;
+      }
+      return false;
+    }
+    /**
      * Eng 2017 (t1652 ujvnep): gate host.sellUnusedOnce.
      * Host walks shop when hasPlain (e.g. bag Sword) even with 0 mats — door thrash if
      * path stalls; returns true every walk tick with no sell. Stall after no progress;
      * skip entirely when empty-food + rod + known pond/farm (fish first).
+     * Eng 2022: cookables block sell ONLY while cook path is live; else sell raw for fund.
      */
     trySellUnusedOnce(host, w) {
       if (this.runTicks < this.sellUnusedBlockUntil) return false;
-      const needFoodPath = this.foodPathEmpty(w) || this.hasBagCookables(w);
       const pond = this.resolvePond(w);
       const farmOk = !!pond || w.pondKnown || !!this.lastFoodFarm && this.lastFoodFarm.depth === w.depth;
-      if (needFoodPath && this.hasBagCookables(w)) return false;
-      if (needFoodPath && host.hasTool("rod") && farmOk) return false;
-      if (this.foodPathEmpty(w) && host.hasTool("rod") && !this.hasSellableMats(w)) return false;
+      if (this.hasBagCookables(w) && this.canCookBagCookables(host, w)) return false;
+      if (this.foodPathEmpty(w) && host.hasTool("rod") && farmOk) return false;
+      if (this.foodPathEmpty(w) && host.hasTool("rod") && !this.hasSellableMats(w) && !this.hasBagCookables(w)) return false;
       const before = `${w.coins}|${w.bagFree}|${w.logCount}|${w.oreCount}|${w.progressFp || ""}`;
       const acted = host.sellUnusedOnce();
       if (!acted) {
@@ -2831,11 +2860,20 @@
         this.h1001.lockedMats = true;
         return false;
       }
+      if (this.trySellUnusedOnce(host, w)) return true;
+      if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) return true;
       const rock = this.mem(w, "rock");
       const tree = this.mem(w, "tree");
+      const anvil = this.mem(w, "anvil");
       if (rock && host.hasTool("pickaxe")) {
         if (this.walkToTile(host, rock.x, rock.y)) return true;
         return this.tryGather(host, w, stance, "fund mine");
+      }
+      if (!host.hasTool("pickaxe") && rock) {
+        if (this.canFundToolNow("pickaxe", w, anvil) && host.acquireTool("pickaxe")) {
+          this.setStatus1001(host, w, stance, "fund pickaxe");
+          return true;
+        }
       }
       if (tree && host.hasTool("hatchet")) {
         if (this.walkToTile(host, tree.x, tree.y)) return true;
@@ -2849,7 +2887,6 @@
         this.setStatus1001(host, w, stance, "fund mobs");
         return true;
       }
-      if (this.trySellUnusedOnce(host, w)) return true;
       if (w.explore) {
         host.walkTo(w.explore.x, w.explore.y);
         return true;
