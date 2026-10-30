@@ -1,4 +1,4 @@
-/* phd auto-engine 2019 — pull via GET /api/auto-engine */
+/* phd auto-engine 2020 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -967,7 +967,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2019";
+  var AUTO_ENGINE_VERSION = "2020";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1014,6 +1014,9 @@
   var SAME_TARGET_MAX = 3;
   var TILE_BLOCK_TICKS = 200;
   var IDLE_STUCK_TICKS = 48;
+  var STUCK_METER_SCAN = 4;
+  var STUCK_WATCHDOG_FIRES = 3;
+  var STUCK_WATCHDOG_WINDOW = 400;
   var STUCK_TILE_RING = 12;
   var TOOL_BLOCK_TICKS = 400;
   var PROGRESS_STALL_TICKS = 60;
@@ -1238,6 +1241,27 @@
       __publicField(this, "stuckApproachBest", 9999);
       /** Recent tiles while approaching (revisit → thrash fingerprint). */
       __publicField(this, "stuckRecentTiles", []);
+      /**
+       * Eng 2020: progress-stuck fire times (runTicks) for TERM watchdog.
+       * Cleared on gear/food/xp progress; kill when ≥3 in window.
+       */
+      __publicField(this, "stuckFireTicks", []);
+      __publicField(this, "stuckWatchdogFired", false);
+      /** Eng 2020/t1668: last meter-scan tick + fingerprints (exp/gear/hp/mp). */
+      __publicField(this, "stuckMeterAt", 0);
+      __publicField(this, "stuckMeterXp", "");
+      __publicField(this, "stuckMeterGear", "");
+      __publicField(this, "stuckMeterHp", -1);
+      __publicField(this, "stuckMeterMp", -1);
+      /** Recent status lines for repeated-action thrash (≥2 same in ring). */
+      __publicField(this, "stuckRecentStatus", []);
+      /**
+       * Eng 2020 / t1669: observational marks — set whenever detection trips,
+       * even if eng does not SNAP / rethink / watchdog. Exposed on FHD + SIT.
+       */
+      __publicField(this, "markThrash", false);
+      __publicField(this, "markClash", false);
+      __publicField(this, "markStuck", false);
       /** Last progressFp (heal+gear+ore); reset stall when it changes. */
       __publicField(this, "progressFp", "");
       /** runTicks when progressFp last changed (heal up / equip / forge+). */
@@ -1388,6 +1412,17 @@
         this.stuckDesireKey = "";
         this.stuckApproachBest = 9999;
         this.stuckRecentTiles = [];
+        this.stuckFireTicks = [];
+        this.stuckWatchdogFired = false;
+        this.stuckMeterAt = 0;
+        this.stuckMeterXp = "";
+        this.stuckMeterGear = "";
+        this.stuckMeterHp = -1;
+        this.stuckMeterMp = -1;
+        this.stuckRecentStatus = [];
+        this.markThrash = false;
+        this.markClash = false;
+        this.markStuck = false;
         this.eliteThrash = 0;
         this.eliteThrashKey = "";
         this.laneBias = null;
@@ -2442,13 +2477,16 @@
       }
       if (tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y)) {
         this.setStatus1001(host, w, stance, "tools fund chop");
-        if (this.walkToTile(host, tree.x, tree.y)) return true;
-        if (this.tryGather(host, w, stance, "tools fund chop")) return true;
+        this.desireXY = { x: tree.x, y: tree.y };
         const attempt = host.gatherAt(tree.x, tree.y);
         if (attempt.ok || /^enroute$/i.test(attempt.reason || "")) {
-          this.setStatus1001(host, w, stance, "tools fund chop mem");
+          this.setStatus1001(host, w, stance, `tools fund chop (${tree.x},${tree.y})`);
+          this.cool = attempt.ok ? 2 : 1;
           return true;
         }
+        this.noteGatherFail(tree.x, tree.y, attempt.tool);
+        this.noteAction(`fund chop fail \u2014 ${attempt.reason || "x"}`);
+        host.log(`AUTO: fund chop fail \u2014 ${attempt.reason || "x"}`);
       }
       const need = Math.max(1, 30 - w.coins);
       if (this.trySellUnusedOnce(host, w)) {
@@ -2532,13 +2570,14 @@
         }
         if (tree && !this.isGatherTileBlocked(tree.x, tree.y)) {
           this.setStatus1001(host, w, stance, "tools chop");
-          if (this.walkToTile(host, tree.x, tree.y)) return true;
-          if (this.tryGather(host, w, stance, "tools chop")) return true;
+          this.desireXY = { x: tree.x, y: tree.y };
           const attempt = host.gatherAt(tree.x, tree.y);
           if (attempt.ok || /^enroute$/i.test(attempt.reason || "")) {
-            this.setStatus1001(host, w, stance, "tools chop mem");
+            this.setStatus1001(host, w, stance, `tools chop (${tree.x},${tree.y})`);
+            this.cool = attempt.ok ? 2 : 1;
             return true;
           }
+          this.noteGatherFail(tree.x, tree.y, attempt.tool);
         }
         if (host.hasTool("rod")) {
           const p = this.resolvePond(w);
@@ -3715,6 +3754,9 @@
         bagFull: this.runTicks < this.bagFullUntil,
         mineBlocked: this.runTicks < this.mineBlockUntil,
         chestBlocked: this.runTicks < this.chestBlockUntil,
+        thrash: !!this.markThrash,
+        clash: !!this.markClash,
+        stuck: !!this.markStuck,
         phase: this.h1001.phase,
         topEvent: this.h1001.topEvent,
         utilityPick: this.h1001.utilityPick,
@@ -4060,6 +4102,26 @@
     stuckFoodFpOf(w) {
       return `h${w.healReserve}|f${w.food}|r${w.rawFish}`;
     }
+    /** Eng 2020 / t1668: exp/gear/hp/mp fingerprint for meter-scan stuck. */
+    stuckMetersOf(w) {
+      return {
+        xp: w.xpFp || "",
+        gear: this.stuckGearFpOf(w),
+        hp: w.hp | 0,
+        mp: (typeof w.mp === "number" ? w.mp : 0) | 0
+      };
+    }
+    /**
+     * Eng 2020 / t1669: thrash | clash | stuck observational marks.
+     * Always available for FHD / SIT / LIVE STATS even when eng does not intervene.
+     */
+    detectMarks() {
+      return {
+        thrash: !!this.markThrash,
+        clash: !!this.markClash,
+        stuck: !!this.markStuck
+      };
+    }
     /** A meal owns the hero. Shop and chest wait until the catch is cooked. */
     mealOwns(w, stance) {
       return w.bagFree > 1 && this.cookOwed(w, stance) && (w.rawFish > 0 || this.catchingMeal(w, stance));
@@ -4171,7 +4233,14 @@
         const s = this.lastFoodFarm;
         return { key: `foodfell:${s.x},${s.y}`, x: s.x, y: s.y };
       }
-      if (/pond|fish|farm food|hoard food|enroute pond/i.test(st) && w.gather) {
+      const fundGather = /tools fund chop|tools fund fish|tools chop|tools mine|tools fish|fund chop|fund mine|util chop|util mine|util fish/i.test(st);
+      if (fundGather && this.desireXY) {
+        return { key: `fund:${this.desireXY.x},${this.desireXY.y}`, x: this.desireXY.x, y: this.desireXY.y };
+      }
+      if (/tools fund chop|tools chop|fund chop|util chop|chop for/i.test(st) && w.gather) {
+        return { key: `gather:${w.gather.x},${w.gather.y}`, x: w.gather.x, y: w.gather.y };
+      }
+      if (/pond|fish|farm food|hoard food|enroute pond|tools fund fish|tools fish/i.test(st) && w.gather) {
         return { key: `gather:${w.gather.x},${w.gather.y}`, x: w.gather.x, y: w.gather.y };
       }
       if (/find pond/i.test(st) && !w.gather && this.desireXY && w.explore) {
@@ -4191,7 +4260,7 @@
       return null;
     }
     maybeRethinkIdle(host, w, stance) {
-      var _a;
+      var _a, _b, _c;
       const combatBusy = w.foes.some((f) => f.alive && f.lit && f.dist <= 2);
       const gatherBusy = this.sameTargetHits > 0 && this.cool > 0 && !!w.gather;
       const striveBusy = !!this.mineStrive || !!this.anvilStrive;
@@ -4199,11 +4268,48 @@
       const gearFp = this.stuckGearFpOf(w);
       const foodFp = this.stuckFoodFpOf(w);
       const xpFp = w.xpFp || "";
+      const meters = this.stuckMetersOf(w);
+      let meterProg = false;
+      let metersFlat = true;
+      if (this.stuckMeterAt === 0) {
+        this.stuckMeterAt = this.runTicks;
+        this.stuckMeterXp = meters.xp;
+        this.stuckMeterGear = meters.gear;
+        this.stuckMeterHp = meters.hp;
+        this.stuckMeterMp = meters.mp;
+        metersFlat = false;
+      } else if (this.runTicks - this.stuckMeterAt >= STUCK_METER_SCAN) {
+        meterProg = meters.xp !== this.stuckMeterXp || meters.gear !== this.stuckMeterGear || meters.hp !== this.stuckMeterHp || meters.mp !== this.stuckMeterMp;
+        metersFlat = !meterProg;
+        this.stuckMeterAt = this.runTicks;
+        this.stuckMeterXp = meters.xp;
+        this.stuckMeterGear = meters.gear;
+        this.stuckMeterHp = meters.hp;
+        this.stuckMeterMp = meters.mp;
+      } else {
+        metersFlat = meters.xp === this.stuckMeterXp && meters.gear === this.stuckMeterGear && meters.hp === this.stuckMeterHp && meters.mp === this.stuckMeterMp;
+        meterProg = !metersFlat;
+      }
       const gearProg = gearFp !== this.stuckGearFp && this.stuckGearFp !== "";
       const foodProg = foodFp !== this.stuckFoodFp && this.stuckFoodFp !== "";
       const expProg = xpFp !== this.stuckXpFp && this.stuckXpFp !== "";
+      const realProg = gearProg || foodProg || expProg || meterProg;
+      const stNow = (this.lastStatus || "").trim();
+      if (stNow) {
+        const last = this.stuckRecentStatus[this.stuckRecentStatus.length - 1] || "";
+        if (stNow !== last) {
+          this.stuckRecentStatus.push(stNow);
+          if (this.stuckRecentStatus.length > 8) this.stuckRecentStatus.shift();
+        }
+      }
+      const statusCounts = /* @__PURE__ */ new Map();
+      for (const s of this.stuckRecentStatus) statusCounts.set(s, (statusCounts.get(s) || 0) + 1);
+      let topStatusHits = 0;
+      for (const n of statusCounts.values()) if (n > topStatusHits) topStatusHits = n;
+      const uniqueStatuses = statusCounts.size;
+      const repeatedAction = topStatusHits >= 2 && this.stuckRecentStatus.length >= 2;
       let usefulApproach = false;
-      let thrashing = false;
+      let walkOsc = false;
       const desire = this.stuckDesireTarget(w);
       if (desire) {
         const dist = Math.max(Math.abs(w.tile.x - desire.x), Math.abs(w.tile.y - desire.y));
@@ -4218,7 +4324,7 @@
           usefulApproach = true;
         } else if (dist <= 1) {
           const stPark = (this.lastStatus || "").toLowerCase();
-          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest|remembered chest/i.test(stPark);
+          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest|remembered chest|tools fund chop|tools fund fish|tools chop|tools mine|tools fish/i.test(stPark);
           if (desire.key.startsWith("gather:") && !gatherBusy) {
             usefulApproach = false;
           } else {
@@ -4229,10 +4335,32 @@
           if (this.stuckRecentTiles.length > STUCK_TILE_RING) this.stuckRecentTiles.shift();
           const uniq = new Set(this.stuckRecentTiles);
           if (this.stuckRecentTiles.length >= 6 && uniq.size <= Math.ceil(this.stuckRecentTiles.length * 0.5)) {
-            thrashing = true;
+            walkOsc = true;
           }
         }
       }
+      {
+        const stG = (this.lastStatus || "").toLowerCase();
+        const gatherIntent = /tools fund chop|tools fund fish|tools chop|tools mine|tools fish|enroute gather|enroute pond|chop for|fund chop|fund mine|fish for food|farm food|mine ore|mine gear|util chop|util mine|util fish|open chest|remembered chest/i.test(stG);
+        if (gatherIntent && !gatherBusy && !realProg) {
+          if (usefulApproach) walkOsc = true;
+          usefulApproach = false;
+        }
+      }
+      const thrashNow = metersFlat && repeatedAction && walkOsc && !combatBusy && !gatherBusy && !striveBusy;
+      const clashNow = metersFlat && uniqueStatuses >= 2 && this.stuckRecentStatus.length >= 4 && !combatBusy && !gatherBusy && !striveBusy;
+      if (realProg || combatBusy || gatherBusy || striveBusy) {
+        this.markThrash = false;
+        this.markClash = false;
+        this.markStuck = false;
+      } else {
+        if (thrashNow) this.markThrash = true;
+        if (clashNow) this.markClash = true;
+        if (metersFlat && this.stuckTicks >= Math.floor(IDLE_STUCK_TICKS / 2)) {
+          this.markStuck = true;
+        }
+      }
+      const thrashing = this.markThrash || walkOsc;
       if (!this.stuckTile && !this.stuckXpFp && !this.stuckGearFp && !this.stuckFoodFp) {
         this.stuckTile = tile;
         this.stuckGearFp = gearFp;
@@ -4241,26 +4369,71 @@
         this.stuckTicks = 0;
         return;
       }
-      if (combatBusy || gatherBusy || striveBusy || usefulApproach || gearProg || foodProg || expProg) {
+      if (combatBusy || gatherBusy || striveBusy || usefulApproach || realProg) {
         this.stuckTile = tile;
         this.stuckGearFp = gearFp;
         this.stuckFoodFp = foodFp;
         this.stuckXpFp = xpFp;
         this.stuckTicks = 0;
         if (foodProg) this.pondRethinks = 0;
-        if (usefulApproach || gearProg || foodProg || expProg || combatBusy || striveBusy) {
+        if (realProg) {
+          this.stuckFireTicks = [];
+          this.stuckWatchdogFired = false;
+        }
+        if (usefulApproach || realProg || combatBusy || striveBusy) {
           this.stuckRecentTiles = [];
         }
         return;
       }
       this.stuckTile = tile;
       this.stuckTicks += thrashing ? 2 : 1;
+      if (metersFlat && this.stuckTicks >= Math.floor(IDLE_STUCK_TICKS / 2)) {
+        this.markStuck = true;
+      }
       if (this.stuckTicks < IDLE_STUCK_TICKS) return;
       const keepStairs = this.stairsStrive && /ceiling thrash|farm ceiling|food fat/i.test(this.stairsStrive.label) && (w.healReserve > 0 || w.food > 0) && w.kitReady && w.descendSafe;
       if (keepStairs) {
         this.stuckTicks = 0;
         this.noteAction("stuck rethink \u2014 keep ceiling stairs");
         return;
+      }
+      this.markStuck = true;
+      if (thrashing) this.markThrash = true;
+      const stuckReason = this.markThrash ? "stuck thrash (no approach / meters flat)" : this.markClash ? "stuck clash (status osc / meters flat)" : "stuck (no gear/food/exp/meters/approach)";
+      try {
+        (_a = host.onStuckProgress) == null ? void 0 : _a.call(host, {
+          status: this.lastStatus || "stuck rethink",
+          ticks: this.runTicks,
+          thrashing: this.markThrash,
+          reason: stuckReason
+        });
+      } catch {
+      }
+      if (!this.stuckWatchdogFired) {
+        this.stuckFireTicks.push(this.runTicks);
+        this.stuckFireTicks = this.stuckFireTicks.filter(
+          (t) => this.runTicks - t <= STUCK_WATCHDOG_WINDOW
+        );
+        if (this.stuckFireTicks.length >= STUCK_WATCHDOG_FIRES) {
+          this.stuckWatchdogFired = true;
+          this.noteAction(
+            `stuck watchdog \u2014 ${this.stuckFireTicks.length} fires / ${STUCK_WATCHDOG_WINDOW}t`
+          );
+          host.log(
+            `AUTO: stuck watchdog kill \u2014 ${this.stuckFireTicks.length} rethinks without progress`
+          );
+          try {
+            (_b = host.onStuckWatchdogKill) == null ? void 0 : _b.call(host, {
+              status: this.lastStatus || "stuck watchdog",
+              ticks: this.runTicks,
+              stuckFires: this.stuckFireTicks.length,
+              windowTicks: STUCK_WATCHDOG_WINDOW
+            });
+          } catch {
+          }
+          this.stuckTicks = 0;
+          return;
+        }
       }
       this.stuckTicks = 0;
       this.stuckApproachBest = 9999;
@@ -4319,7 +4492,7 @@
       if (w.loot) this.noteGatherFail(w.loot.x, w.loot.y);
       {
         const stChest = (this.lastStatus || "").toLowerCase();
-        if (/remembered chest|open chest/i.test(stChest) && ((_a = w.seen) == null ? void 0 : _a.chest)) {
+        if (/remembered chest|open chest/i.test(stChest) && ((_c = w.seen) == null ? void 0 : _c.chest)) {
           this.softBlockChest(host, w, w.seen.chest.x, w.seen.chest.y, "stuck rethink");
         }
       }
