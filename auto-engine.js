@@ -1,4 +1,4 @@
-/* phd auto-engine 2028 — pull via GET /api/auto-engine */
+/* phd auto-engine 2029 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -971,7 +971,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2028";
+  var AUTO_ENGINE_VERSION = "2029";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2772,6 +2772,11 @@
       var _a, _b;
       if (this.fundIntentBlocks("tool")) return false;
       if (!this.claimFundIntent("tool")) return false;
+      if (!this.beginnerToolsIncomplete(host)) {
+        this.clearFundIntent("tool");
+        this.h1001.phase = !w.hasMetalWeapon && !w.hasStyleWeapon ? "FIRST_WEP" : "GEAR_FARM";
+        return false;
+      }
       const rock = this.mem(w, "rock");
       const tree = this.mem(w, "tree");
       const pond = this.mem(w, "pond");
@@ -2819,7 +2824,7 @@
         if (this.tryGather(host, w, stance, "tools mine")) return true;
         this.blockGatherTile(liveRock.x, liveRock.y);
       }
-      if (!fundingTool && !this.needsRawNoCookSell(host, w, stance) && pond && host.hasTool("rod") && !this.isGatherTileBlocked(pond.x, pond.y)) {
+      if (!fundingTool && this.cookOwed(w, stance) && !this.needsRawNoCookSell(host, w, stance) && pond && host.hasTool("rod") && !this.isGatherTileBlocked(pond.x, pond.y)) {
         this.setStatus1001(host, w, stance, "tools fish");
         this.lastFoodFarm = { depth: w.depth, x: pond.x, y: pond.y };
         if (this.walkToTile(host, pond.x, pond.y)) return true;
@@ -2847,7 +2852,7 @@
           }
           this.noteGatherFail(tree.x, tree.y, attempt.tool);
         }
-        if (host.hasTool("rod") && !this.needsRawNoCookSell(host, w, stance)) {
+        if (host.hasTool("rod") && this.cookOwed(w, stance) && !this.needsRawNoCookSell(host, w, stance)) {
           const p = this.resolvePond(w);
           if (p && !this.isGatherTileBlocked(p.x, p.y)) {
             this.setStatus1001(host, w, stance, "tools fish");
