@@ -1,4 +1,4 @@
-/* phd auto-engine 2034 — pull via GET /api/auto-engine */
+/* phd auto-engine 2035 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2034";
+  var AUTO_ENGINE_VERSION = "2035";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1340,6 +1340,19 @@
       /** Eng 2033: ore-liquidate sameTile streak → abandon after shop-path attempts. */
       __publicField(this, "oreLiqSameTile", 0);
       __publicField(this, "oreLiqTile", "");
+      /**
+       * Eng 2035 / R4: tools find rock thrash (m54rep/r7juze) — after rethink fires
+       * with no live rock, cool-block find-rock label and force explore/wander/hub.
+       */
+      __publicField(this, "rockFindRethinks", 0);
+      __publicField(this, "rockFindBreakUntil", 0);
+      /**
+       * Eng 2035 / R4 5wavp7: kit hatchet/pickaxe acquire sameTile hang — streak +
+       * cool-block so we walk/explore instead of perpetual acquire claim.
+       */
+      __publicField(this, "kitAcquireSameTile", 0);
+      __publicField(this, "kitAcquireTile", "");
+      __publicField(this, "kitAcquireBlockUntil", 0);
       /** Peak healReserve this floor — detect food fall from fat stock. */
       __publicField(this, "peakHealThisFloor", 0);
       /** Elite/threat kite↔anvil thrash counter; patience → fight past / explore. */
@@ -1425,6 +1438,11 @@
         this.rawSellBlockUntil = 0;
         this.oreLiqSameTile = 0;
         this.oreLiqTile = "";
+        this.rockFindRethinks = 0;
+        this.rockFindBreakUntil = 0;
+        this.kitAcquireSameTile = 0;
+        this.kitAcquireTile = "";
+        this.kitAcquireBlockUntil = 0;
         this.fundIntent = null;
         this.forgeBlockUntil = 0;
         this.forgeBlockCoins = 0;
@@ -1605,7 +1623,7 @@
           host,
           w,
           stance,
-          host.hasTool("pickaxe") ? "tools find rock" : "tools wait node"
+          host.hasTool("pickaxe") && !this.rockFindBreakActive() ? "tools find rock" : host.hasTool("pickaxe") ? "tools explore" : "tools wait node"
         );
       } else {
         this.setStatus1001(host, w, stance, "explore");
@@ -2080,6 +2098,7 @@
      * labelPrefix 'emerg' | 'food' for status (unchased never says emerg find pond).
      */
     runFoodSeek(host, w, stance, labelPrefix) {
+      var _a, _b;
       if (w.food > 0 && w.hp < w.maxHp * 0.85) host.eat();
       if (w.food <= 0 && w.coins > 0) host.buyFoodIfCritical();
       if (this.tryCookBagCookables(host, w, stance, `${labelPrefix} cook`)) return true;
@@ -2113,30 +2132,10 @@
         const anvilFood = this.mem(w, "anvil");
         if (this.beginnerToolsIncomplete(host) && w.coins >= 30) {
           if (!host.hasTool("pickaxe") && this.canFundToolNow("pickaxe", w, anvilFood)) {
-            this.setStatus1001(host, w, stance, "kit pickaxe");
-            const shopK = this.mem(w, "shop");
-            const dest = anvilFood || shopK || w.hub;
-            if (dest) this.desireXY = { x: dest.x, y: dest.y };
-            if (host.acquireTool("pickaxe")) return true;
-            if (dest) {
-              host.walkTo(dest.x, dest.y);
-              return true;
-            }
-            if (w.explore) {
-              host.walkTo(w.explore.x, w.explore.y);
-              return true;
-            }
+            if (this.tryKitAcquireWalk(host, w, stance, "pickaxe", anvilFood)) return true;
           }
           if (!host.hasTool("hatchet") && this.canFundToolNow("hatchet", w, anvilFood)) {
-            this.setStatus1001(host, w, stance, "kit hatchet");
-            const shopH = this.mem(w, "shop");
-            const destH = anvilFood || shopH || w.hub;
-            if (destH) this.desireXY = { x: destH.x, y: destH.y };
-            if (host.acquireTool("hatchet")) return true;
-            if (destH) {
-              host.walkTo(destH.x, destH.y);
-              return true;
-            }
+            if (this.tryKitAcquireWalk(host, w, stance, "hatchet", anvilFood)) return true;
           }
         }
         if ((w.pondKnown || pond) && this.canFundRodNow(w)) {
@@ -2172,22 +2171,13 @@
       if (host.hasTool("rod") && !host.hasTool("pickaxe") && w.coins >= 30) {
         const anvilP = this.mem(w, "anvil");
         if (this.canFundToolNow("pickaxe", w, anvilP)) {
-          this.setStatus1001(host, w, stance, "kit pickaxe");
-          const shopP = this.mem(w, "shop");
-          const destP = anvilP || shopP || w.hub;
-          if (destP) this.desireXY = { x: destP.x, y: destP.y };
-          if (host.acquireTool("pickaxe")) return true;
-          if (destP) {
-            host.walkTo(destP.x, destP.y);
-            return true;
-          }
+          if (this.tryKitAcquireWalk(host, w, stance, "pickaxe", anvilP)) return true;
         }
       }
       if (!host.hasTool("hatchet")) {
         const anvil = this.mem(w, "anvil");
-        if (this.canFundToolNow("hatchet", w, anvil) && host.acquireTool("hatchet")) {
-          this.setStatus1001(host, w, stance, "kit hatchet");
-          return true;
+        if (this.canFundToolNow("hatchet", w, anvil)) {
+          if (this.tryKitAcquireWalk(host, w, stance, "hatchet", anvil)) return true;
         }
         if (this.hasBagCookables(w)) {
           if (this.trySellUnusedOnce(host, w)) {
@@ -2212,11 +2202,39 @@
         }
       }
       if (this.pondBreakActive()) {
+        this.dropEnroutePonds();
+        if (this.lastFoodFarm) {
+          this.noteGatherFail(this.lastFoodFarm.x, this.lastFoodFarm.y);
+          this.lastFoodFarm = null;
+        }
         if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) {
           this.setStatus1001(host, w, stance, `${labelPrefix} sell mats`);
           return true;
         }
-        if (labelPrefix === "food") return false;
+        if (this.trySellUnusedOnce(host, w)) {
+          this.setStatus1001(host, w, stance, `${labelPrefix} sell`);
+          return true;
+        }
+        if (host.hasTool("pickaxe")) {
+          const live = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
+          if (live && !this.isGatherTileBlocked(live.x, live.y)) {
+            this.setStatus1001(host, w, stance, `${labelPrefix} mine break`);
+            if (this.walkToTile(host, live.x, live.y)) return true;
+            if (this.tryGather(host, w, stance, `${labelPrefix} mine break`)) return true;
+          }
+        }
+        if (w.explore) {
+          this.setStatus1001(host, w, stance, `${labelPrefix} pond break \u2014 explore`);
+          this.desireXY = { x: w.explore.x, y: w.explore.y };
+          host.walkTo(w.explore.x, w.explore.y);
+          return true;
+        }
+        if (w.wander) {
+          this.setStatus1001(host, w, stance, `${labelPrefix} pond break \u2014 explore`);
+          host.walkTo(w.wander.x, w.wander.y);
+          return true;
+        }
+        this.setStatus1001(host, w, stance, `${labelPrefix} pond break`);
         return true;
       }
       if (this.hasBagCookables(w) && (w.bagFree <= 1 || this.canCookBagCookables(host, w) && !this.cookOwed(w, stance))) {
@@ -2303,10 +2321,15 @@
         }
       }
       if (this.lastFoodFarm && this.lastFoodFarm.depth === w.depth) {
-        this.setStatus1001(host, w, stance, `${labelPrefix} last farm`);
-        this.desireXY = { x: this.lastFoodFarm.x, y: this.lastFoodFarm.y };
-        host.walkTo(this.lastFoodFarm.x, this.lastFoodFarm.y);
-        return true;
+        const lf = this.lastFoodFarm;
+        if (this.isGatherTileBlocked(lf.x, lf.y) || this.pondBreakActive()) {
+          this.lastFoodFarm = null;
+        } else {
+          this.setStatus1001(host, w, stance, `${labelPrefix} last farm`);
+          this.desireXY = { x: lf.x, y: lf.y };
+          host.walkTo(lf.x, lf.y);
+          return true;
+        }
       }
       this.h1001.phase = "FOOD_BUFFER";
       this.setStatus1001(host, w, stance, `${labelPrefix} find pond`);
@@ -3111,11 +3134,12 @@
       }
       if (((_a = this.fundIntent) == null ? void 0 : _a.kind) === "food") this.clearFundIntent("food");
       if (!this.claimFundIntent("tool")) {
+        if (host.hasTool("pickaxe") && this.tryToolsFindRockOrBreak(host, w, stance)) return true;
         this.setStatus1001(
           host,
           w,
           stance,
-          host.hasTool("pickaxe") ? "tools find rock" : "tools wait node"
+          host.hasTool("pickaxe") ? "tools explore" : "tools wait node"
         );
         if (w.explore) {
           host.walkTo(w.explore.x, w.explore.y);
@@ -3269,17 +3293,11 @@
       if (fundingTool && canFarmFund && tool !== "pickaxe") {
         if (this.tryFundBeginnerToolFarm(host, w, stance, tree, pond)) return true;
       }
-      if (host.hasTool("pickaxe") && !liveRock && w.explore && !(fundingTool && tool !== "pickaxe" && canFarmFund)) {
-        this.setStatus1001(host, w, stance, "tools find rock");
-        this.desireXY = { x: w.explore.x, y: w.explore.y };
-        host.walkTo(w.explore.x, w.explore.y);
-        return true;
+      if (host.hasTool("pickaxe") && !liveRock && !(fundingTool && tool !== "pickaxe" && canFarmFund)) {
+        if (this.tryToolsFindRockOrBreak(host, w, stance)) return true;
       }
-      if (!rock && !host.hasTool("pickaxe") && w.explore && !canFarmFund) {
-        this.setStatus1001(host, w, stance, "tools find rock");
-        this.desireXY = { x: w.explore.x, y: w.explore.y };
-        host.walkTo(w.explore.x, w.explore.y);
-        return true;
+      if (!rock && !host.hasTool("pickaxe") && !canFarmFund) {
+        if (this.tryToolsFindRockOrBreak(host, w, stance)) return true;
       }
       if (!tool) {
         if ((host.hasTool("pickaxe") || host.hasTool("hatchet") || host.hasTool("rod")) && w.explore) {
@@ -3304,10 +3322,8 @@
           if (this.walkToTile(host, live.x, live.y)) return true;
           if (this.tryGather(host, w, stance, "tools mine")) return true;
         }
-        if (host.hasTool("pickaxe") && w.explore) {
-          this.setStatus1001(host, w, stance, "tools find rock");
-          host.walkTo(w.explore.x, w.explore.y);
-          return true;
+        if (host.hasTool("pickaxe")) {
+          if (this.tryToolsFindRockOrBreak(host, w, stance)) return true;
         }
         this.setStatus1001(host, w, stance, `tools fund ${tool}`);
         return true;
@@ -3317,13 +3333,10 @@
         if (host.acquireTool(tool)) return true;
         return true;
       }
-      if (w.explore) {
-        this.setStatus1001(
-          host,
-          w,
-          stance,
-          host.hasTool("pickaxe") ? "tools find rock" : "tools explore"
-        );
+      if (host.hasTool("pickaxe")) {
+        if (this.tryToolsFindRockOrBreak(host, w, stance)) return true;
+      } else if (w.explore) {
+        this.setStatus1001(host, w, stance, "tools explore");
         host.walkTo(w.explore.x, w.explore.y);
         return true;
       }
@@ -3332,7 +3345,7 @@
           host,
           w,
           stance,
-          host.hasTool("pickaxe") ? "tools find rock" : "tools explore"
+          host.hasTool("pickaxe") && !this.rockFindBreakActive() ? "tools find rock" : "tools explore"
         );
         host.walkTo(w.wander.x, w.wander.y);
         return true;
@@ -3695,6 +3708,11 @@
           return w.oreCount > 0;
         }
         if (n.kind === "shop" && !this.shopVisitWorth(host, w)) return false;
+        if (n.kind === "pond") {
+          if (this.pondBreakActive()) return false;
+          if (this.isGatherTileBlocked(n.x, n.y)) return false;
+          if (this.foodPathEmpty(w) && this.pondRethinks > 0) return false;
+        }
         return true;
       });
       if (chain.length >= 2) {
@@ -3712,7 +3730,10 @@
         }
         if (o.id === "mine") return host.hasTool("pickaxe");
         if (o.id === "chop") return host.hasTool("hatchet");
-        if (o.id === "fish") return host.hasTool("rod");
+        if (o.id === "fish") {
+          if (this.pondBreakActive()) return false;
+          return host.hasTool("rod");
+        }
         if (o.id === "anvil") {
           if (toolsBootstrap || this.beginnerToolsIncomplete(host)) return false;
           if (this.runTicks < this.forgeBlockUntil) return false;
@@ -3779,6 +3800,7 @@
       }
       if (kind === "fish" || kind === "pond") {
         if (!host.hasTool("rod")) return false;
+        if (this.pondBreakActive() || this.isGatherTileBlocked(x, y)) return false;
         if (this.tryCookBagCookables(host, w, stance, "util cook")) return true;
         if (this.walkToTile(host, x, y)) return true;
         return this.tryGather(host, w, stance, "util fish");
@@ -4248,6 +4270,100 @@
     /** e47: cool window after pond thrash — block find-pond/farm-food desire re-entry. */
     pondBreakActive() {
       return this.runTicks < this.pondBreakUntil;
+    }
+    /** Eng 2035: cool after tools find rock thrash — stop infinite find-rock. */
+    rockFindBreakActive() {
+      return this.runTicks < this.rockFindBreakUntil;
+    }
+    /**
+     * Eng 2035 / R4: tools find rock with explore/wander — or break-label explore
+     * when rockFindBreakActive (m54rep/r7juze).
+     */
+    tryToolsFindRockOrBreak(host, w, stance) {
+      const breaking = this.rockFindBreakActive();
+      const label = breaking ? "tools explore" : "tools find rock";
+      if (w.explore) {
+        this.setStatus1001(host, w, stance, label);
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
+        host.walkTo(w.explore.x, w.explore.y);
+        return true;
+      }
+      if (w.wander) {
+        this.setStatus1001(host, w, stance, label);
+        host.walkTo(w.wander.x, w.wander.y);
+        return true;
+      }
+      if (w.hub) {
+        this.setStatus1001(host, w, stance, breaking ? "tools find shop" : "tools find rock");
+        this.desireXY = { x: w.hub.x, y: w.hub.y };
+        host.walkTo(w.hub.x, w.hub.y);
+        return true;
+      }
+      return false;
+    }
+    /**
+     * Eng 2035 / 5wavp7: kit acquire with desire+walk; sameTile streak → cool-block
+     * explore/mine so hang sameTile never parks on acquire claim alone.
+     */
+    tryKitAcquireWalk(host, w, stance, tool, anvil) {
+      var _a, _b;
+      if (this.runTicks < this.kitAcquireBlockUntil) return false;
+      const label = tool === "pickaxe" ? "kit pickaxe" : tool === "hatchet" ? "kit hatchet" : "kit rod";
+      this.setStatus1001(host, w, stance, label);
+      const shop = this.mem(w, "shop");
+      const dest = anvil || shop || w.hub;
+      if (dest) this.desireXY = { x: dest.x, y: dest.y };
+      const tileKey = `${w.tile.x},${w.tile.y}`;
+      if (tileKey === this.kitAcquireTile) this.kitAcquireSameTile++;
+      else {
+        this.kitAcquireTile = tileKey;
+        this.kitAcquireSameTile = 1;
+      }
+      if (host.acquireTool(tool)) {
+        if (host.hasTool(tool)) {
+          this.kitAcquireSameTile = 0;
+          this.kitAcquireTile = "";
+          return true;
+        }
+      }
+      if (this.kitAcquireSameTile >= 16) {
+        this.kitAcquireBlockUntil = this.runTicks + 48;
+        this.kitAcquireSameTile = 0;
+        this.kitAcquireTile = "";
+        this.noteAction(`kit ${tool} sameTile \u2014 cool explore`);
+        if (host.hasTool("pickaxe")) {
+          const live = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
+          if (live && !this.isGatherTileBlocked(live.x, live.y)) {
+            this.setStatus1001(host, w, stance, "kit cool \u2014 mine");
+            if (this.walkToTile(host, live.x, live.y)) return true;
+            if (this.tryGather(host, w, stance, "kit cool \u2014 mine")) return true;
+          }
+        }
+        if (w.explore) {
+          this.setStatus1001(host, w, stance, "kit cool \u2014 explore");
+          host.walkTo(w.explore.x, w.explore.y);
+          return true;
+        }
+        if (w.wander) {
+          this.setStatus1001(host, w, stance, "kit cool \u2014 explore");
+          host.walkTo(w.wander.x, w.wander.y);
+          return true;
+        }
+        return false;
+      }
+      if (dest) {
+        host.walkTo(dest.x, dest.y);
+        return true;
+      }
+      if (w.explore) {
+        host.walkTo(w.explore.x, w.explore.y);
+        return true;
+      }
+      if (w.wander) {
+        host.walkTo(w.wander.x, w.wander.y);
+        return true;
+      }
+      return this.kitAcquireSameTile < 8;
     }
     /** Eng 2033: empty food + ore≥3 → liquidate before fish (t1735); drop queued ponds. */
     oreLiquidateBeforeFish(w) {
@@ -5091,7 +5207,7 @@
       return null;
     }
     maybeRethinkIdle(host, w, stance) {
-      var _a, _b, _c;
+      var _a, _b, _c, _d, _e, _f, _g, _h;
       const combatBusy = w.foes.some((f) => f.alive && f.lit && f.dist <= 2);
       const gatherBusy = this.sameTargetHits > 0 && this.cool > 0 && !!w.gather;
       const striveBusy = !!this.mineStrive || !!this.anvilStrive;
@@ -5155,7 +5271,7 @@
           usefulApproach = true;
         } else if (dist <= 1) {
           const stPark = (this.lastStatus || "").toLowerCase();
-          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest|remembered chest|tools fund chop|tools fund fish|tools fund hatchet|tools fund sell|tools fund pickaxe|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools pickaxe|tools find shop|tools find rock|tools wait|tools explore|kit pickaxe|kit hatchet|food rod|food find shop|food fish|food sell ore|bag sell trim|bag forge|bag find shop|raw sell fund|hub forge\/clean|sell trim|gear cook|sell cook/i.test(stPark);
+          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest|remembered chest|tools fund chop|tools fund fish|tools fund hatchet|tools fund sell|tools fund pickaxe|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools pickaxe|tools find shop|tools find rock|tools wait|tools explore|kit pickaxe|kit hatchet|food rod|food find shop|food fish|food sell ore|food last farm|food buffer|food farm thrash|pond thrash|round-trip pond|util fish|bag sell trim|bag forge|bag find shop|raw sell fund|hub forge\/clean|sell trim|gear cook|sell cook/i.test(stPark);
           if (desire.key.startsWith("gather:") && !gatherBusy) {
             usefulApproach = false;
           } else {
@@ -5172,7 +5288,7 @@
       }
       {
         const stG = (this.lastStatus || "").toLowerCase();
-        const gatherIntent = /tools fund chop|tools fund fish|tools fund hatchet|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools find rock|enroute gather|enroute pond|enroute toward gather|chop for|fund chop|fund mine|fish for food|farm food|food fish|food last farm|(^|\s)fish(\s|$)|mine ore|mine gear|util chop|util mine|util fish|open chest|remembered chest/i.test(stG);
+        const gatherIntent = /tools fund chop|tools fund fish|tools fund hatchet|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools find rock|enroute gather|enroute pond|enroute toward gather|chop for|fund chop|fund mine|fish for food|farm food|food fish|food last farm|food buffer|food farm thrash|pond thrash|round-trip pond|(^|\s)fish(\s|$)|mine ore|mine gear|util chop|util mine|util fish|open chest|remembered chest/i.test(stG);
         if (gatherIntent && !gatherBusy && !realProg) {
           if (usefulApproach) walkOsc = true;
           usefulApproach = false;
@@ -5298,7 +5414,8 @@
           this.foodFarmSoftBlocks = 0;
           this.lastFoodFarm = null;
           this.laneBias = "gear";
-          this.pondBreakUntil = this.runTicks + 48;
+          this.pondBreakUntil = this.runTicks + 96;
+          this.dropEnroutePonds();
           this.noteAction("food farm thrash \u2014 drop last farm");
           host.log("AUTO: food farm thrash \u2014 break to explore/fight");
           if (w.explore) host.walkTo(w.explore.x, w.explore.y);
@@ -5336,20 +5453,35 @@
       this.lootWalkHits = 0;
       this.lootStandHits = 0;
       const stRethink = (this.lastStatus || "").toLowerCase();
-      const pondSpin = /find pond|farm food|enroute pond|enroute toward gather|regen to hub|food fish|emerg fish|tools fish|tools fund fish|(^|\s)fish(\s|$)|food last farm/i.test(stRethink);
+      const pondSpin = /find pond|farm food|enroute pond|enroute toward gather|regen to hub|food fish|emerg fish|tools fish|tools fund fish|(^|\s)fish(\s|$)|food last farm|food buffer|round-trip pond|util fish|food farm thrash/i.test(stRethink);
       if (pondSpin) this.pondRethinks++;
-      const pondThresh = w.food === 0 && w.healReserve === 0 ? 2 : 3;
+      const emptyFoodPath = w.food === 0 && w.healReserve === 0 && !this.hasBagCookables(w);
+      const pondThresh = emptyFoodPath ? 1 : 3;
       if (this.pondRethinks >= pondThresh) {
         this.pondRethinks = 0;
         this.laneBias = "gear";
         if (this.lastFoodFarm) {
+          this.noteGatherFail(this.lastFoodFarm.x, this.lastFoodFarm.y);
           this.noteAction("pond thrash \u2014 drop last food farm");
           this.lastFoodFarm = null;
           this.foodFarmSoftBlocks = 0;
         }
-        this.pondBreakUntil = this.runTicks + 48;
+        const pondMem = (_d = this.mem(w, "pond")) != null ? _d : this.resolvePond(w);
+        if (pondMem) this.noteGatherFail(pondMem.x, pondMem.y);
+        this.dropEnroutePonds();
+        this.pondBreakUntil = this.runTicks + (emptyFoodPath ? 96 : 48);
         this.noteAction("pond thrash \u2014 fight/XP");
         host.log("AUTO: pond thrash \u2014 break to fight/XP");
+        if (host.hasTool("pickaxe")) {
+          const live = (_f = (_e = w.seen) == null ? void 0 : _e.rock) != null ? _f : this.mem(w, "rock");
+          if (live && !this.isGatherTileBlocked(live.x, live.y)) {
+            this.setStatus(host, w, stance, "pond thrash \u2014 mine");
+            if (this.walkToTile(host, live.x, live.y) || this.tryGather(host, w, stance, "pond thrash \u2014 mine")) {
+              this.cool = 5;
+              return;
+            }
+          }
+        }
         if (w.explore) {
           host.walkTo(w.explore.x, w.explore.y);
         } else if (w.wander) {
@@ -5359,10 +5491,47 @@
         this.cool = 5;
         return;
       }
-      const hatchetSpin = /hub for hatchet|forge hatchet|shop for hatchet|wait anvil hatchet|explore for hatchet/i.test(stRethink) && !host.hasTool("hatchet");
+      const rockSpin = /tools find rock/i.test(stRethink);
+      if (rockSpin) this.rockFindRethinks++;
+      else if (!/tools explore|tools mine|tools wait/i.test(stRethink)) this.rockFindRethinks = 0;
+      if (this.rockFindRethinks >= 1) {
+        this.rockFindRethinks = 0;
+        this.rockFindBreakUntil = this.runTicks + 64;
+        this.noteAction("rock find thrash \u2014 explore");
+        host.log("AUTO: tools find rock thrash \u2014 break to explore");
+        if (!host.hasTool("hatchet") && w.coins >= 30) {
+          const anvil = this.mem(w, "anvil");
+          if (this.canFundToolNow("hatchet", w, anvil) && this.tryKitAcquireWalk(host, w, stance, "hatchet", anvil)) {
+            this.cool = 3;
+            return;
+          }
+        }
+        if (host.hasTool("hatchet")) {
+          const tree = (_h = this.mem(w, "tree")) != null ? _h : (_g = w.seen) == null ? void 0 : _g.tree;
+          if (tree && !this.isGatherTileBlocked(tree.x, tree.y)) {
+            this.setStatus(host, w, stance, "rock thrash \u2014 chop");
+            if (this.walkToTile(host, tree.x, tree.y) || this.tryGather(host, w, stance, "rock thrash \u2014 chop")) {
+              this.cool = 3;
+              return;
+            }
+          }
+        }
+        if (w.wander) {
+          host.walkTo(w.wander.x, w.wander.y);
+        } else if (w.explore) {
+          host.walkTo(w.explore.x, w.explore.y);
+        } else if (w.hub) {
+          host.walkTo(w.hub.x, w.hub.y);
+        }
+        this.setStatus(host, w, stance, "rock thrash \u2014 explore");
+        this.cool = 3;
+        return;
+      }
+      const hatchetSpin = /hub for hatchet|forge hatchet|shop for hatchet|wait anvil hatchet|explore for hatchet|kit hatchet/i.test(stRethink) && !host.hasTool("hatchet");
       if (hatchetSpin) this.hatchetRethinks++;
       else this.hatchetRethinks = 0;
-      if (this.hatchetRethinks >= 3) {
+      const hatchetThresh = /kit hatchet/i.test(stRethink) ? 2 : 3;
+      if (this.hatchetRethinks >= hatchetThresh) {
         this.hatchetRethinks = 0;
         this.clearAnvilStrive();
         this.stylePivot = false;
