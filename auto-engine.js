@@ -1,4 +1,4 @@
-/* phd auto-engine 2038 — pull via GET /api/auto-engine */
+/* phd auto-engine 2039 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2038";
+  var AUTO_ENGINE_VERSION = "2039";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1217,6 +1217,17 @@
       /** Desire tile for on-way Cheb sample (updated when walk issued). */
       __publicField(this, "desireXY", null);
       __publicField(this, "doorSeenUntil", 0);
+      /**
+       * Eng 2039 / t1760+t1761: sticky desire while crossing a door so open is
+       * followed by step-through (host slam-closes the tile we leave).
+       */
+      __publicField(this, "doorCrossStickyUntil", 0);
+      __publicField(this, "doorCrossDesire", null);
+      /** Open then retreat / open-close with no approach — abandon at ≥3. */
+      __publicField(this, "doorOscStreak", 0);
+      /** True last tick while standing on remembered door tile. */
+      __publicField(this, "doorOnDoorLast", false);
+      __publicField(this, "doorLastTile", "");
       /** e42: last coins+bag fingerprint — reset fail streak on loot gain. */
       __publicField(this, "chestProgKey", "");
       /**
@@ -1462,6 +1473,11 @@
         this.scan = freshScanState();
         this.desireXY = null;
         this.doorSeenUntil = 0;
+        this.doorCrossStickyUntil = 0;
+        this.doorCrossDesire = null;
+        this.doorOscStreak = 0;
+        this.doorOnDoorLast = false;
+        this.doorLastTile = "";
         this.chestProgKey = "";
         this.anvilStrive = null;
         this.mineStrive = null;
@@ -1597,6 +1613,7 @@
       h.utilityPick = "";
       this.maybeScan(host, w);
       if (this.drainAtTileLoot(host, w, stance)) return true;
+      if (this.tryDoorCrossCommit(host, w, stance)) return true;
       if (this.trySwapMeleeFromBag(host, w, stance)) return true;
       if (!this.foodUrgency(w) && this.heroAtkRange(w) > 1) {
         const press = w.foes.filter((f) => f.alive && f.lit && f.dist <= this.heroAtkRange(w) + 1).sort((a, b) => a.dist - b.dist)[0];
@@ -4284,6 +4301,128 @@
       return this.runTicks < this.bagFullUntil;
     }
     /**
+     * Eng 2039 / t1760+t1761: FOOD_BUFFER door open/close thrash.
+     * Host opens on step-onto and slam-closes on leave — so open→close without
+     * approaching desire means we retreated off the door. Sticky-commit through;
+     * after N fails soft-block door + mark thrash/stuck + explore.
+     */
+    tryDoorCrossCommit(host, w, stance) {
+      var _a, _b;
+      const door = (_b = (_a = w.seen) == null ? void 0 : _a.door) != null ? _b : null;
+      const tileKey = `${w.tile.x},${w.tile.y}`;
+      const pinned = this.stuckDesireTarget(w);
+      const desire = this.doorCrossDesire || this.desireXY || (pinned ? { x: pinned.x, y: pinned.y } : null);
+      if (!door) {
+        this.doorOscStreak = 0;
+        this.doorOnDoorLast = false;
+        this.doorLastTile = tileKey;
+        return false;
+      }
+      const onDoor = w.tile.x === door.x && w.tile.y === door.y;
+      const adjDoor = Math.max(Math.abs(w.tile.x - door.x), Math.abs(w.tile.y - door.y)) <= 1;
+      const foodDoorStatus = /find pond|find shop|food buffer|enroute pond|food fish|food sell ore|sell ore|remembered door|door through|door open/i.test(this.lastStatus || "");
+      if (this.doorOnDoorLast && !onDoor && foodDoorStatus) {
+        let retreated = true;
+        if (desire) {
+          const dist = Math.max(
+            Math.abs(w.tile.x - desire.x),
+            Math.abs(w.tile.y - desire.y)
+          );
+          const onDoorDist = Math.max(
+            Math.abs(door.x - desire.x),
+            Math.abs(door.y - desire.y)
+          );
+          if (dist < onDoorDist) retreated = false;
+        }
+        if (retreated) {
+          this.doorOscStreak += 1;
+          this.markThrash = true;
+          this.noteAction(`door osc streak ${this.doorOscStreak}`);
+        } else {
+          this.doorOscStreak = 0;
+        }
+      }
+      if (foodDoorStatus && this.doorLastTile && this.doorLastTile !== tileKey && adjDoor && (this.doorLastTile === `${door.x},${door.y}` || onDoor)) {
+        if (onDoor && this.doorLastTile !== `${door.x},${door.y}`) {
+          this.doorOscStreak = Math.max(this.doorOscStreak, 1);
+          this.markThrash = true;
+        }
+      }
+      this.doorOnDoorLast = onDoor;
+      this.doorLastTile = tileKey;
+      if (this.doorOscStreak >= 3) {
+        this.markThrash = true;
+        this.markStuck = true;
+        this.noteGatherFail(door.x, door.y);
+        this.noteGatherFail(w.tile.x, w.tile.y);
+        this.doorSeenUntil = this.runTicks + 160;
+        this.doorOscStreak = 0;
+        this.doorCrossStickyUntil = 0;
+        this.doorCrossDesire = null;
+        this.doorOnDoorLast = false;
+        if (foodDoorStatus) {
+          this.pondBreakUntil = Math.max(this.pondBreakUntil, this.runTicks + 96);
+          this.dropEnroutePonds();
+          this.clearFundIntent("food");
+          this.bagFindShopUntil = 0;
+          this.bagFindShopTile = "";
+        }
+        host.log("AUTO: door open/close thrash \u2014 abandon (2039)");
+        this.noteAction("door thrash abandon");
+        if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+        else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        this.setStatus(host, w, stance, "door thrash \u2014 explore");
+        this.cool = 4;
+        return true;
+      }
+      if (this.runTicks < this.doorCrossStickyUntil && this.doorCrossDesire) {
+        const d = this.doorCrossDesire;
+        const dist = Math.max(Math.abs(w.tile.x - d.x), Math.abs(w.tile.y - d.y));
+        if (dist > 1) {
+          this.desireXY = { x: d.x, y: d.y };
+          host.walkTo(d.x, d.y);
+          this.setStatus(host, w, stance, "door through");
+          this.cool = 1;
+          return true;
+        }
+        this.doorCrossStickyUntil = 0;
+        this.doorCrossDesire = null;
+        this.doorOscStreak = 0;
+      }
+      if (this.runTicks < this.doorSeenUntil) return false;
+      if (!desire) return false;
+      const desireDist = Math.max(
+        Math.abs(w.tile.x - desire.x),
+        Math.abs(w.tile.y - desire.y)
+      );
+      if (desireDist <= 1) return false;
+      const doorToDesire = Math.max(
+        Math.abs(door.x - desire.x),
+        Math.abs(door.y - desire.y)
+      );
+      const doorHelps = doorToDesire < desireDist || onDoor;
+      if (onDoor && doorHelps) {
+        this.doorCrossDesire = { x: desire.x, y: desire.y };
+        this.doorCrossStickyUntil = this.runTicks + 28;
+        this.desireXY = { x: desire.x, y: desire.y };
+        host.walkTo(desire.x, desire.y);
+        this.setStatus(host, w, stance, "door through");
+        this.cool = 1;
+        return true;
+      }
+      if (adjDoor && !onDoor && doorHelps && foodDoorStatus) {
+        this.doorCrossDesire = { x: desire.x, y: desire.y };
+        this.doorCrossStickyUntil = this.runTicks + 32;
+        this.desireXY = { x: desire.x, y: desire.y };
+        host.walkTo(door.x, door.y);
+        this.setStatus(host, w, stance, "door open");
+        this.cool = 1;
+        return true;
+      }
+      return false;
+    }
+    /**
      * Eng 2038 / R8: known A↔B status oscillation in the recent ring.
      * Counts distinct labels matching either regex; needs ≥2 of each OR ≥4 ring
      * entries with both sides present (fast-farm HP-regen never reached rethink).
@@ -4305,7 +4444,7 @@
      * (pond/tools/shop loops otherwise never arm stuck/pondBreak).
      */
     statusIgnoresHpMpProgress(st) {
-      return /food fish|enroute pond|find pond|food last farm|food buffer|round-trip pond|util fish|tools find rock|tools mine|tools explore|food sell ore|food find shop|bag find shop|sell trim|round-trip rock|chop for fire|cook\b|first wep|mine first wep|remembered door/i.test(st);
+      return /food fish|enroute pond|find pond|food last farm|food buffer|round-trip pond|util fish|tools find rock|tools mine|tools explore|food sell ore|food find shop|bag find shop|sell trim|round-trip rock|chop for fire|cook\b|first wep|mine first wep|remembered door|door through|door open|door thrash/i.test(st);
     }
     /**
      * Eng 2038 / R8 + t1760: arm breakers from status oscillation alone
@@ -4314,7 +4453,7 @@
     tryStatusOscBreak(host, w, stance) {
       var _a, _b, _c, _d, _e;
       const st = (this.lastStatus || "").toLowerCase();
-      const pondOsc = this.statusOscPair(/enroute pond|food last farm|round-trip pond/, /food fish|util fish|(^|\s)fish(\s|$)/) || this.statusOscPair(/find pond/, /enroute pond|food fish|remembered door/) || /find pond/i.test(st) && this.stuckRecentTiles.length >= 6;
+      const pondOsc = this.statusOscPair(/enroute pond|food last farm|round-trip pond/, /food fish|util fish|(^|\s)fish(\s|$)/) || this.statusOscPair(/find pond/, /enroute pond|food fish|remembered door|door through|door open/) || this.statusOscPair(/find shop|sell ore/, /door through|door open|remembered door/) || /find pond|find shop/i.test(st) && this.stuckRecentTiles.length >= 6 || /find pond|find shop|door through|door open/i.test(st) && this.doorOscStreak >= 2;
       if (pondOsc && !this.pondBreakActive()) {
         this.pondRethinks = 0;
         this.pondBreakUntil = this.runTicks + 128;
@@ -5362,6 +5501,9 @@
       if (/pond|fish|farm food|hoard food|enroute pond|tools fund fish|tools fish/i.test(st) && w.gather) {
         return { key: `gather:${w.gather.x},${w.gather.y}`, x: w.gather.x, y: w.gather.y };
       }
+      if (/find pond|find shop|door through|door open/i.test(st) && this.desireXY) {
+        return { key: `desire:${this.desireXY.x},${this.desireXY.y}`, x: this.desireXY.x, y: this.desireXY.y };
+      }
       if (/find pond/i.test(st) && !w.gather && this.desireXY && w.explore) {
         return { key: `explore:${this.desireXY.x},${this.desireXY.y}`, x: this.desireXY.x, y: this.desireXY.y };
       }
@@ -5454,7 +5596,7 @@
           usefulApproach = true;
         } else if (dist <= 1) {
           const stPark = (this.lastStatus || "").toLowerCase();
-          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest|remembered chest|remembered door|find pond|tools fund chop|tools fund fish|tools fund hatchet|tools fund sell|tools fund pickaxe|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools pickaxe|tools find shop|tools find rock|tools wait|tools explore|kit pickaxe|kit hatchet|kit cool|kit pickaxe thrash|food rod|food find shop|food fish|food sell ore|food last farm|food buffer|food farm thrash|pond thrash|pond osc|round-trip pond|round-trip rock|util fish|bag sell trim|bag forge|bag find shop|raw sell fund|hub forge\/clean|sell trim|gear cook|sell cook|chop for fire|first wep|mine first wep/i.test(stPark);
+          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest|remembered chest|remembered door|door through|door open|door thrash|find pond|tools fund chop|tools fund fish|tools fund hatchet|tools fund sell|tools fund pickaxe|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools pickaxe|tools find shop|tools find rock|tools wait|tools explore|kit pickaxe|kit hatchet|kit cool|kit pickaxe thrash|food rod|food find shop|food fish|food sell ore|food last farm|food buffer|food farm thrash|pond thrash|pond osc|round-trip pond|round-trip rock|util fish|bag sell trim|bag forge|bag find shop|raw sell fund|hub forge\/clean|sell trim|gear cook|sell cook|chop for fire|first wep|mine first wep/i.test(stPark);
           if (desire.key.startsWith("gather:") && !gatherBusy) {
             usefulApproach = false;
           } else {
@@ -5471,13 +5613,15 @@
       }
       {
         const stG = (this.lastStatus || "").toLowerCase();
-        const gatherIntent = /tools fund chop|tools fund fish|tools fund hatchet|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools find rock|enroute gather|enroute pond|enroute toward gather|chop for|fund chop|fund mine|fish for food|farm food|food fish|food last farm|food buffer|food farm thrash|pond thrash|pond osc|find pond|round-trip pond|round-trip rock|(^|\s)fish(\s|$)|mine ore|mine gear|util chop|util mine|util fish|open chest|remembered chest|remembered door|food sell ore|food find shop|sell trim|first wep|mine first wep/i.test(stG);
+        const gatherIntent = /tools fund chop|tools fund fish|tools fund hatchet|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools find rock|enroute gather|enroute pond|enroute toward gather|chop for|fund chop|fund mine|fish for food|farm food|food fish|food last farm|food buffer|food farm thrash|pond thrash|pond osc|find pond|round-trip pond|round-trip rock|(^|\s)fish(\s|$)|mine ore|mine gear|util chop|util mine|util fish|open chest|remembered chest|remembered door|door through|door open|door thrash|food sell ore|food find shop|sell trim|first wep|mine first wep/i.test(stG);
         if (gatherIntent && !gatherBusy && !realProg) {
           if (usefulApproach) walkOsc = true;
           usefulApproach = false;
         }
       }
-      const thrashNow = metersFlat && repeatedAction && walkOsc && !combatBusy && !gatherBusy && !striveBusy;
+      const doorThrash = this.doorOscStreak >= 2;
+      if (doorThrash) walkOsc = true;
+      const thrashNow = (metersFlat && repeatedAction && walkOsc || doorThrash) && !combatBusy && !gatherBusy && !striveBusy;
       const clashNow = metersFlat && uniqueStatuses >= 2 && this.stuckRecentStatus.length >= 4 && !combatBusy && !gatherBusy && !striveBusy;
       if (realProg || combatBusy || gatherBusy || striveBusy) {
         this.markThrash = false;
