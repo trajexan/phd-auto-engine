@@ -1,4 +1,4 @@
-/* phd auto-engine 2036 — pull via GET /api/auto-engine */
+/* phd auto-engine 2037 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2036";
+  var AUTO_ENGINE_VERSION = "2037";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -4287,7 +4287,7 @@
     pondBreakActive() {
       return this.runTicks < this.pondBreakUntil;
     }
-    /** Eng 2035: cool after tools find rock thrash — stop infinite find-rock. */
+    /** Eng 2035/2037: cool after tools find rock/mine thrash — stop infinite find-rock. */
     rockFindBreakActive() {
       return this.runTicks < this.rockFindBreakUntil;
     }
@@ -4310,9 +4310,13 @@
         return true;
       }
       if (w.hub) {
-        this.setStatus1001(host, w, stance, breaking ? "tools find shop" : "tools find rock");
+        this.setStatus1001(host, w, stance, breaking ? "tools explore" : "tools find rock");
         this.desireXY = { x: w.hub.x, y: w.hub.y };
         host.walkTo(w.hub.x, w.hub.y);
+        return true;
+      }
+      if (breaking) {
+        this.setStatus1001(host, w, stance, "tools explore");
         return true;
       }
       return false;
@@ -5517,14 +5521,14 @@
         this.cool = 5;
         return;
       }
-      const rockSpin = /tools find rock/i.test(stRethink);
+      const rockSpin = /tools find rock|tools mine/i.test(stRethink);
       if (rockSpin) this.rockFindRethinks++;
-      else if (!/tools explore|tools mine|tools wait/i.test(stRethink)) this.rockFindRethinks = 0;
+      else if (!/tools explore|tools mine|tools wait|rock thrash/i.test(stRethink)) this.rockFindRethinks = 0;
       if (this.rockFindRethinks >= 1) {
         this.rockFindRethinks = 0;
-        this.rockFindBreakUntil = this.runTicks + 64;
+        this.rockFindBreakUntil = this.runTicks + 192;
         this.noteAction("rock find thrash \u2014 explore");
-        host.log("AUTO: tools find rock thrash \u2014 break to explore");
+        host.log("AUTO: tools find rock/mine thrash \u2014 break to explore (2037)");
         if (!host.hasTool("hatchet") && w.coins >= 30) {
           const anvil = this.mem(w, "anvil");
           if (this.canFundToolNow("hatchet", w, anvil) && this.tryKitAcquireWalk(host, w, stance, "hatchet", anvil)) {
