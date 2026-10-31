@@ -1,4 +1,4 @@
-/* phd auto-engine 2030 — pull via GET /api/auto-engine */
+/* phd auto-engine 2031 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -523,15 +523,9 @@
     const A = !!(s == null ? void 0 : s.anvil) || w.anvilNearby || has("anvil");
     const S = !!(s == null ? void 0 : s.shop) || has("shop");
     if (!R && !T && !P && !A && !S) return null;
-    if (A && !host.hasTool("pickaxe")) return "pickaxe";
-    if (R && !host.hasTool("pickaxe")) return "pickaxe";
-    if (P && !host.hasTool("rod")) return "rod";
-    if (T && !host.hasTool("hatchet")) return "hatchet";
-    if (S) {
-      if (!host.hasTool("hatchet")) return "hatchet";
-      if (!host.hasTool("pickaxe")) return "pickaxe";
-      if (!host.hasTool("rod")) return "rod";
-    }
+    if ((A || R || S) && !host.hasTool("pickaxe")) return "pickaxe";
+    if ((T || A || S || P || R) && !host.hasTool("hatchet")) return "hatchet";
+    if ((P || S) && !host.hasTool("rod")) return "rod";
     return null;
   }
   function canEarlyPush(w, stance) {
@@ -549,8 +543,8 @@
       h.phase = h.phaseResume;
       h.phaseResume = null;
     }
-    if (h.phase === "MAP_HUB" && (w.hub || (s == null ? void 0 : s.anvil) || (s == null ? void 0 : s.shop) || (s == null ? void 0 : s.rock) || (s == null ? void 0 : s.pond) || (s == null ? void 0 : s.tree) || has("anvil") || has("shop") || has("rock") || has("pond") || has("tree"))) {
-      const needTools = !!((s == null ? void 0 : s.rock) || has("rock")) || !!((s == null ? void 0 : s.tree) || has("tree")) || !!((s == null ? void 0 : s.pond) || w.pondKnown || has("pond"));
+    if (h.phase === "MAP_HUB" && (w.hub || (s == null ? void 0 : s.anvil) || (s == null ? void 0 : s.shop) || (s == null ? void 0 : s.rock) || (s == null ? void 0 : s.pond) || (s == null ? void 0 : s.tree) || has("anvil") || has("shop") || has("rock") || has("pond") || has("tree") || w.anvilNearby)) {
+      const needTools = !!((s == null ? void 0 : s.rock) || has("rock")) || !!((s == null ? void 0 : s.tree) || has("tree")) || !!((s == null ? void 0 : s.pond) || w.pondKnown || has("pond")) || !!((s == null ? void 0 : s.anvil) || has("anvil") || w.anvilNearby) || !!((s == null ? void 0 : s.shop) || has("shop"));
       if (needTools) h.phase = "TOOLS";
       else if (!w.hasMetalWeapon && !w.hasStyleWeapon) h.phase = "FIRST_WEP";
       else h.phase = "GEAR_FARM";
@@ -971,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2030";
+  var AUTO_ENGINE_VERSION = "2031";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1921,6 +1915,18 @@
       }
       if (stop.kind === "pond") {
         if (this.hasBagCookables(w)) return false;
+        if (this.pondBreakActive()) {
+          this.scan.enrouteStops.shift();
+          return false;
+        }
+        if (!host.hasTool("hatchet") && w.rawFish >= 3) {
+          this.scan.enrouteStops.shift();
+          return false;
+        }
+        if (w.bagFree <= 1) {
+          this.scan.enrouteStops.shift();
+          return false;
+        }
         this.scan.enrouteStops.shift();
         if (!host.hasTool("rod")) return false;
         this.desireXY = { x: stop.x, y: stop.y };
@@ -2062,6 +2068,17 @@
       const tree = this.mem(w, "tree");
       const hasRod = host.hasTool("rod");
       if (!hasRod) {
+        const anvilFood = this.mem(w, "anvil");
+        if (this.beginnerToolsIncomplete(host) && w.coins >= 30) {
+          if (!host.hasTool("pickaxe") && this.canFundToolNow("pickaxe", w, anvilFood)) {
+            this.setStatus1001(host, w, stance, `${labelPrefix} pickaxe`);
+            if (host.acquireTool("pickaxe")) return true;
+          }
+          if (!host.hasTool("hatchet") && this.canFundToolNow("hatchet", w, anvilFood)) {
+            this.setStatus1001(host, w, stance, `${labelPrefix} hatchet`);
+            if (host.acquireTool("hatchet")) return true;
+          }
+        }
         if ((w.pondKnown || pond) && this.canFundRodNow(w)) {
           this.setStatus1001(host, w, stance, `${labelPrefix} rod`);
           if (host.acquireTool("rod")) return true;
@@ -2091,6 +2108,13 @@
         }
         this.h1001.topEvent = "none";
         return false;
+      }
+      if (host.hasTool("rod") && !host.hasTool("pickaxe") && w.coins >= 30) {
+        const anvilP = this.mem(w, "anvil");
+        if (this.canFundToolNow("pickaxe", w, anvilP) && host.acquireTool("pickaxe")) {
+          this.setStatus1001(host, w, stance, `${labelPrefix} pickaxe`);
+          return true;
+        }
       }
       if (!host.hasTool("hatchet")) {
         const anvil = this.mem(w, "anvil");
@@ -2227,7 +2251,7 @@
       this.h1001.phase = "FOOD_BUFFER";
       this.h1001.topEvent = "none";
       const pond = this.resolvePond(w);
-      if (host.hasTool("rod") && pond && !this.hasBagCookables(w)) {
+      if (host.hasTool("rod") && pond && !this.hasBagCookables(w) && !this.pondBreakActive() && (host.hasTool("hatchet") || w.rawFish < 3) && w.bagFree > 1) {
         pushEnrouteStop(this.scan, {
           id: `${w.depth}:pond:${pond.x},${pond.y}`,
           kind: "pond",
@@ -2576,10 +2600,10 @@
     canFundRodNow(w) {
       return w.coins >= 30 || w.logCount >= 1;
     }
-    /** Plain pick/hatchet shop is BEGINNER_TOOL_PRICE 30c; forge needs anvil+ore (t1628 nncz96). */
+    /** Plain pick/hatchet shop is BEGINNER_TOOL_PRICE 30c; bronze forge needs 2 ore (HATCHET/PICK_SMITH). */
     canFundPlainToolNow(tool, w, anvil) {
       if (w.coins >= 30) return true;
-      return !!(anvil || w.anvilNearby) && w.oreCount > 0;
+      return !!(anvil || w.anvilNearby) && w.oreCount >= 2;
     }
     canFundToolNow(tool, w, anvil) {
       if (tool === "rod") return this.canFundRodNow(w);
@@ -2680,6 +2704,7 @@
       if (this.hasBagCookables(w) && this.canCookBagCookables(host, w) && this.cookOwed(w, stanceSell)) return false;
       if (this.foodPathEmpty(w) && host.hasTool("rod") && farmOk) return false;
       if (this.foodPathEmpty(w) && host.hasTool("rod") && !this.hasSellableMats(w) && !this.hasBagCookables(w)) return false;
+      if (this.beginnerToolsIncomplete(host) && !this.hasSellableMats(w) && !this.hasBagCookables(w) && w.logCount <= 0 && !w.hasLogs) return false;
       const before = `${w.coins}|${w.bagFree}|${w.logCount}|${w.oreCount}|${w.food}|${w.progressFp || ""}`;
       const acted = host.sellUnusedOnce();
       if (!acted) {
@@ -2699,7 +2724,7 @@
         this.sellUnusedProgKey = before;
         this.sellUnusedFailStreak = 1;
       }
-      if (this.sellUnusedFailStreak >= 6) {
+      if (this.sellUnusedFailStreak >= 3) {
         this.sellUnusedBlockUntil = this.runTicks + 48;
         this.sellUnusedFailStreak = 0;
         return false;
@@ -2798,26 +2823,28 @@
         host.log(`AUTO: fund chop fail \u2014 ${attempt.reason || "x"}`);
       }
       const need = Math.max(1, 30 - w.coins);
-      if (this.trySellUnusedOnce(host, w)) {
-        this.setStatus1001(host, w, stance, "tools fund sell");
-        return true;
-      }
       if (this.hasSellableMats(w) && host.sellMatsForCoins(need)) {
         this.setStatus1001(host, w, stance, "tools fund sell mats");
+        return true;
+      }
+      if (this.trySellUnusedOnce(host, w)) {
+        this.setStatus1001(host, w, stance, "tools fund sell");
         return true;
       }
       return false;
     }
     /** True when owned farm tools + registered/visible nodes (or bag mats) can raise 30c. */
     canFarmFundBeginnerTool(host, w, tree, pond) {
+      var _a;
       if (this.hasBagCookables(w) || w.logCount > 0) return true;
       if (pond && host.hasTool("rod") && !this.isGatherTileBlocked(pond.x, pond.y)) return true;
       if (tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y)) return true;
       if (host.hasTool("rod") && w.pondKnown) return true;
+      if (host.hasTool("pickaxe") && (((_a = w.seen) == null ? void 0 : _a.rock) || this.mem(w, "rock") || w.oreCount > 0)) return true;
       return false;
     }
     phaseTools1001(host, w, stance) {
-      var _a, _b, _c, _d;
+      var _a, _b, _c, _d, _e;
       if (this.fundIntentBlocks("tool")) return false;
       if (!this.claimFundIntent("tool")) return false;
       if (!this.beginnerToolsIncomplete(host)) {
@@ -2835,8 +2862,9 @@
         this.setStatus1001(host, w, stance, `tools ${tool}`);
         if (host.acquireTool(tool)) return true;
       }
-      if (this.beginnerToolsIncomplete(host) && w.coins >= 30 && !shop && !anvil && !w.anvilNearby) {
+      if (this.beginnerToolsIncomplete(host) && w.coins >= 30 && !shop && !(anvil && w.oreCount >= 2) && !(w.anvilNearby && w.oreCount >= 2)) {
         this.setStatus1001(host, w, stance, "tools find shop");
+        if (host.acquireTool(tool || "pickaxe")) return true;
         if (w.hub) {
           this.desireXY = { x: w.hub.x, y: w.hub.y };
           host.walkTo(w.hub.x, w.hub.y);
@@ -2872,23 +2900,35 @@
             return true;
           }
           if (tool === "pickaxe" && (anvil || w.anvilNearby) && this.wantSmithKit(w) && host.smithKitOnce()) return true;
-          if (shop) {
-            this.desireXY = { x: shop.x, y: shop.y };
-            host.walkTo(shop.x, shop.y);
+          if (w.coins >= 30) {
+            if (shop) {
+              this.desireXY = { x: shop.x, y: shop.y };
+              host.walkTo(shop.x, shop.y);
+              return true;
+            }
+            if (host.acquireTool(tool)) return true;
+            if (w.hub) {
+              this.setStatus1001(host, w, stance, "tools find shop");
+              this.desireXY = { x: w.hub.x, y: w.hub.y };
+              host.walkTo(w.hub.x, w.hub.y);
+              return true;
+            }
             return true;
           }
-          if (tool !== "rod" && (anvil || w.anvilNearby) && anvil) {
-            this.desireXY = { x: anvil.x, y: anvil.y };
-            host.walkTo(anvil.x, anvil.y);
+          if (tool !== "rod" && w.oreCount >= 2 && (anvil || w.anvilNearby)) {
+            const a = anvil || ((_a = w.seen) == null ? void 0 : _a.anvil) || null;
+            if (a) {
+              this.desireXY = { x: a.x, y: a.y };
+              host.walkTo(a.x, a.y);
+              return true;
+            }
             return true;
           }
-          return true;
         } else {
           if (this.tryFundBeginnerToolFarm(host, w, stance, tree, pond)) return true;
-          this.setStatus1001(host, w, stance, `tools fund ${tool}`);
         }
       }
-      const liveRock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : null;
+      const liveRock = (_c = (_b = w.seen) == null ? void 0 : _b.rock) != null ? _c : null;
       if (liveRock && host.hasTool("pickaxe") && !this.isGatherTileBlocked(liveRock.x, liveRock.y)) {
         this.setStatus1001(host, w, stance, "tools mine");
         if (this.walkToTile(host, liveRock.x, liveRock.y)) return true;
@@ -2969,11 +3009,16 @@
       }
       if (fundingTool && canFarmFund) {
         if (this.tryFundBeginnerToolFarm(host, w, stance, tree, pond)) return true;
-        const live = (_d = (_c = w.seen) == null ? void 0 : _c.rock) != null ? _d : null;
+        const live = (_e = (_d = w.seen) == null ? void 0 : _d.rock) != null ? _e : null;
         if (live && host.hasTool("pickaxe") && !this.isGatherTileBlocked(live.x, live.y)) {
           this.setStatus1001(host, w, stance, "tools mine");
           if (this.walkToTile(host, live.x, live.y)) return true;
           if (this.tryGather(host, w, stance, "tools mine")) return true;
+        }
+        if (host.hasTool("pickaxe") && w.explore) {
+          this.setStatus1001(host, w, stance, "tools find rock");
+          host.walkTo(w.explore.x, w.explore.y);
+          return true;
         }
         this.setStatus1001(host, w, stance, `tools fund ${tool}`);
         return true;
@@ -3046,6 +3091,10 @@
     phaseFirstWep1001(host, w, stance) {
       if (w.hasMetalWeapon || w.hasStyleWeapon) {
         this.h1001.phase = "GEAR_FARM";
+        return false;
+      }
+      if (this.beginnerToolsIncomplete(host)) {
+        this.h1001.phase = "TOOLS";
         return false;
       }
       this.setStatus1001(host, w, stance, "first wep");
@@ -3232,7 +3281,7 @@
       var _a;
       if (!this.foodUrgency(w)) {
         const tool = bootstrapTool(host, w, this.h1001.nodes);
-        if (tool || !w.hasMetalWeapon && !w.hasStyleWeapon && !w.kitReady && (this.mem(w, "tree") || this.mem(w, "rock") || this.mem(w, "shop") || this.mem(w, "pond"))) {
+        if (tool || this.beginnerToolsIncomplete(host) || !w.hasMetalWeapon && !w.hasStyleWeapon && !w.kitReady && (this.mem(w, "tree") || this.mem(w, "rock") || this.mem(w, "shop") || this.mem(w, "pond") || this.mem(w, "anvil") || w.anvilNearby)) {
           this.h1001.phase = "TOOLS";
           this.h1001.phaseResume = null;
           return false;
@@ -4708,7 +4757,7 @@
           usefulApproach = true;
         } else if (dist <= 1) {
           const stPark = (this.lastStatus || "").toLowerCase();
-          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest|remembered chest|tools fund chop|tools fund fish|tools chop|tools mine|tools fish/i.test(stPark);
+          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest|remembered chest|tools fund chop|tools fund fish|tools fund hatchet|tools fund sell|tools fund pickaxe|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools pickaxe|tools find shop|food rod|food find shop|food fish|bag sell trim|raw sell fund/i.test(stPark);
           if (desire.key.startsWith("gather:") && !gatherBusy) {
             usefulApproach = false;
           } else {
@@ -4725,7 +4774,7 @@
       }
       {
         const stG = (this.lastStatus || "").toLowerCase();
-        const gatherIntent = /tools fund chop|tools fund fish|tools chop|tools mine|tools fish|enroute gather|enroute pond|chop for|fund chop|fund mine|fish for food|farm food|mine ore|mine gear|util chop|util mine|util fish|open chest|remembered chest/i.test(stG);
+        const gatherIntent = /tools fund chop|tools fund fish|tools fund hatchet|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools find rock|enroute gather|enroute pond|enroute toward gather|chop for|fund chop|fund mine|fish for food|farm food|food fish|food last farm|(^|\s)fish(\s|$)|mine ore|mine gear|util chop|util mine|util fish|open chest|remembered chest/i.test(stG);
         if (gatherIntent && !gatherBusy && !realProg) {
           if (usefulApproach) walkOsc = true;
           usefulApproach = false;
@@ -4889,9 +4938,9 @@
       this.lootWalkHits = 0;
       this.lootStandHits = 0;
       const stRethink = (this.lastStatus || "").toLowerCase();
-      const pondSpin = /find pond|farm food|enroute pond|regen to hub|food fish|emerg fish|tools fish|tools fund fish/i.test(stRethink);
+      const pondSpin = /find pond|farm food|enroute pond|enroute toward gather|regen to hub|food fish|emerg fish|tools fish|tools fund fish|(^|\s)fish(\s|$)|food last farm/i.test(stRethink);
       if (pondSpin) this.pondRethinks++;
-      const pondThresh = w.food === 0 && w.healReserve === 0 ? 3 : 4;
+      const pondThresh = w.food === 0 && w.healReserve === 0 ? 2 : 3;
       if (this.pondRethinks >= pondThresh) {
         this.pondRethinks = 0;
         this.laneBias = "gear";
