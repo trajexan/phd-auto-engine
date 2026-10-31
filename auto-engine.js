@@ -1,4 +1,4 @@
-/* phd auto-engine 2035 — pull via GET /api/auto-engine */
+/* phd auto-engine 2036 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2035";
+  var AUTO_ENGINE_VERSION = "2036";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1349,10 +1349,15 @@
       /**
        * Eng 2035 / R4 5wavp7: kit hatchet/pickaxe acquire sameTile hang — streak +
        * cool-block so we walk/explore instead of perpetual acquire claim.
+       * Eng 2036 / R5: also tick-budget (moving ≠ progress) + kitPickRethinks break.
        */
       __publicField(this, "kitAcquireSameTile", 0);
       __publicField(this, "kitAcquireTile", "");
       __publicField(this, "kitAcquireBlockUntil", 0);
+      /** Consecutive kit-acquire ticks without ownership (moving still counts). */
+      __publicField(this, "kitAcquireTicks", 0);
+      /** kit pickaxe stuck-rethink streak → arm cool + TOOLS. */
+      __publicField(this, "kitPickRethinks", 0);
       /** Peak healReserve this floor — detect food fall from fat stock. */
       __publicField(this, "peakHealThisFloor", 0);
       /** Elite/threat kite↔anvil thrash counter; patience → fight past / explore. */
@@ -1443,6 +1448,8 @@
         this.kitAcquireSameTile = 0;
         this.kitAcquireTile = "";
         this.kitAcquireBlockUntil = 0;
+        this.kitAcquireTicks = 0;
+        this.kitPickRethinks = 0;
         this.fundIntent = null;
         this.forgeBlockUntil = 0;
         this.forgeBlockCoins = 0;
@@ -2132,11 +2139,20 @@
         const anvilFood = this.mem(w, "anvil");
         if (this.beginnerToolsIncomplete(host) && w.coins >= 30) {
           if (!host.hasTool("pickaxe") && this.canFundToolNow("pickaxe", w, anvilFood)) {
-            if (this.tryKitAcquireWalk(host, w, stance, "pickaxe", anvilFood)) return true;
+            if (host.acquireTool("pickaxe") && host.hasTool("pickaxe")) {
+              this.setStatus1001(host, w, stance, "kit pickaxe");
+              return true;
+            }
           }
           if (!host.hasTool("hatchet") && this.canFundToolNow("hatchet", w, anvilFood)) {
-            if (this.tryKitAcquireWalk(host, w, stance, "hatchet", anvilFood)) return true;
+            if (host.acquireTool("hatchet") && host.hasTool("hatchet")) {
+              this.setStatus1001(host, w, stance, "kit hatchet");
+              return true;
+            }
           }
+          this.clearFundIntent("food");
+          this.h1001.phase = "TOOLS";
+          return false;
         }
         if ((w.pondKnown || pond) && this.canFundRodNow(w)) {
           this.setStatus1001(host, w, stance, `${labelPrefix} rod`);
@@ -4304,10 +4320,13 @@
     /**
      * Eng 2035 / 5wavp7: kit acquire with desire+walk; sameTile streak → cool-block
      * explore/mine so hang sameTile never parks on acquire claim alone.
+     * Eng 2036 / R5: also tick-budget (≥32 without ownership even while moving) —
+     * hub orbit never reaches sameTile 16 before stuck WD.
      */
     tryKitAcquireWalk(host, w, stance, tool, anvil) {
       var _a, _b;
       if (this.runTicks < this.kitAcquireBlockUntil) return false;
+      this.kitAcquireTicks++;
       const label = tool === "pickaxe" ? "kit pickaxe" : tool === "hatchet" ? "kit hatchet" : "kit rod";
       this.setStatus1001(host, w, stance, label);
       const shop = this.mem(w, "shop");
@@ -4323,14 +4342,21 @@
         if (host.hasTool(tool)) {
           this.kitAcquireSameTile = 0;
           this.kitAcquireTile = "";
+          this.kitAcquireTicks = 0;
           return true;
         }
       }
-      if (this.kitAcquireSameTile >= 16) {
+      const coolNow = this.kitAcquireSameTile >= 16 || this.kitAcquireTicks >= 32;
+      if (coolNow) {
         this.kitAcquireBlockUntil = this.runTicks + 48;
         this.kitAcquireSameTile = 0;
         this.kitAcquireTile = "";
-        this.noteAction(`kit ${tool} sameTile \u2014 cool explore`);
+        this.kitAcquireTicks = 0;
+        this.noteAction(`kit ${tool} cool \u2014 explore`);
+        if (this.beginnerToolsIncomplete(host)) {
+          this.clearFundIntent("food");
+          this.h1001.phase = "TOOLS";
+        }
         if (host.hasTool("pickaxe")) {
           const live = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
           if (live && !this.isGatherTileBlocked(live.x, live.y)) {
@@ -5271,7 +5297,7 @@
           usefulApproach = true;
         } else if (dist <= 1) {
           const stPark = (this.lastStatus || "").toLowerCase();
-          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest|remembered chest|tools fund chop|tools fund fish|tools fund hatchet|tools fund sell|tools fund pickaxe|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools pickaxe|tools find shop|tools find rock|tools wait|tools explore|kit pickaxe|kit hatchet|food rod|food find shop|food fish|food sell ore|food last farm|food buffer|food farm thrash|pond thrash|round-trip pond|util fish|bag sell trim|bag forge|bag find shop|raw sell fund|hub forge\/clean|sell trim|gear cook|sell cook/i.test(stPark);
+          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest|remembered chest|tools fund chop|tools fund fish|tools fund hatchet|tools fund sell|tools fund pickaxe|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools pickaxe|tools find shop|tools find rock|tools wait|tools explore|kit pickaxe|kit hatchet|kit cool|kit pickaxe thrash|food rod|food find shop|food fish|food sell ore|food last farm|food buffer|food farm thrash|pond thrash|round-trip pond|util fish|bag sell trim|bag forge|bag find shop|raw sell fund|hub forge\/clean|sell trim|gear cook|sell cook/i.test(stPark);
           if (desire.key.startsWith("gather:") && !gatherBusy) {
             usefulApproach = false;
           } else {
@@ -5524,6 +5550,26 @@
           host.walkTo(w.hub.x, w.hub.y);
         }
         this.setStatus(host, w, stance, "rock thrash \u2014 explore");
+        this.cool = 3;
+        return;
+      }
+      const kitPickSpin = /kit pickaxe|kit cool/i.test(stRethink) && !host.hasTool("pickaxe");
+      if (kitPickSpin) this.kitPickRethinks++;
+      else if (!/kit pickaxe|kit cool/i.test(stRethink)) this.kitPickRethinks = 0;
+      if (this.kitPickRethinks >= 1) {
+        this.kitPickRethinks = 0;
+        this.kitAcquireBlockUntil = this.runTicks + 64;
+        this.kitAcquireSameTile = 0;
+        this.kitAcquireTile = "";
+        this.kitAcquireTicks = 0;
+        this.clearFundIntent("food");
+        this.h1001.phase = "TOOLS";
+        this.noteAction("kit pickaxe thrash \u2014 TOOLS explore");
+        host.log("AUTO: kit pickaxe thrash \u2014 break to TOOLS explore");
+        if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+        else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        this.setStatus(host, w, stance, "kit pickaxe thrash \u2014 explore");
         this.cool = 3;
         return;
       }
