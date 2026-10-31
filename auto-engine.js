@@ -1,4 +1,4 @@
-/* phd auto-engine 2042 — pull via GET /api/auto-engine */
+/* phd auto-engine 2043 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2042";
+  var AUTO_ENGINE_VERSION = "2043";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -4452,7 +4452,7 @@
      * (pond/tools/shop loops otherwise never arm stuck/pondBreak).
      */
     statusIgnoresHpMpProgress(st) {
-      return /food fish|enroute pond|find pond|food last farm|food buffer|food mine break|round-trip pond|util fish|tools find rock|tools mine|tools explore|rock osc|food sell ore|food find shop|bag find shop|sell-ore osc|sell trim|round-trip rock|round-trip tree|util chop|chop for fire|cook\b|first wep|mine first wep|first-wep osc|remembered door|door through|door open|door thrash|tools hatchet|open chest|mono thrash|mono divert|hatchet osc|hatchet thrash|explore-kite osc/i.test(st);
+      return /food fish|enroute pond|find pond|food last farm|food buffer|food mine break|round-trip pond|util fish|tools find rock|tools mine|tools explore|rock osc|food sell ore|food find shop|bag find shop|sell-ore osc|sell trim|round-trip rock|round-trip tree|util chop|chop for fire|cook\b|first wep|mine first wep|first-wep osc|remembered door|door through|door open|door thrash|tools hatchet|open chest|mono thrash|mono divert|hatchet osc|hatchet thrash|explore-kite osc|emerg-tools osc|status osc explore\/kite/i.test(st);
     }
     /**
      * Eng 2038 / R8 + t1760: arm breakers from status oscillation alone
@@ -4599,19 +4599,59 @@
         this.cool = 6;
         return true;
       }
-      if (this.statusOscPair(/tools explore|rock osc — explore|tools find rock/, /lethal kite|approach kite/)) {
-        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 192);
+      if (!/explore-kite osc|status osc explore\/kite/i.test(st) && this.statusOscPair(
+        /tools explore|rock osc — explore|tools find rock/,
+        /lethal kite|approach kite|mob kite|kite outlook|\bkite\b/
+      )) {
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 256);
+        this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 96);
+        this.clearFundIntent("tool");
         if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
-          this.clearFundIntent("tool");
           this.h1001.phase = "GEAR_FARM";
         }
         this.noteAction("status osc explore/kite \u2014 gear");
-        host.log("AUTO: status osc tools explore/lethal kite \u2014 leave TOOLS (2042)");
+        host.log("AUTO: status osc tools explore/kite \u2014 leave TOOLS (2043)");
         if (w.hub) host.walkTo(w.hub.x, w.hub.y);
         else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
         this.setStatus(host, w, stance, "explore-kite osc \u2014 hub");
-        this.cool = 6;
+        this.cool = 12;
+        return true;
+      }
+      if (!/emerg-tools osc/i.test(st) && this.statusOscPair(
+        /tools explore|tools find rock|tools mine/,
+        /emerg hub fund|emerg find pond/
+      )) {
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 192);
+        this.clearFundIntent("tool");
+        if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
+          this.h1001.phase = "GEAR_FARM";
+          this.noteAction("status osc emerg-tools \u2014 gear");
+          host.log("AUTO: status osc tools/emerg hub \u2014 leave TOOLS (2043)");
+          if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+          else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+          else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+          this.setStatus(host, w, stance, "emerg-tools osc \u2014 gear");
+          this.cool = 8;
+          return true;
+        }
+        this.claimFundIntent("food", 24);
+        this.noteAction("status osc emerg-tools \u2014 food");
+        host.log("AUTO: status osc tools/emerg hub \u2014 food fund (2043)");
+        const pond = this.resolvePond(w);
+        if (w.hub) {
+          this.desireXY = { x: w.hub.x, y: w.hub.y };
+          host.walkTo(w.hub.x, w.hub.y);
+        } else if (pond && !this.isGatherTileBlocked(pond.x, pond.y) && !this.pondBreakActive()) {
+          this.desireXY = { x: pond.x, y: pond.y };
+          host.walkTo(pond.x, pond.y);
+        } else if (w.wander) {
+          host.walkTo(w.wander.x, w.wander.y);
+        } else if (w.explore) {
+          host.walkTo(w.explore.x, w.explore.y);
+        }
+        this.setStatus(host, w, stance, "emerg-tools osc \u2014 food");
+        this.cool = 8;
         return true;
       }
       const mono = this.stuckRecentStatus.length >= 6 && (() => {
@@ -4627,7 +4667,7 @@
       })();
       if (mono) {
         const low = mono.toLowerCase();
-        if (/food fish|food mine break|tools mine|tools find rock|tools hatchet|open chest|chop for fire|\bcook\b|rock osc/.test(low)) {
+        if (/food fish|food mine break|tools mine|tools find rock|tools hatchet|open chest|chop for fire|\bcook\b|rock osc|food sell ore|food find shop|sell ore|find shop/.test(low)) {
           if (/food fish|food mine break|rock osc/.test(low)) {
             this.pondBreakUntil = Math.max(this.pondBreakUntil, this.runTicks + 128);
             this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 192);
@@ -4648,8 +4688,16 @@
             if ((_m = w.seen) == null ? void 0 : _m.chest) this.softBlockChest(host, w, w.seen.chest.x, w.seen.chest.y, "mono chest/hatchet");
             this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 96);
           }
+          if (/food sell ore|food find shop|sell ore|find shop/.test(low)) {
+            this.bagFindShopUntil = 0;
+            this.bagFindShopTile = "";
+            this.oreLiqSameTile = 0;
+            this.oreLiqTile = "";
+            this.sellOreKeepBlockUntil = this.runTicks + 160;
+            this.clearFundIntent("food");
+          }
           this.noteAction(`mono status ${mono} \u2014 explore`);
-          host.log(`AUTO: mono status divert \u2014 ${mono} (2041)`);
+          host.log(`AUTO: mono status divert \u2014 ${mono} (2043)`);
           if (w.explore) host.walkTo(w.explore.x, w.explore.y);
           else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
           else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
