@@ -1,4 +1,4 @@
-/* phd auto-engine 2046 — pull via GET /api/auto-engine */
+/* phd auto-engine 2047 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2046";
+  var AUTO_ENGINE_VERSION = "2047";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1367,6 +1367,8 @@
       __publicField(this, "sellOreBreakUntil", 0);
       /** Eng 2046 / R16: sticky food mine break ↔ altar/enroute / mono hang. */
       __publicField(this, "foodMineBreakUntil", 0);
+      /** Eng 2047 / R17: sticky stuck-rethink ↔ tools wander/explore (WD thrash class). */
+      __publicField(this, "stuckWanderBreakUntil", 0);
       /**
        * Eng 2035 / R4 5wavp7: kit hatchet/pickaxe acquire sameTile hang — streak +
        * cool-block so we walk/explore instead of perpetual acquire claim.
@@ -1471,6 +1473,7 @@
         this.hatchetChestBreakUntil = 0;
         this.sellOreBreakUntil = 0;
         this.foodMineBreakUntil = 0;
+        this.stuckWanderBreakUntil = 0;
         this.kitAcquireSameTile = 0;
         this.kitAcquireTile = "";
         this.kitAcquireBlockUntil = 0;
@@ -3190,7 +3193,7 @@
         this.h1001.phase = "GEAR_FARM";
         return false;
       }
-      if (this.hatchetChestBreakActive() && host.hasTool("pickaxe")) {
+      if (host.hasTool("pickaxe") && (this.hatchetChestBreakActive() || this.stuckWanderBreakActive() || this.exploreKiteBreakActive() || this.emergToolsBreakActive())) {
         this.clearFundIntent("tool");
         this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 128);
         this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
@@ -3393,7 +3396,7 @@
         if (host.hasTool("pickaxe")) {
           if (this.tryToolsFindRockOrBreak(host, w, stance)) return true;
         }
-        if (this.emergToolsBreakActive() || this.exploreKiteBreakActive()) {
+        if (this.emergToolsBreakActive() || this.exploreKiteBreakActive() || this.stuckWanderBreakActive()) {
           this.setStatus1001(host, w, stance, "tools wander");
           if (w.hub) host.walkTo(w.hub.x, w.hub.y);
           else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
@@ -4486,7 +4489,7 @@
      * (pond/tools/shop loops otherwise never arm stuck/pondBreak).
      */
     statusIgnoresHpMpProgress(st) {
-      return /food fish|enroute pond|find pond|food last farm|food buffer|food mine break|round-trip pond|util fish|tools find rock|tools mine|tools explore|tools wander|tools pickaxe|tools fund|rock osc|food sell ore|food find shop|bag find shop|sell-ore osc|sell trim|round-trip rock|round-trip tree|util chop|chop for fire|cook\b|first wep|mine first wep|first-wep osc|remembered door|door through|door open|door thrash|tools hatchet|open chest|chest soft-block|mono thrash|mono divert|hatchet osc|hatchet thrash|explore-kite osc|emerg-tools osc|status osc explore\/kite|lethal kite|lethal close|approach kite|mob kite|food-mine osc|food-fish mono|altar runecraft/i.test(st);
+      return /food fish|enroute pond|find pond|food last farm|food buffer|food mine break|round-trip pond|util fish|tools find rock|tools mine|tools explore|tools wander|tools pickaxe|tools fund|rock osc|food sell ore|food find shop|bag find shop|sell-ore osc|sell trim|round-trip rock|round-trip tree|util chop|chop for fire|cook\b|first wep|mine first wep|first-wep osc|remembered door|door through|door open|door thrash|tools hatchet|open chest|chest soft-block|mono thrash|mono divert|hatchet osc|hatchet thrash|explore-kite osc|emerg-tools osc|status osc explore\/kite|lethal kite|lethal close|approach kite|mob kite|food-mine osc|food-fish mono|altar runecraft|stuck rethink|stuck-wander osc|wander-mob osc/i.test(st);
     }
     /**
      * Eng 2038 / R8 + t1760: arm breakers from status oscillation alone
@@ -4498,7 +4501,7 @@
       const pondOsc = this.statusOscPair(/enroute pond|food last farm|round-trip pond/, /food fish|util fish|(^|\s)fish(\s|$)/) || this.statusOscPair(/find pond/, /enroute pond|food fish|remembered door|door through|door open/) || this.statusOscPair(/find shop|sell ore/, /door through|door open|remembered door/) || /find pond|find shop/i.test(st) && this.stuckRecentTiles.length >= 6 || /find pond|find shop|door through|door open/i.test(st) && this.doorOscStreak >= 2;
       if (pondOsc && !this.pondBreakActive()) {
         this.pondRethinks = 0;
-        this.pondBreakUntil = this.runTicks + 128;
+        this.pondBreakUntil = this.runTicks + 256;
         if (this.lastFoodFarm) {
           this.noteGatherFail(this.lastFoodFarm.x, this.lastFoodFarm.y);
           this.lastFoodFarm = null;
@@ -4636,9 +4639,9 @@
         return true;
       }
       if (!this.hatchetChestBreakActive() && (this.statusOscPair(/tools hatchet|tools fund hatchet|kit hatchet|hatchet osc|hatchet thrash/, /open chest|chest thrash|looting|chest soft-block/) || this.statusOscPair(/tools hatchet|tools fund hatchet|kit hatchet|hatchet osc|hatchet thrash/, /stuck rethink/) || this.statusOscPair(/tools hatchet|tools fund hatchet/, /mob engage|approach engage|high-ceiling loot|approach kite|mob kite/) || this.statusOscPair(/hatchet osc|hatchet thrash|status osc hatchet/, /chest soft-block|open chest|tools hatchet/))) {
-        this.hatchetChestBreakUntil = this.runTicks + 480;
-        this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 256);
-        this.toolBlock.set("hatchet", this.runTicks + 240);
+        this.hatchetChestBreakUntil = this.runTicks + 640;
+        this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 320);
+        this.toolBlock.set("hatchet", this.runTicks + 320);
         this.clearFundIntent("tool");
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/tools hatchet|tools fund hatchet|kit hatchet|open chest|chest thrash|looting|chest soft-block|hatchet osc|hatchet thrash|stuck rethink|status osc hatchet/i.test(s)
@@ -4650,7 +4653,7 @@
           this.h1001.phase = "FIRST_WEP";
         }
         this.noteAction("status osc hatchet/chest \u2014 gear");
-        host.log("AUTO: status osc tools hatchet/chest \u2014 sticky leave (2046)");
+        host.log("AUTO: status osc tools hatchet/chest \u2014 sticky leave (2047)");
         if (w.hub) host.walkTo(w.hub.x, w.hub.y);
         else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
@@ -4658,13 +4661,13 @@
         this.cool = 16;
         return true;
       }
-      if (!this.exploreKiteBreakActive() && this.statusOscPair(
+      if (!this.exploreKiteBreakActive() && (this.statusOscPair(
         /tools explore|rock osc — explore|tools find rock|tools wander|tools pickaxe|tools hatchet|tools fund|tools mine/,
         /lethal kite|lethal close|lethal cover|approach kite|mob kite|kite outlook|\bkite\b/
-      )) {
-        this.exploreKiteBreakUntil = this.runTicks + 320;
-        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 320);
-        this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 128);
+      ) || this.statusOscPair(/tools explore|tools wander/, /lethal cover|lethal kite|lethal close/))) {
+        this.exploreKiteBreakUntil = this.runTicks + 512;
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 480);
+        this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 192);
         this.clearFundIntent("tool");
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/tools explore|tools find rock|tools wander|tools pickaxe|tools hatchet|tools fund|tools mine|kite|lethal|explore-kite osc|status osc explore\/kite/i.test(s)
@@ -4675,7 +4678,7 @@
           this.h1001.phase = "FIRST_WEP";
         }
         this.noteAction("status osc explore/kite \u2014 sticky");
-        host.log("AUTO: status osc tools explore/kite \u2014 sticky leave (2045)");
+        host.log("AUTO: status osc tools explore/kite \u2014 sticky leave (2047)");
         if (w.hub) host.walkTo(w.hub.x, w.hub.y);
         else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
@@ -4689,17 +4692,21 @@
       ) || this.statusOscPair(
         /emerg hub fund|emerg find pond/,
         /mob engage|approach engage|high-ceiling loot|mob kite|approach kite|kite outlook/
-      ) || this.statusOscPair(/tools fund hatchet|tools fund sell|tools hatchet/, /emerg hub fund|mob kite|approach kite/))) {
-        this.emergToolsBreakUntil = this.runTicks + 256;
-        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 256);
+      ) || this.statusOscPair(/tools fund hatchet|tools fund sell|tools hatchet/, /emerg hub fund|mob kite|approach kite/) || this.statusOscPair(
+        /tools wander|tools explore|tools hatchet/,
+        /mob engage|approach engage|high-ceiling loot|emerg hub fund/
+      ))) {
+        this.emergToolsBreakUntil = this.runTicks + 480;
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 320);
+        this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 320);
         this.clearFundIntent("tool");
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
-          (s) => !/tools explore|tools find rock|tools mine|tools wander|tools hatchet|tools fund|tools pickaxe|emerg hub|emerg find|emerg-tools osc|mob engage|approach engage|mob kite|approach kite|kite outlook/i.test(s)
+          (s) => !/tools explore|tools find rock|tools mine|tools wander|tools hatchet|tools fund|tools pickaxe|emerg hub|emerg find|emerg-tools osc|mob engage|approach engage|mob kite|approach kite|kite outlook|high-ceiling|wander-mob osc/i.test(s)
         );
         if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
           this.h1001.phase = "GEAR_FARM";
           this.noteAction("status osc emerg-tools \u2014 gear");
-          host.log("AUTO: status osc tools/emerg hub \u2014 sticky leave TOOLS (2045)");
+          host.log("AUTO: status osc tools/emerg hub \u2014 sticky leave TOOLS (2047)");
           if (w.hub) host.walkTo(w.hub.x, w.hub.y);
           else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
           else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
@@ -4712,7 +4719,7 @@
         }
         this.claimFundIntent("food", 24);
         this.noteAction("status osc emerg-tools \u2014 food");
-        host.log("AUTO: status osc tools/emerg hub \u2014 sticky food (2045)");
+        host.log("AUTO: status osc tools/emerg hub \u2014 sticky food (2047)");
         const pond = this.resolvePond(w);
         if (w.hub) {
           this.desireXY = { x: w.hub.x, y: w.hub.y };
@@ -4726,6 +4733,49 @@
           host.walkTo(w.explore.x, w.explore.y);
         }
         this.setStatus(host, w, stance, "emerg-tools osc \u2014 food");
+        this.cool = 12;
+        return true;
+      }
+      if (!this.stuckWanderBreakActive() && (this.statusOscPair(/stuck rethink/, /tools wander|tools explore|tools hatchet|tools fund|tools pickaxe/) || this.statusOscPair(/stuck rethink/, /mono divert|mono status/) || this.statusFamilyHits(/stuck rethink/) >= 3 || this.statusFamilyHits(/tools wander|tools explore/) >= 5)) {
+        this.stuckWanderBreakUntil = this.runTicks + 512;
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 480);
+        this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 320);
+        this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 256);
+        this.clearFundIntent("tool");
+        this.stuckRecentStatus = this.stuckRecentStatus.filter(
+          (s) => !/stuck rethink|tools wander|tools explore|tools hatchet|tools fund|tools pickaxe|mono divert|mono status|stuck-wander osc/i.test(s)
+        );
+        if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
+          this.h1001.phase = "GEAR_FARM";
+        } else if (host.hasTool("pickaxe")) {
+          this.h1001.phase = "FIRST_WEP";
+        }
+        this.noteAction("status osc stuck-wander \u2014 leave");
+        host.log("AUTO: status osc stuck rethink/tools wander \u2014 sticky leave (2047)");
+        if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+        this.setStatus(host, w, stance, "stuck-wander osc \u2014 hub");
+        this.cool = 16;
+        return true;
+      }
+      if (!this.stuckWanderBreakActive() && (this.statusOscPair(/first wep/, /explore|enroute toward gather|enroute gather/) || this.statusFamilyHits(/first wep/) >= 5)) {
+        this.stuckWanderBreakUntil = this.runTicks + 384;
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 256);
+        this.stuckRecentStatus = this.stuckRecentStatus.filter(
+          (s) => !/first wep|explore|enroute toward|enroute gather|first-wep osc/i.test(s)
+        );
+        if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
+          this.h1001.phase = "GEAR_FARM";
+        } else if (host.hasTool("pickaxe")) {
+          this.h1001.phase = "FIRST_WEP";
+        }
+        this.noteAction("status osc first-wep/explore \u2014 leave");
+        host.log("AUTO: status osc first wep/explore \u2014 sticky (2047)");
+        if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+        this.setStatus(host, w, stance, "first-wep osc \u2014 hub");
         this.cool = 12;
         return true;
       }
@@ -4784,7 +4834,7 @@
       })();
       if (mono) {
         const low = mono.toLowerCase();
-        if (/food fish|food mine break|tools mine|tools find rock|tools explore|tools wander|tools pickaxe|tools fund|explore-kite|emerg-tools|tools hatchet|open chest|chest soft-block|hatchet osc|hatchet thrash|chop for fire|\bcook\b|rock osc|food sell ore|food find shop|sell ore|find shop|lethal kite|lethal close|approach kite/.test(low)) {
+        if (/food fish|food mine break|tools mine|tools find rock|tools explore|tools wander|tools pickaxe|tools fund|explore-kite|emerg-tools|tools hatchet|open chest|chest soft-block|hatchet osc|hatchet thrash|chop for fire|\bcook\b|rock osc|food sell ore|food find shop|sell ore|find shop|lethal kite|lethal close|approach kite|stuck rethink|first wep/.test(low)) {
           if (/food fish|food mine break|rock osc/.test(low)) {
             this.pondBreakUntil = Math.max(this.pondBreakUntil, this.runTicks + 256);
             this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 256);
@@ -4801,12 +4851,13 @@
             const rk = (_o = (_n = w.seen) == null ? void 0 : _n.rock) != null ? _o : this.mem(w, "rock");
             if (rk) this.blockGatherTile(rk.x, rk.y);
           }
-          if (/tools explore|tools wander|explore-kite|emerg-tools|tools fund|tools pickaxe/.test(low)) {
-            this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 256);
-            this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 192);
-            this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 256);
+          if (/tools explore|tools wander|explore-kite|emerg-tools|tools fund|tools pickaxe|stuck rethink/.test(low)) {
+            this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 480);
+            this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 320);
+            this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 384);
+            this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 512);
             if (/tools fund chop/.test(low)) {
-              this.chopBreakUntil = Math.max(this.chopBreakUntil, this.runTicks + 128);
+              this.chopBreakUntil = Math.max(this.chopBreakUntil, this.runTicks + 192);
             }
             if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) this.h1001.phase = "GEAR_FARM";
             else if (host.hasTool("pickaxe")) this.h1001.phase = "FIRST_WEP";
@@ -4816,8 +4867,8 @@
           }
           if (/tools hatchet|open chest|chest soft-block|hatchet osc|hatchet thrash/.test(low)) {
             if ((_p = w.seen) == null ? void 0 : _p.chest) this.softBlockChest(host, w, w.seen.chest.x, w.seen.chest.y, "mono chest/hatchet");
-            this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 96);
-            this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 256);
+            this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 160);
+            this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 480);
           }
           if (/food sell ore|food find shop|sell ore|find shop/.test(low)) {
             this.bagFindShopUntil = 0;
@@ -4868,6 +4919,10 @@
     foodMineBreakActive() {
       return this.runTicks < this.foodMineBreakUntil;
     }
+    /** Eng 2047: cool after stuck-rethink ↔ tools wander/explore sticky. */
+    stuckWanderBreakActive() {
+      return this.runTicks < this.stuckWanderBreakUntil;
+    }
     /** Eng 2046: count ring hits matching a family regex (coords/tags ignored). */
     statusFamilyHits(re) {
       let n = 0;
@@ -4882,8 +4937,8 @@
      * when rockFindBreakActive (m54rep/r7juze).
      */
     tryToolsFindRockOrBreak(host, w, stance) {
-      const breaking = this.rockFindBreakActive() || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.hatchetChestBreakActive();
-      if (breaking && host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon || w.oreCount >= 3 || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.hatchetChestBreakActive())) {
+      const breaking = this.rockFindBreakActive() || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.hatchetChestBreakActive() || this.stuckWanderBreakActive();
+      if (breaking && host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon || w.oreCount >= 3 || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.hatchetChestBreakActive() || this.stuckWanderBreakActive())) {
         this.clearFundIntent("tool");
         if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
         else this.h1001.phase = "FIRST_WEP";
@@ -6165,6 +6220,27 @@
         }
         this.setStatus(host, w, stance, "rock thrash \u2014 explore");
         this.cool = 3;
+        return;
+      }
+      const wanderSpin = /tools wander|tools explore|tools pickaxe|tools fund|mono divert|stuck-wander osc/i.test(stRethink);
+      if (wanderSpin && host.hasTool("pickaxe")) {
+        this.stuckWanderBreakUntil = this.runTicks + 512;
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 480);
+        this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 320);
+        this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 256);
+        this.clearFundIntent("tool");
+        this.stuckRecentStatus = this.stuckRecentStatus.filter(
+          (s) => !/stuck rethink|tools wander|tools explore|tools pickaxe|tools fund|mono divert/i.test(s)
+        );
+        if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
+        else this.h1001.phase = "FIRST_WEP";
+        this.noteAction("tools wander thrash \u2014 leave");
+        host.log("AUTO: tools wander/explore stuck rethink \u2014 sticky leave (2047)");
+        if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+        this.setStatus(host, w, stance, "stuck-wander thrash \u2014 hub");
+        this.cool = 12;
         return;
       }
       const kitPickSpin = /kit pickaxe|kit cool/i.test(stRethink) && !host.hasTool("pickaxe");
