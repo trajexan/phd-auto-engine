@@ -1,4 +1,4 @@
-/* phd auto-engine 2031 — pull via GET /api/auto-engine */
+/* phd auto-engine 2032 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2031";
+  var AUTO_ENGINE_VERSION = "2032";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2060,6 +2060,12 @@
             host.walkTo(shop.x, shop.y);
             return true;
           }
+          if (w.hub) {
+            this.setStatus1001(host, w, stance, `${labelPrefix} find shop`);
+            this.desireXY = { x: w.hub.x, y: w.hub.y };
+            host.walkTo(w.hub.x, w.hub.y);
+            return true;
+          }
           if (labelPrefix === "food") return false;
           return true;
         }
@@ -2071,11 +2077,11 @@
         const anvilFood = this.mem(w, "anvil");
         if (this.beginnerToolsIncomplete(host) && w.coins >= 30) {
           if (!host.hasTool("pickaxe") && this.canFundToolNow("pickaxe", w, anvilFood)) {
-            this.setStatus1001(host, w, stance, `${labelPrefix} pickaxe`);
+            this.setStatus1001(host, w, stance, "kit pickaxe");
             if (host.acquireTool("pickaxe")) return true;
           }
           if (!host.hasTool("hatchet") && this.canFundToolNow("hatchet", w, anvilFood)) {
-            this.setStatus1001(host, w, stance, `${labelPrefix} hatchet`);
+            this.setStatus1001(host, w, stance, "kit hatchet");
             if (host.acquireTool("hatchet")) return true;
           }
         }
@@ -2112,17 +2118,17 @@
       if (host.hasTool("rod") && !host.hasTool("pickaxe") && w.coins >= 30) {
         const anvilP = this.mem(w, "anvil");
         if (this.canFundToolNow("pickaxe", w, anvilP) && host.acquireTool("pickaxe")) {
-          this.setStatus1001(host, w, stance, `${labelPrefix} pickaxe`);
+          this.setStatus1001(host, w, stance, "kit pickaxe");
           return true;
         }
       }
       if (!host.hasTool("hatchet")) {
         const anvil = this.mem(w, "anvil");
         if (this.canFundToolNow("hatchet", w, anvil) && host.acquireTool("hatchet")) {
-          this.setStatus1001(host, w, stance, `${labelPrefix} hatchet`);
+          this.setStatus1001(host, w, stance, "kit hatchet");
           return true;
         }
-        if (this.hasBagCookables(w) && !this.canCookBagCookables(host, w)) {
+        if (this.hasBagCookables(w)) {
           if (this.trySellUnusedOnce(host, w)) {
             this.setStatus1001(host, w, stance, `${labelPrefix} sell raw`);
             return true;
@@ -2132,6 +2138,12 @@
             this.setStatus1001(host, w, stance, `${labelPrefix} sell raw`);
             this.desireXY = { x: shop.x, y: shop.y };
             host.walkTo(shop.x, shop.y);
+            return true;
+          }
+          if (w.hub) {
+            this.setStatus1001(host, w, stance, `${labelPrefix} find shop`);
+            this.desireXY = { x: w.hub.x, y: w.hub.y };
+            host.walkTo(w.hub.x, w.hub.y);
             return true;
           }
           this.setStatus1001(host, w, stance, `${labelPrefix} sell raw`);
@@ -2161,15 +2173,30 @@
         if (labelPrefix === "food") return false;
         return true;
       }
-      if (this.foodPathEmpty(w) && w.oreCount >= 3 && (this.mem(w, "shop") || w.coins >= 0)) {
-        if (this.trySellOreKeep(host, w, 0)) {
-          this.setStatus1001(host, w, stance, `${labelPrefix} sell ore`);
-          return true;
-        }
+      if (this.foodPathEmpty(w) && w.oreCount >= 3) {
+        this.setStatus1001(host, w, stance, `${labelPrefix} sell ore`);
+        if (this.trySellOreKeep(host, w, 0)) return true;
         if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) {
           this.setStatus1001(host, w, stance, `${labelPrefix} sell mats`);
           return true;
         }
+        const shopOre = this.mem(w, "shop");
+        if (shopOre) {
+          this.desireXY = { x: shopOre.x, y: shopOre.y };
+          host.walkTo(shopOre.x, shopOre.y);
+          return true;
+        }
+        if (w.hub) {
+          this.setStatus1001(host, w, stance, `${labelPrefix} find shop`);
+          this.desireXY = { x: w.hub.x, y: w.hub.y };
+          host.walkTo(w.hub.x, w.hub.y);
+          return true;
+        }
+        if (w.explore) {
+          host.walkTo(w.explore.x, w.explore.y);
+          return true;
+        }
+        return true;
       }
       if (pond || w.gather && w.pondKnown) {
         const t = pond != null ? pond : w.gather;
@@ -2350,6 +2377,18 @@
         this.bagFullUntil = 0;
         this.bagFullFails = 0;
         if ((surplusFood || healRich) && !fishOnly && host.freeCookSlot()) return true;
+        if (!surplusFood && w.hub) {
+          this.setStatus1001(host, w, stance, "bag find shop");
+          this.desireXY = { x: w.hub.x, y: w.hub.y };
+          host.walkTo(w.hub.x, w.hub.y);
+          return true;
+        }
+        if (!surplusFood && w.explore) {
+          this.setStatus1001(host, w, stance, "bag find shop");
+          host.walkTo(w.explore.x, w.explore.y);
+          return true;
+        }
+        return false;
       }
       const shop = this.mem(w, "shop");
       const sellCool = this.runTicks < this.sellUnusedBlockUntil && this.runTicks < this.sellOreKeepBlockUntil;
@@ -2357,7 +2396,20 @@
         host.walkTo(shop.x, shop.y);
         return true;
       }
-      return true;
+      if (!shop && !surplusFood) {
+        if (w.hub) {
+          this.setStatus1001(host, w, stance, "bag find shop");
+          this.desireXY = { x: w.hub.x, y: w.hub.y };
+          host.walkTo(w.hub.x, w.hub.y);
+          return true;
+        }
+        if (w.explore) {
+          this.setStatus1001(host, w, stance, "bag find shop");
+          host.walkTo(w.explore.x, w.explore.y);
+          return true;
+        }
+      }
+      return false;
     }
     /**
      * Eng 2023: soft-block threshold for raw with no cook path (~8–12 / mealBatch).
@@ -2683,10 +2735,6 @@
       if (w.hasFire || w.hasLogs) return true;
       const tree = (_c = (_b = this.mem(w, "tree")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.tree) != null ? _c : null;
       if (tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y)) return true;
-      if (!host.hasTool("hatchet")) {
-        const anvil = this.mem(w, "anvil");
-        if (this.canFundToolNow("hatchet", w, anvil)) return true;
-      }
       return false;
     }
     /**
@@ -3029,11 +3077,33 @@
         return true;
       }
       if (w.explore) {
-        this.setStatus1001(host, w, stance, "tools explore");
+        this.setStatus1001(
+          host,
+          w,
+          stance,
+          host.hasTool("pickaxe") ? "tools find rock" : "tools explore"
+        );
         host.walkTo(w.explore.x, w.explore.y);
         return true;
       }
-      return false;
+      if (w.wander) {
+        this.setStatus1001(
+          host,
+          w,
+          stance,
+          host.hasTool("pickaxe") ? "tools find rock" : "tools explore"
+        );
+        host.walkTo(w.wander.x, w.wander.y);
+        return true;
+      }
+      if (w.hub) {
+        this.setStatus1001(host, w, stance, "tools find shop");
+        this.desireXY = { x: w.hub.x, y: w.hub.y };
+        host.walkTo(w.hub.x, w.hub.y);
+        return true;
+      }
+      this.setStatus1001(host, w, stance, "tools wait node");
+      return true;
     }
     /**
      * 2003 / t1591–t1597: score bag + smithable by offense → equip or smith+equip.
@@ -4757,7 +4827,7 @@
           usefulApproach = true;
         } else if (dist <= 1) {
           const stPark = (this.lastStatus || "").toLowerCase();
-          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest|remembered chest|tools fund chop|tools fund fish|tools fund hatchet|tools fund sell|tools fund pickaxe|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools pickaxe|tools find shop|food rod|food find shop|food fish|bag sell trim|raw sell fund/i.test(stPark);
+          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest|remembered chest|tools fund chop|tools fund fish|tools fund hatchet|tools fund sell|tools fund pickaxe|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools pickaxe|tools find shop|tools find rock|food rod|food find shop|food fish|food sell ore|bag sell trim|bag forge|bag find shop|raw sell fund/i.test(stPark);
           if (desire.key.startsWith("gather:") && !gatherBusy) {
             usefulApproach = false;
           } else {
