@@ -1,4 +1,4 @@
-/* phd auto-engine 2033 — pull via GET /api/auto-engine */
+/* phd auto-engine 2034 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2033";
+  var AUTO_ENGINE_VERSION = "2034";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1328,6 +1328,8 @@
       /** Eng 2033: sticky bag find-shop after escalation — no sell/forge label osc. */
       __publicField(this, "bagFindShopUntil", 0);
       __publicField(this, "bagFindShopTile", "");
+      /** Eng 2034: sticky SELL_TRIM while bag tight with sellables/raws — no GEAR_FARM ping-pong. */
+      __publicField(this, "sellTrimStickyUntil", 0);
       /** Eng 2033: ore-liquidate sameTile streak → abandon after shop-path attempts. */
       __publicField(this, "oreLiqSameTile", 0);
       __publicField(this, "oreLiqTile", "");
@@ -1410,6 +1412,7 @@
         this.bagFullFails = 0;
         this.bagFindShopUntil = 0;
         this.bagFindShopTile = "";
+        this.sellTrimStickyUntil = 0;
         this.oreLiqSameTile = 0;
         this.oreLiqTile = "";
         this.fundIntent = null;
@@ -2466,9 +2469,9 @@
       const healRich = stance.healRich;
       const surplusFood = healRich && w.food > Math.max(2, stance.minFood);
       const flooded = this.bagFloodedWeps(host, w);
-      const canForge = !surplusFood && (flooded || this.wantSmithKit(w) || w.oreCount > 0 && (!w.hasMetalWeapon || !w.hasArmour) || w.logCount > 0 && !this.hasBagCookables(w));
+      const canForge = !surplusFood && w.oreCount > 0 && (this.wantSmithKit(w) || !w.hasMetalWeapon || !w.hasArmour);
       const fishOnly = this.hasBagCookables(w) && w.oreCount <= 0 && !flooded;
-      const task = surplusFood ? "bag free food" : fishOnly ? "bag sell trim" : canForge ? "bag forge\u2192trim" : "bag sell trim";
+      const task = surplusFood ? "bag free food" : fishOnly || flooded ? "bag sell trim" : canForge ? "bag forge\u2192trim" : "bag sell trim";
       this.setStatus1001(host, w, stance, task);
       if (!surplusFood && !fishOnly && host.forgeWieldedOnce()) return true;
       if (!surplusFood && !fishOnly && !flooded && this.wantSmithKit(w) && host.smithKitOnce()) return true;
@@ -2874,8 +2877,8 @@
       const farmOk = !!pond || w.pondKnown || !!this.lastFoodFarm && this.lastFoodFarm.depth === w.depth;
       const stanceSell = foodStance(w.healReserve, w.floorHealNeed, this.traits, w.food);
       if (this.hasBagCookables(w) && this.canCookBagCookables(host, w) && this.cookOwed(w, stanceSell)) return false;
-      if (this.foodPathEmpty(w) && host.hasTool("rod") && farmOk) return false;
-      if (this.foodPathEmpty(w) && host.hasTool("rod") && !this.hasSellableMats(w) && !this.hasBagCookables(w)) return false;
+      if (this.foodPathEmpty(w) && host.hasTool("rod") && farmOk && !this.oreLiquidateBeforeFish(w)) return false;
+      if (this.foodPathEmpty(w) && host.hasTool("rod") && !this.hasSellableMats(w) && !this.hasBagCookables(w) && !this.oreLiquidateBeforeFish(w)) return false;
       if (this.beginnerToolsIncomplete(host) && !this.hasSellableMats(w) && !this.hasBagCookables(w) && w.logCount <= 0 && !w.hasLogs) return false;
       const before = `${w.coins}|${w.bagFree}|${w.logCount}|${w.oreCount}|${w.food}|${w.progressFp || ""}`;
       const acted = host.sellUnusedOnce();
@@ -3210,13 +3213,18 @@
         }
       }
       const canFarmFund = this.canFarmFundBeginnerTool(host, w, tree, pond);
-      if (host.hasTool("pickaxe") && !liveRock && w.explore) {
+      if (fundingTool && canFarmFund && tool !== "pickaxe") {
+        if (this.tryFundBeginnerToolFarm(host, w, stance, tree, pond)) return true;
+      }
+      if (host.hasTool("pickaxe") && !liveRock && w.explore && !(fundingTool && tool !== "pickaxe" && canFarmFund)) {
         this.setStatus1001(host, w, stance, "tools find rock");
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
         host.walkTo(w.explore.x, w.explore.y);
         return true;
       }
       if (!rock && !host.hasTool("pickaxe") && w.explore && !canFarmFund) {
         this.setStatus1001(host, w, stance, "tools find rock");
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
         host.walkTo(w.explore.x, w.explore.y);
         return true;
       }
@@ -3381,7 +3389,7 @@
       return false;
     }
     phaseGear1001(host, w, stance) {
-      var _a, _b, _c, _d;
+      var _a, _b, _c, _d, _e, _f;
       this.h1001.phase = "GEAR_FARM";
       const foodLow = w.food <= Math.max(2, Math.floor(stance.minFood * 0.5));
       const matsFull = w.bagFree <= 1 && (w.oreCount >= 2 || w.logCount >= 2);
@@ -3407,17 +3415,41 @@
       if (anvil || w.anvilNearby || ((_b = (_a = host.listBagCombatGear) == null ? void 0 : _a.call(host)) != null ? _b : []).some((b) => b.slot === "weapon" || b.slot === "armour")) {
         if (this.tryScoreSmithEquip(host, w, stance, "gear score")) return true;
       }
+      if (this.runTicks < this.sellTrimStickyUntil && this.sellTrimStillNeeded(host, w)) {
+        this.h1001.phase = "SELL_TRIM";
+        return this.phaseSellTrim1001(host, w, stance);
+      }
       if ((foodLow || matsFull) && (anvil || w.hub)) {
-        this.setStatus1001(host, w, stance, "hub forge/clean");
-        if (this.tryScoreSmithEquip(host, w, stance, "hub score")) return true;
-        if (host.forgeWieldedOnce()) {
-          this.lastImproveTick = this.runTicks;
-          return true;
+        const hasForgeWork = w.oreCount > 0 || this.wantSmithKit(w);
+        if (foodLow && this.hasBagCookables(w) && !hasForgeWork) {
+          if (this.tryCookBagCookables(host, w, stance, "gear cook")) return true;
+          if (this.cookOwed(w, stance)) {
+            this.h1001.phaseResume = "GEAR_FARM";
+            this.h1001.phase = "FOOD_BUFFER";
+            this.setStatus1001(host, w, stance, "food buffer");
+            return false;
+          }
+          this.armSellTrimSticky(host, w);
+          this.h1001.phase = "SELL_TRIM";
+          return this.phaseSellTrim1001(host, w, stance);
         }
-        if (this.wantSmithKit(w) && host.smithKitOnce()) return true;
-        if (host.craftGemRingOnce()) return true;
-        if ((_c = host.craftClothesOnce) == null ? void 0 : _c.call(host)) return true;
-        if ((_d = host.craftShieldOnce) == null ? void 0 : _d.call(host)) return true;
+        if (hasForgeWork) {
+          this.setStatus1001(host, w, stance, "hub forge/clean");
+          if (this.tryScoreSmithEquip(host, w, stance, "hub score")) return true;
+          if (host.forgeWieldedOnce()) {
+            this.lastImproveTick = this.runTicks;
+            return true;
+          }
+          if (this.wantSmithKit(w) && host.smithKitOnce()) return true;
+          if (host.craftGemRingOnce()) return true;
+          if ((_c = host.craftClothesOnce) == null ? void 0 : _c.call(host)) return true;
+          if ((_d = host.craftShieldOnce) == null ? void 0 : _d.call(host)) return true;
+        } else if (matsFull || foodLow) {
+          if (host.craftGemRingOnce()) return true;
+          if ((_e = host.craftClothesOnce) == null ? void 0 : _e.call(host)) return true;
+          if ((_f = host.craftShieldOnce) == null ? void 0 : _f.call(host)) return true;
+        }
+        this.armSellTrimSticky(host, w);
         this.h1001.phase = "SELL_TRIM";
         return this.phaseSellTrim1001(host, w, stance);
       }
@@ -3507,21 +3539,70 @@
       }
       return false;
     }
+    /** Eng 2034: bag tight with raws/mats/junk weps → keep SELL_TRIM sticky. */
+    sellTrimStillNeeded(host, w) {
+      if (w.bagFree > 2) return false;
+      return this.hasBagCookables(w) || this.hasSellableMats(w) || this.bagFloodedWeps(host, w);
+    }
+    armSellTrimSticky(host, w) {
+      if (this.sellTrimStillNeeded(host, w)) {
+        this.sellTrimStickyUntil = Math.max(this.sellTrimStickyUntil, this.runTicks + 96);
+      }
+    }
     phaseSellTrim1001(host, w, stance) {
       this.setStatus1001(host, w, stance, "sell trim");
+      if (this.hasBagCookables(w) && this.cookOwed(w, stance)) {
+        if (this.tryCookBagCookables(host, w, stance, "sell cook")) return true;
+      }
       if (host.craftGemRingOnce()) return true;
-      if (this.trySellUnusedOnce(host, w)) return true;
+      if (this.trySellUnusedOnce(host, w)) {
+        if (this.sellTrimStillNeeded(host, w)) this.armSellTrimSticky(host, w);
+        else this.sellTrimStickyUntil = 0;
+        return true;
+      }
       if (host.sellOreKeep(this.h1001.lockedMats && !w.hasArmour ? 2 : 0)) return true;
       if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) return true;
       const shop = this.mem(w, "shop");
       if (shop && cheb(w.tile.x, w.tile.y, shop.x, shop.y) > 1) {
+        this.armSellTrimSticky(host, w);
+        this.desireXY = { x: shop.x, y: shop.y };
         host.walkTo(shop.x, shop.y);
         return true;
       }
+      const stillNeed = this.sellTrimStillNeeded(host, w);
+      const sticky = this.runTicks < this.sellTrimStickyUntil;
+      if (stillNeed || sticky) {
+        this.h1001.phase = "SELL_TRIM";
+        if (!stillNeed) {
+          this.sellTrimStickyUntil = 0;
+        } else {
+          this.armSellTrimSticky(host, w);
+          if (w.hub && cheb(w.tile.x, w.tile.y, w.hub.x, w.hub.y) > 2) {
+            this.desireXY = { x: w.hub.x, y: w.hub.y };
+            host.walkTo(w.hub.x, w.hub.y);
+            return true;
+          }
+          if (w.explore) {
+            host.walkTo(w.explore.x, w.explore.y);
+            return true;
+          }
+          if (w.wander) {
+            host.walkTo(w.wander.x, w.wander.y);
+            return true;
+          }
+        }
+        return false;
+      }
+      this.sellTrimStickyUntil = 0;
       if (this.foodUrgency(w)) this.h1001.phase = "FOOD_BUFFER";
       else if (stance.hungry || w.food < stance.minFood) {
-        const tool = bootstrapTool(host, w, this.h1001.nodes);
-        this.h1001.phase = tool ? "TOOLS" : "GEAR_FARM";
+        if (this.hasBagCookables(w) && this.cookOwed(w, stance)) {
+          this.h1001.phaseResume = "GEAR_FARM";
+          this.h1001.phase = "FOOD_BUFFER";
+        } else {
+          const tool = bootstrapTool(host, w, this.h1001.nodes);
+          this.h1001.phase = tool ? "TOOLS" : "GEAR_FARM";
+        }
       } else {
         this.h1001.phase = "GEAR_FARM";
       }
@@ -5021,7 +5102,7 @@
           usefulApproach = true;
         } else if (dist <= 1) {
           const stPark = (this.lastStatus || "").toLowerCase();
-          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest|remembered chest|tools fund chop|tools fund fish|tools fund hatchet|tools fund sell|tools fund pickaxe|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools pickaxe|tools find shop|tools find rock|tools wait|tools explore|kit pickaxe|kit hatchet|food rod|food find shop|food fish|food sell ore|bag sell trim|bag forge|bag find shop|raw sell fund/i.test(stPark);
+          const parked = /food fell|sell for loot|fletch sell|bag stuck|wait anvil|hub for hatchet|cook fuel|dry ground|food fat|farm ceiling → next floor|stairs soft-block|hoard food|hoard fire|hoard loot|hoard explore|enroute pond|enroute gather|enroute toward gather|fish for food|open chest|remembered chest|tools fund chop|tools fund fish|tools fund hatchet|tools fund sell|tools fund pickaxe|tools fund|tools chop|tools mine|tools fish|tools hatchet|tools pickaxe|tools find shop|tools find rock|tools wait|tools explore|kit pickaxe|kit hatchet|food rod|food find shop|food fish|food sell ore|bag sell trim|bag forge|bag find shop|raw sell fund|hub forge\/clean|sell trim|gear cook|sell cook/i.test(stPark);
           if (desire.key.startsWith("gather:") && !gatherBusy) {
             usefulApproach = false;
           } else {
