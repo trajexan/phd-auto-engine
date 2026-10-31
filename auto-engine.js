@@ -1330,6 +1330,13 @@
       __publicField(this, "bagFindShopTile", "");
       /** Eng 2034: sticky SELL_TRIM while bag tight with sellables/raws — no GEAR_FARM ping-pong. */
       __publicField(this, "sellTrimStickyUntil", 0);
+      /**
+       * Eng 2034 / 752huv: raw-sell-fund sameTile streak + cool-block.
+       * Never perpetual sameTile return true when shop walk/sell stalls.
+       */
+      __publicField(this, "rawSellSameTile", 0);
+      __publicField(this, "rawSellTile", "");
+      __publicField(this, "rawSellBlockUntil", 0);
       /** Eng 2033: ore-liquidate sameTile streak → abandon after shop-path attempts. */
       __publicField(this, "oreLiqSameTile", 0);
       __publicField(this, "oreLiqTile", "");
@@ -1413,6 +1420,9 @@
         this.bagFindShopUntil = 0;
         this.bagFindShopTile = "";
         this.sellTrimStickyUntil = 0;
+        this.rawSellSameTile = 0;
+        this.rawSellTile = "";
+        this.rawSellBlockUntil = 0;
         this.oreLiqSameTile = 0;
         this.oreLiqTile = "";
         this.fundIntent = null;
@@ -2570,22 +2580,65 @@
     /**
      * Eng 2023 (t1703): raw≥N + !canCook + bag still has free slots → sell/yield
      * before calm fish / TOOLS fish stalls into a mountain of unsellable-by-path raw.
+     * Eng 2034 / 752huv: sameTile streak + find-shop escalate; cool-block ~40t —
+     * never perpetual sameTile return true.
      */
     evRawNoCookFund(host, w, stance) {
       if (w.bagFree <= 0) return false;
+      if (this.runTicks < this.rawSellBlockUntil) return false;
       if (!this.needsRawNoCookSell(host, w, stance)) return false;
       this.h1001.topEvent = "bag_full";
       this.setStatus1001(host, w, stance, "raw sell fund");
       this.claimFundIntent("food", 16);
-      if (this.trySellUnusedOnce(host, w)) return true;
-      if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) return true;
+      const tileKey = `${w.tile.x},${w.tile.y}`;
+      if (tileKey === this.rawSellTile) this.rawSellSameTile++;
+      else {
+        this.rawSellTile = tileKey;
+        this.rawSellSameTile = 1;
+      }
+      if (this.trySellUnusedOnce(host, w)) {
+        this.rawSellSameTile = 0;
+        return true;
+      }
+      if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) {
+        this.rawSellSameTile = 0;
+        return true;
+      }
       const shop = this.mem(w, "shop");
-      if (shop) {
+      if (shop && cheb(w.tile.x, w.tile.y, shop.x, shop.y) > 1) {
         this.desireXY = { x: shop.x, y: shop.y };
         host.walkTo(shop.x, shop.y);
         return true;
       }
-      return true;
+      const escalate = !shop || this.rawSellSameTile >= 14;
+      if (escalate) {
+        if (w.bagFree <= 2) this.armSellTrimSticky(host, w);
+        if (this.rawSellSameTile >= 40) {
+          this.rawSellBlockUntil = this.runTicks + 48;
+          this.rawSellSameTile = 0;
+          this.rawSellTile = "";
+          return false;
+        }
+        if (w.hub && cheb(w.tile.x, w.tile.y, w.hub.x, w.hub.y) > 2) {
+          this.setStatus1001(host, w, stance, "raw sell find shop");
+          this.desireXY = { x: w.hub.x, y: w.hub.y };
+          host.walkTo(w.hub.x, w.hub.y);
+          return true;
+        }
+        if (w.explore) {
+          this.setStatus1001(host, w, stance, "raw sell find shop");
+          this.desireXY = { x: w.explore.x, y: w.explore.y };
+          host.walkTo(w.explore.x, w.explore.y);
+          return true;
+        }
+        if (w.wander) {
+          this.setStatus1001(host, w, stance, "raw sell find shop");
+          host.walkTo(w.wander.x, w.wander.y);
+          return true;
+        }
+        return false;
+      }
+      return false;
     }
     evHighCeiling(host, w, stance) {
       if (!w.loot) return false;
