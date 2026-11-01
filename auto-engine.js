@@ -1,4 +1,4 @@
-/* phd auto-engine 2059 — pull via GET /api/auto-engine */
+/* phd auto-engine 2060 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2059";
+  var AUTO_ENGINE_VERSION = "2060";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1277,6 +1277,14 @@
       __publicField(this, "markThrash", false);
       __publicField(this, "markClash", false);
       __publicField(this, "markStuck", false);
+      /**
+       * Eng 2060 / t1789: life-latched incident bits — once set this life, NEVER clear
+       * on combat/progress/realProg. Death FHD/SIT always export via detectMarks().
+       * Floor change keeps latch; only brand-new life (prev < 0) resets.
+       */
+      __publicField(this, "lifeThrash", false);
+      __publicField(this, "lifeClash", false);
+      __publicField(this, "lifeStuck", false);
       /** Last progressFp (heal+gear+ore); reset stall when it changes. */
       __publicField(this, "progressFp", "");
       /** runTicks when progressFp last changed (heal up / equip / forge+). */
@@ -1561,6 +1569,15 @@
         this.markThrash = false;
         this.markClash = false;
         this.markStuck = false;
+        if (prev < 0) {
+          this.lifeThrash = false;
+          this.lifeClash = false;
+          this.lifeStuck = false;
+        } else {
+          if (this.lifeThrash) this.latchThrash();
+          if (this.lifeClash) this.latchClash();
+          if (this.lifeStuck) this.latchStuck();
+        }
         this.eliteThrash = 0;
         this.eliteThrashKey = "";
         this.laneBias = null;
@@ -3869,7 +3886,7 @@
       this.sellTrimNoSellStreak = 0;
       this.sellTrimEmptyUntil = this.runTicks + 128;
       if (firstLeave || why !== "cool") {
-        this.markThrash = true;
+        this.latchThrash();
         host.equipUp();
         host.log(`AUTO: sell trim empty \u2014 leave (${why}) (2059)`);
         this.noteAction(`sell trim empty \u2014 ${why}`);
@@ -3918,7 +3935,7 @@
       if (!this.hasSellableMats(w) && !this.hasBagCookables(w)) {
         this.sellTrimNoSellStreak++;
         if (this.sellTrimNoSellStreak >= 2 || !this.sellTrimHasWork(host, w) || this.bagFloodedWeps(host, w) && this.sellTrimNoSellStreak >= 1 && w.bagFree > 2) {
-          this.markThrash = true;
+          this.latchThrash();
           return this.leaveSellTrimEmpty(host, w, stance, "no-sell");
         }
       } else {
@@ -4647,7 +4664,7 @@
         }
         if (retreated) {
           this.doorOscStreak += 1;
-          this.markThrash = true;
+          this.latchThrash();
           this.noteAction(`door osc streak ${this.doorOscStreak}`);
         } else {
           this.doorOscStreak = 0;
@@ -4656,14 +4673,14 @@
       if (foodDoorStatus && this.doorLastTile && this.doorLastTile !== tileKey && adjDoor && (this.doorLastTile === `${door.x},${door.y}` || onDoor)) {
         if (onDoor && this.doorLastTile !== `${door.x},${door.y}`) {
           this.doorOscStreak = Math.max(this.doorOscStreak, 1);
-          this.markThrash = true;
+          this.latchThrash();
         }
       }
       this.doorOnDoorLast = onDoor;
       this.doorLastTile = tileKey;
       if (this.doorOscStreak >= 3) {
-        this.markThrash = true;
-        this.markStuck = true;
+        this.latchThrash();
+        this.latchStuck();
         this.noteGatherFail(door.x, door.y);
         this.noteGatherFail(w.tile.x, w.tile.y);
         this.doorSeenUntil = this.runTicks + 160;
@@ -4767,8 +4784,8 @@
       const pondOsc = this.statusOscPair(/enroute pond|food last farm|round-trip pond/, /food fish|util fish|(^|\s)fish(\s|$)/) || this.statusOscPair(/find pond/, /enroute pond|food fish|remembered door|door through|door open/) || this.statusOscPair(/find shop|sell ore|sell trim/, /door through|door open|remembered door/) || /find pond|find shop/i.test(st) && this.stuckRecentTiles.length >= 6 || /find pond|find shop|door through|door open|sell trim/i.test(st) && this.doorOscStreak >= 2 || this.findPondMonoStreak >= 8;
       if (pondOsc && !this.pondBreakActive()) {
         this.pondRethinks = 0;
-        this.markThrash = true;
-        if (this.doorOscStreak >= 2 || this.findPondMonoStreak >= 8) this.markStuck = true;
+        this.latchThrash();
+        if (this.doorOscStreak >= 2 || this.findPondMonoStreak >= 8) this.latchStuck();
         this.findPondMonoStreak = 0;
         this.pondBreakUntil = this.runTicks + 256;
         if (this.lastFoodFarm) {
@@ -4882,8 +4899,8 @@
         this.chopBreakUntil = Math.max(this.chopBreakUntil, this.runTicks + 96);
         this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 96);
         this.campChainBreakUntil = Math.max(this.campChainBreakUntil, this.runTicks + 256);
-        this.markThrash = true;
-        this.markClash = true;
+        this.latchThrash();
+        this.latchClash();
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/sell trim|bag sell trim|camp-trim osc|fish|gear score|round-trip/i.test(s)
         );
@@ -5305,8 +5322,8 @@
       if (!this.pondBreakActive() && this.statusOscPair(/round-trip pond|util fish|food fish|(?:^|\s)fish(?:\s|$)/, /sell trim/)) {
         this.pondBreakUntil = this.runTicks + 384;
         this.dropEnroutePonds();
-        this.markThrash = true;
-        this.markClash = true;
+        this.latchThrash();
+        this.latchClash();
         if (this.sellTrimHasWork(host, w)) {
           this.sellTrimStickyUntil = Math.max(this.sellTrimStickyUntil, this.runTicks + 256);
         } else {
@@ -6114,9 +6131,7 @@
         bagFull: this.runTicks < this.bagFullUntil,
         mineBlocked: this.runTicks < this.mineBlockUntil,
         chestBlocked: this.runTicks < this.chestBlockUntil,
-        thrash: !!this.markThrash,
-        clash: !!this.markClash,
-        stuck: !!this.markStuck,
+        ...this.detectMarks(),
         phase: this.h1001.phase,
         topEvent: this.h1001.topEvent,
         utilityPick: this.h1001.utilityPick,
@@ -6472,14 +6487,31 @@
       };
     }
     /**
-     * Eng 2020 / t1669: thrash | clash | stuck observational marks.
-     * Always available for FHD / SIT / LIVE STATS even when eng does not intervene.
+     * Eng 2060 / t1789: latch thrash for the rest of this life (recovery may still break).
+     */
+    latchThrash() {
+      this.markThrash = true;
+      this.lifeThrash = true;
+    }
+    /** Eng 2060 / t1789: latch clash for the rest of this life. */
+    latchClash() {
+      this.markClash = true;
+      this.lifeClash = true;
+    }
+    /** Eng 2060 / t1789: latch stuck for the rest of this life. */
+    latchStuck() {
+      this.markStuck = true;
+      this.lifeStuck = true;
+    }
+    /**
+     * Eng 2020 / t1669 + Eng 2060 life-latch: thrash | clash | stuck observational marks.
+     * Always available for FHD / SIT / LIVE STATS. Latched bits survive combat/progress.
      */
     detectMarks() {
       return {
-        thrash: !!this.markThrash,
-        clash: !!this.markClash,
-        stuck: !!this.markStuck
+        thrash: !!(this.markThrash || this.lifeThrash),
+        clash: !!(this.markClash || this.lifeClash),
+        stuck: !!(this.markStuck || this.lifeStuck)
       };
     }
     /** A meal owns the hero. Shop and chest wait until the catch is cooked. */
@@ -6683,6 +6715,8 @@
         this.findPondMonoStreak = 0;
       }
       if (this.tryStatusOscBreak(host, w, stance)) {
+        this.latchThrash();
+        if (uniqueStatuses >= 2) this.latchClash();
         this.stuckTicks = 0;
         this.stuckRecentTiles = [];
         return;
@@ -6732,19 +6766,25 @@
       if (doorThrash || sellTrimThrash || findPondThrash) walkOsc = true;
       const thrashNow = (metersFlat && repeatedAction && walkOsc || doorThrash || sellTrimThrash || findPondThrash) && !combatBusy && !gatherBusy && !striveBusy;
       const clashNow = (metersFlat && uniqueStatuses >= 2 && this.stuckRecentStatus.length >= 4 || metersFlat && /sell trim/i.test(stNow) && this.statusFamilyHits(/sell trim/) >= 2 && this.statusFamilyHits(/(?:^|\s)fish(?:\s|$)|gear score|explore|round-trip/) >= 2) && !combatBusy && !gatherBusy && !striveBusy;
-      if (realProg || combatBusy || gatherBusy || striveBusy) {
-        this.markThrash = false;
-        this.markClash = false;
-        this.markStuck = false;
-        if (realProg || gatherBusy) this.findPondMonoStreak = 0;
-      } else {
-        if (thrashNow) this.markThrash = true;
-        if (clashNow) this.markClash = true;
-        if (metersFlat && this.stuckTicks >= Math.floor(IDLE_STUCK_TICKS / 2)) {
-          this.markStuck = true;
+      if (realProg || gatherBusy) this.findPondMonoStreak = 0;
+      if (thrashNow) this.latchThrash();
+      if (clashNow) this.latchClash();
+      if (metersFlat && this.stuckTicks >= Math.floor(IDLE_STUCK_TICKS / 2) && !combatBusy && !gatherBusy && !striveBusy) {
+        this.latchStuck();
+      }
+      if (metersFlat && !combatBusy && !gatherBusy && !striveBusy) {
+        const actTail = this.actions.slice(-10);
+        const lastAct = actTail[actTail.length - 1] || "";
+        const actMono = !!lastAct && actTail.length >= 6 && actTail.filter((a) => a === lastAct).length >= 5;
+        const shopWalkSpam = actTail.filter((a) => /walk to shop|sell unused|sell trim empty|gather fund/i.test(a)).length >= 4;
+        const statusMono = topStatusHits >= 5 && this.stuckRecentStatus.length >= 5;
+        const statusOscPersist = uniqueStatuses >= 2 && this.stuckRecentStatus.length >= 6 && topStatusHits >= 2;
+        if (actMono || shopWalkSpam || statusMono || statusOscPersist && (walkOsc || doorThrash)) {
+          this.latchThrash();
+          if (statusOscPersist || uniqueStatuses >= 2) this.latchClash();
         }
       }
-      const thrashing = this.markThrash || walkOsc;
+      const thrashing = this.markThrash || this.lifeThrash || walkOsc;
       if (!this.stuckTile && !this.stuckXpFp && !this.stuckGearFp && !this.stuckFoodFp) {
         this.stuckTile = tile;
         this.stuckGearFp = gearFp;
@@ -6772,7 +6812,7 @@
       this.stuckTile = tile;
       this.stuckTicks += thrashing ? 2 : 1;
       if (metersFlat && this.stuckTicks >= Math.floor(IDLE_STUCK_TICKS / 2)) {
-        this.markStuck = true;
+        this.latchStuck();
       }
       if (this.stuckTicks < IDLE_STUCK_TICKS) return;
       const keepStairs = this.stairsStrive && /ceiling thrash|farm ceiling|food fat/i.test(this.stairsStrive.label) && (w.healReserve > 0 || w.food > 0) && w.kitReady && w.descendSafe;
@@ -6781,14 +6821,14 @@
         this.noteAction("stuck rethink \u2014 keep ceiling stairs");
         return;
       }
-      this.markStuck = true;
-      if (thrashing) this.markThrash = true;
-      const stuckReason = this.markThrash ? "stuck thrash (no approach / meters flat)" : this.markClash ? "stuck clash (status osc / meters flat)" : "stuck (no gear/food/exp/meters/approach)";
+      this.latchStuck();
+      if (thrashing) this.latchThrash();
+      const stuckReason = this.markThrash || this.lifeThrash ? "stuck thrash (no approach / meters flat)" : this.markClash || this.lifeClash ? "stuck clash (status osc / meters flat)" : "stuck (no gear/food/exp/meters/approach)";
       try {
         (_a = host.onStuckProgress) == null ? void 0 : _a.call(host, {
           status: this.lastStatus || "stuck rethink",
           ticks: this.runTicks,
-          thrashing: this.markThrash,
+          thrashing: !!(this.markThrash || this.lifeThrash),
           reason: stuckReason
         });
       } catch {
