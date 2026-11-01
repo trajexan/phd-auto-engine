@@ -1,4 +1,4 @@
-/* phd auto-engine 2054 — pull via GET /api/auto-engine */
+/* phd auto-engine 2055 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2054";
+  var AUTO_ENGINE_VERSION = "2055";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1387,6 +1387,13 @@
       /** Eng 2050 / R20: cool after GEAR camp_chain round-trip tree/shop/rock osc WD. */
       __publicField(this, "campChainBreakUntil", 0);
       /**
+       * Eng 2055 / R25: camp_chain sets round-trip AFTER util gather same tick, so
+       * stuckRecentStatus only ever sees round-trip (util chop never enters ring) →
+       * osc break never fires (zmqcsc/zrrv6w/qb647p WD). Count same node visits.
+       */
+      __publicField(this, "campChainSameKey", "");
+      __publicField(this, "campChainSameHits", 0);
+      /**
        * Eng 2035 / R4 5wavp7: kit hatchet/pickaxe acquire sameTile hang — streak +
        * cool-block so we walk/explore instead of perpetual acquire claim.
        * Eng 2036 / R5: also tick-budget (moving ≠ progress) + kitPickRethinks break.
@@ -1496,6 +1503,8 @@
         this.stickyPhaseLeaveArmed = false;
         this.monoDivertFails = 0;
         this.campChainBreakUntil = 0;
+        this.campChainSameKey = "";
+        this.campChainSameHits = 0;
         this.kitAcquireSameTile = 0;
         this.kitAcquireTile = "";
         this.kitAcquireBlockUntil = 0;
@@ -3924,6 +3933,30 @@
       });
       if (!this.campChainBreakActive() && chain.length >= 2) {
         const next = chain[0];
+        const sameKey = `${next.kind}:${next.x},${next.y}`;
+        if (sameKey === this.campChainSameKey) this.campChainSameHits++;
+        else {
+          this.campChainSameKey = sameKey;
+          this.campChainSameHits = 1;
+        }
+        if (this.campChainSameHits >= 3) {
+          this.campChainBreakUntil = this.runTicks + 768;
+          this.chopBreakUntil = Math.max(this.chopBreakUntil, this.runTicks + 512);
+          this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 640);
+          this.blockGatherTile(next.x, next.y);
+          this.campChainSameKey = "";
+          this.campChainSameHits = 0;
+          this.noteAction(`camp-chain same \u2014 explore (${next.kind})`);
+          host.log(`AUTO: camp_chain same-node ${next.kind} @(${next.x},${next.y}) \u2014 break (2055)`);
+          if (w.explore) {
+            this.desireXY = { x: w.explore.x, y: w.explore.y };
+            host.walkTo(w.explore.x, w.explore.y);
+          } else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+          else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+          this.setStatus(host, w, stance, `camp-chain osc \u2014 explore`);
+          this.cool = 16;
+          return true;
+        }
         const ok2 = this.visitNode1001(host, w, stance, next.kind, next.x, next.y);
         if (!ok2) return false;
         this.h1001.topEvent = "camp_chain";
@@ -4623,14 +4656,14 @@
      * (pond/tools/shop loops otherwise never arm stuck/pondBreak).
      */
     statusIgnoresHpMpProgress(st) {
-      return /food fish|enroute pond|find pond|food last farm|food buffer|food mine break|round-trip pond|util fish|tools find rock|tools mine|tools explore|tools wander|tools pickaxe|tools fund|rock osc|food sell ore|food find shop|bag find shop|sell-ore osc|sell trim|round-trip rock|round-trip tree|round-trip shop|util chop|chop for fire|cook\b|first wep|mine first wep|first-wep osc|remembered door|door through|door open|door thrash|tools hatchet|open chest|chest soft-block|mono thrash|mono divert|hatchet osc|hatchet thrash|explore-kite osc|emerg-tools osc|status osc explore\/kite|lethal kite|lethal close|approach kite|mob kite|kite outlook|enroute loot|walk HV loot|walk loot|emerg hub|food-mine osc|food-fish mono|altar runecraft|stuck rethink|stuck-wander osc|wander-mob osc|sticky progress|sticky leave|camp-chain osc|camp-shop osc|camp-tree osc|camp-rock osc|gear-explore-kite|sticky-explore mono|lethal-loot osc|sticky leave — phase|lethal-cover osc|camp-rock osc|mono divert escalate/i.test(st);
+      return /food fish|enroute pond|find pond|food last farm|food buffer|food mine break|round-trip pond|util fish|tools find rock|tools mine|tools explore|tools wander|tools pickaxe|tools fund|rock osc|food sell ore|food find shop|bag find shop|sell-ore osc|sell trim|round-trip rock|round-trip tree|round-trip shop|util chop|chop for fire|cook\b|first wep|mine first wep|first-wep osc|remembered door|door through|door open|door thrash|tools hatchet|open chest|chest soft-block|mono thrash|mono divert|hatchet osc|hatchet thrash|explore-kite osc|emerg-tools osc|status osc explore\/kite|lethal kite|lethal close|approach kite|mob kite|kite outlook|enroute loot|walk HV loot|walk loot|emerg hub|food-mine osc|food-fish mono|altar runecraft|stuck rethink|stuck-wander osc|wander-mob osc|sticky progress|sticky leave|camp-chain osc|camp-shop osc|camp-tree osc|camp-rock osc|gear-explore-kite|sticky-explore mono|lethal-loot osc|sticky leave — phase|lethal-cover osc|camp-rock osc|mono divert escalate|FIRST_WEP hold|first wep mine|camp-chain osc|camp-chain same/i.test(st);
     }
     /**
      * Eng 2038 / R8 + t1760: arm breakers from status oscillation alone
      * (before IDLE_STUCK_TICKS). Returns true if a break walk was issued.
      */
     tryStatusOscBreak(host, w, stance) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C;
       const st = (this.lastStatus || "").toLowerCase();
       const pondOsc = this.statusOscPair(/enroute pond|food last farm|round-trip pond/, /food fish|util fish|(^|\s)fish(\s|$)/) || this.statusOscPair(/find pond/, /enroute pond|food fish|remembered door|door through|door open/) || this.statusOscPair(/find shop|sell ore/, /door through|door open|remembered door/) || /find pond|find shop/i.test(st) && this.stuckRecentTiles.length >= 6 || /find pond|find shop|door through|door open/i.test(st) && this.doorOscStreak >= 2;
       if (pondOsc && !this.pondBreakActive()) {
@@ -4740,7 +4773,7 @@
         this.cool = 16;
         return true;
       }
-      if (this.statusOscPair(/round-trip rock|round-trip tree/, /sell trim/) || this.statusOscPair(/util chop/, /sell trim|round-trip tree/)) {
+      if (this.statusOscPair(/round-trip rock|round-trip tree/, /sell trim/) || this.statusOscPair(/util chop/, /sell trim/)) {
         this.sellTrimStickyUntil = 0;
         this.chopBreakUntil = Math.max(this.chopBreakUntil, this.runTicks + 96);
         this.noteAction("status osc camp/trim \u2014 explore");
@@ -4751,16 +4784,18 @@
         this.cool = 6;
         return true;
       }
-      if (!this.campChainBreakActive() && (this.statusOscPair(/round-trip tree/, /util chop|explore/) || this.statusOscPair(/util chop/, /round-trip tree|explore/) || this.statusFamilyHits(/round-trip tree|util chop/) >= 6)) {
-        this.campChainBreakUntil = this.runTicks + 512;
-        this.chopBreakUntil = Math.max(this.chopBreakUntil, this.runTicks + 384);
+      if (!this.campChainBreakActive() && (this.statusOscPair(/round-trip tree/, /util chop|explore/) || this.statusOscPair(/util chop/, /round-trip tree|explore/) || this.statusFamilyHits(/round-trip tree|util chop/) >= 4 || this.statusFamilyHits(/round-trip tree/) >= 3 || this.campChainSameHits >= 2 && /round-trip tree/i.test(this.lastStatus || ""))) {
+        this.campChainBreakUntil = this.runTicks + 768;
+        this.chopBreakUntil = Math.max(this.chopBreakUntil, this.runTicks + 512);
+        this.campChainSameKey = "";
+        this.campChainSameHits = 0;
         const tree = (_j = (_i = (_h = w.seen) == null ? void 0 : _h.tree) != null ? _i : this.mem(w, "tree")) != null ? _j : this.lastTree;
         if (tree) this.blockGatherTile(tree.x, tree.y);
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/round-trip tree|util chop|camp-tree osc|camp-chain osc/i.test(s)
         );
         this.noteAction("status osc camp-tree \u2014 explore");
-        host.log("AUTO: status osc round-trip tree/util chop \u2014 break (2050)");
+        host.log("AUTO: status osc round-trip tree/util chop \u2014 break (2055)");
         if (w.explore) host.walkTo(w.explore.x, w.explore.y);
         else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
@@ -4785,17 +4820,19 @@
         this.cool = 14;
         return true;
       }
-      if (!this.campChainBreakActive() && (this.statusOscPair(/round-trip rock/, /explore|util mine/) || this.statusOscPair(/util mine/, /round-trip rock|explore/) || this.statusFamilyHits(/round-trip rock|util mine/) >= 4)) {
+      if (!this.campChainBreakActive() && (this.statusOscPair(/round-trip rock/, /explore|util mine/) || this.statusOscPair(/util mine/, /round-trip rock|explore/) || this.statusFamilyHits(/round-trip rock|util mine/) >= 3 || this.statusFamilyHits(/round-trip rock/) >= 3 || this.campChainSameHits >= 2 && /round-trip rock/i.test(this.lastStatus || ""))) {
         this.campChainBreakUntil = this.runTicks + 768;
         this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 640);
         this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 512);
+        this.campChainSameKey = "";
+        this.campChainSameHits = 0;
         const rk = (_l = (_k = w.seen) == null ? void 0 : _k.rock) != null ? _l : this.mem(w, "rock");
         if (rk) this.blockGatherTile(rk.x, rk.y);
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/round-trip rock|util mine|camp-rock osc|camp-chain osc/i.test(s)
         );
         this.noteAction("status osc camp-rock \u2014 explore");
-        host.log("AUTO: status osc round-trip rock/util mine \u2014 break (2053)");
+        host.log("AUTO: status osc round-trip rock/util mine \u2014 break (2055)");
         if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
         else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
@@ -4970,15 +5007,20 @@
         this.cool = 6;
         return true;
       }
-      if (this.statusOscPair(/mine first wep/, /first wep/) || this.statusOscPair(/chop first wep/, /first wep/) || this.statusOscPair(/first-wep osc/, /first wep|mine first wep/)) {
+      if (this.statusOscPair(/mine first wep/, /first wep/) || this.statusOscPair(/chop first wep/, /first wep/) || this.statusOscPair(/first-wep osc/, /first wep|mine first wep/) || this.statusFamilyHits(/mine first wep|first wep mine/) >= 4) {
         this.noteAction("status osc first-wep \u2014 explore");
-        host.log("AUTO: status osc first wep \u2014 break (2041)");
-        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 160);
-        this.h1001.phase = "TOOLS";
+        host.log("AUTO: status osc first wep \u2014 break (2055)");
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 480);
+        const rk = (_r = (_q = w.seen) == null ? void 0 : _q.rock) != null ? _r : this.mem(w, "rock");
+        if (rk) this.blockGatherTile(rk.x, rk.y);
+        this.stuckRecentStatus = this.stuckRecentStatus.filter(
+          (s) => !/first wep|mine first wep|first-wep osc|FIRST_WEP hold/i.test(s)
+        );
+        if (host.hasTool("pickaxe")) this.h1001.phase = "FIRST_WEP";
         if (w.explore) host.walkTo(w.explore.x, w.explore.y);
         else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         this.setStatus(host, w, stance, "first-wep osc \u2014 explore");
-        this.cool = 6;
+        this.cool = 12;
         return true;
       }
       if (!this.hatchetChestBreakActive() && (this.statusOscPair(/tools hatchet|tools fund hatchet|kit hatchet|hatchet osc|hatchet thrash/, /open chest|chest thrash|looting|chest soft-block/) || this.statusOscPair(/tools hatchet|tools fund hatchet|kit hatchet|hatchet osc|hatchet thrash/, /stuck rethink/) || this.statusOscPair(/tools hatchet|tools fund hatchet/, /mob engage|approach engage|high-ceiling loot|approach kite|mob kite/) || this.statusOscPair(/hatchet osc|hatchet thrash|status osc hatchet/, /chest soft-block|open chest|tools hatchet/))) {
@@ -4989,7 +5031,7 @@
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/tools hatchet|tools fund hatchet|kit hatchet|open chest|chest thrash|looting|chest soft-block|hatchet osc|hatchet thrash|stuck rethink|status osc hatchet/i.test(s)
         );
-        if ((_q = w.seen) == null ? void 0 : _q.chest) this.softBlockChest(host, w, w.seen.chest.x, w.seen.chest.y, "hatchet/chest osc");
+        if ((_s = w.seen) == null ? void 0 : _s.chest) this.softBlockChest(host, w, w.seen.chest.x, w.seen.chest.y, "hatchet/chest osc");
         if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
           this.h1001.phase = "GEAR_FARM";
         } else if (host.hasTool("pickaxe")) {
@@ -5097,20 +5139,22 @@
         this.cool = 12;
         return true;
       }
-      if (this.statusOscPair(/first wep|mine first wep|first-wep osc/, /explore|enroute toward gather|enroute gather/) || this.statusFamilyHits(/first wep/) >= 5) {
+      if (this.statusOscPair(/first wep|mine first wep|first-wep osc|FIRST_WEP hold/, /explore|enroute toward gather|enroute gather/) || this.statusFamilyHits(/first wep|FIRST_WEP hold/) >= 4 || this.statusFamilyHits(/mine first wep|first wep mine/) >= 4) {
         this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 512);
-        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 384);
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 480);
+        const rk = (_u = (_t = w.seen) == null ? void 0 : _t.rock) != null ? _u : this.mem(w, "rock");
+        if (rk) this.blockGatherTile(rk.x, rk.y);
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
-          (s) => !/first wep|mine first wep|explore|enroute toward|enroute gather|first-wep osc/i.test(s)
+          (s) => !/first wep|mine first wep|explore|enroute toward|enroute gather|first-wep osc|FIRST_WEP hold/i.test(s)
         );
         this.noteAction("status osc first-wep/explore \u2014 progress");
-        host.log("AUTO: status osc first wep/explore \u2014 sticky progress (2050)");
+        host.log("AUTO: status osc first wep/explore \u2014 sticky progress (2055)");
         return this.tryStickyProgressLeave(host, w, stance, "first-wep osc");
       }
       if (!this.foodMineBreakActive() && (this.statusOscPair(/food mine break|mine break/, /altar runecraft|altar→forge|altar rune/) || this.statusOscPair(/food mine break|mine break/, /enroute pond|enroute toward gather|enroute gather/) || this.statusOscPair(/pond osc — mine|food mine break/, /altar|enroute/) || this.statusFamilyHits(/food mine break|mine break|pond osc — mine/) >= 5)) {
         this.foodMineBreakUntil = this.runTicks + 320;
         this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 256);
-        const rk = (_s = (_r = w.seen) == null ? void 0 : _r.rock) != null ? _s : this.mem(w, "rock");
+        const rk = (_w = (_v = w.seen) == null ? void 0 : _v.rock) != null ? _w : this.mem(w, "rock");
         if (rk) this.blockGatherTile(rk.x, rk.y);
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/food mine break|mine break|pond osc — mine|altar|enroute pond|enroute toward|enroute gather/i.test(s)
@@ -5132,7 +5176,7 @@
           this.noteGatherFail(this.lastFoodFarm.x, this.lastFoodFarm.y);
           this.lastFoodFarm = null;
         }
-        const pondMem = (_t = this.mem(w, "pond")) != null ? _t : this.resolvePond(w);
+        const pondMem = (_x = this.mem(w, "pond")) != null ? _x : this.resolvePond(w);
         if (pondMem) this.noteGatherFail(pondMem.x, pondMem.y);
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/food fish|util fish|enroute pond|fish /i.test(s)
@@ -5171,12 +5215,12 @@
             }
             this.dropEnroutePonds();
             if (w.gather) this.noteGatherFail(w.gather.x, w.gather.y);
-            const rk = (_v = (_u = w.seen) == null ? void 0 : _u.rock) != null ? _v : this.mem(w, "rock");
+            const rk = (_z = (_y = w.seen) == null ? void 0 : _y.rock) != null ? _z : this.mem(w, "rock");
             if (rk) this.blockGatherTile(rk.x, rk.y);
           }
           if (/tools mine|tools find rock/.test(low)) {
             this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 256);
-            const rk = (_x = (_w = w.seen) == null ? void 0 : _w.rock) != null ? _x : this.mem(w, "rock");
+            const rk = (_B = (_A = w.seen) == null ? void 0 : _A.rock) != null ? _B : this.mem(w, "rock");
             if (rk) this.blockGatherTile(rk.x, rk.y);
           }
           if (/tools explore|tools wander|explore-kite|emerg-tools|tools fund|tools pickaxe|stuck rethink|sticky leave|sticky progress|^explore\b|lethal kite|mob kite|kite outlook|enroute loot|emerg hub/.test(low)) {
@@ -5194,7 +5238,7 @@
             this.chopBreakUntil = Math.max(this.chopBreakUntil, this.runTicks + 128);
           }
           if (/tools hatchet|open chest|chest soft-block|hatchet osc|hatchet thrash/.test(low)) {
-            if ((_y = w.seen) == null ? void 0 : _y.chest) this.softBlockChest(host, w, w.seen.chest.x, w.seen.chest.y, "mono chest/hatchet");
+            if ((_C = w.seen) == null ? void 0 : _C.chest) this.softBlockChest(host, w, w.seen.chest.x, w.seen.chest.y, "mono chest/hatchet");
             this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 160);
             this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 480);
           }
