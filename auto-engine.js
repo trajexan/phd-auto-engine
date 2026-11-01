@@ -1,4 +1,4 @@
-/* phd auto-engine 2053 — pull via GET /api/auto-engine */
+/* phd auto-engine 2054 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2053";
+  var AUTO_ENGINE_VERSION = "2054";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1376,6 +1376,12 @@
        * (byqjbw/jkpw4q/e79x46/7ab9rh/wrfxwf status-osc sticky→progress re-entry clash).
        */
       __publicField(this, "stickyExploreBlockUntil", 0);
+      /**
+       * Eng 2054 / R24: one-shot arm after sticky/TOOLS/wanderSpin hard leave — while
+       * stickyExploreBlock live, skip leave theater / wanderSpin re-fire (v6rzkb/5wjycq
+       * hard leave#25–45; k34wf2 TOOLS mono↔fund-sell; wp5ab8 FIRST_WEP hold).
+       */
+      __publicField(this, "stickyPhaseLeaveArmed", false);
       /** Eng 2053 / R23: mono divert explore fail streak → hard phase leave (uf5dvs). */
       __publicField(this, "monoDivertFails", 0);
       /** Eng 2050 / R20: cool after GEAR camp_chain round-trip tree/shop/rock osc WD. */
@@ -1487,6 +1493,7 @@
         this.stuckWanderBreakUntil = 0;
         this.stickyLeaveRethinks = 0;
         this.stickyExploreBlockUntil = 0;
+        this.stickyPhaseLeaveArmed = false;
         this.monoDivertFails = 0;
         this.campChainBreakUntil = 0;
         this.kitAcquireSameTile = 0;
@@ -3217,24 +3224,32 @@
           /lethal kite|lethal close|stuck watchdog/
         );
         const stickyWatchdog = this.statusFamilyHits(/stuck watchdog/) >= 1 && stickyExploreHits >= 1;
-        if (stickyExploreHits >= 3 || stickyLethalPair || stickyWatchdog || stickyExploreHits >= 2 && this.exploreKiteBreakActive() || this.stickyExploreBlockActive() || this.stickyLeaveRethinks >= 3) {
+        if (stickyExploreHits >= 3 || stickyLethalPair || stickyWatchdog || stickyExploreHits >= 2 && this.exploreKiteBreakActive() || this.stickyExploreBlockActive() || this.stickyLeaveRethinks >= 3 || this.stickyPhaseLeaveArmed) {
           if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
           else this.h1001.phase = "FIRST_WEP";
           this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 896);
           this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 768);
           this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 640);
           this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 1024);
+          const wasArmed = this.stickyPhaseLeaveArmed || this.stickyLeaveRethinks >= 1;
+          this.stickyPhaseLeaveArmed = true;
           this.stuckRecentStatus = this.stuckRecentStatus.filter(
-            (s) => !/sticky progress|sticky leave|wanderSpin|lethal|stuck watchdog|TOOLS sticky|explore-kite/i.test(s)
+            (s) => !/sticky progress|sticky leave|wanderSpin|lethal|stuck watchdog|TOOLS sticky|explore-kite|phase cool/i.test(s)
           );
+          if (wasArmed) {
+            host.log("AUTO: TOOLS sticky explore mono \u2014 quiet yield (2054)");
+            this.cool = 8;
+            return false;
+          }
           this.noteAction("TOOLS sticky explore mono \u2014 phase leave");
-          host.log("AUTO: TOOLS sticky explore mono \u2014 phase leave (2053)");
+          host.log("AUTO: TOOLS sticky explore mono \u2014 phase leave (2054)");
           if (w.wander) host.walkTo(w.wander.x, w.wander.y);
           else if (w.explore) {
             this.desireXY = { x: w.explore.x, y: w.explore.y };
             host.walkTo(w.explore.x, w.explore.y);
           } else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-          this.setStatus(host, w, stance, "sticky leave \u2014 phase");
+          this.setStatus(host, w, stance, "phase cool");
+          this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 1);
           this.cool = 16;
           return true;
         }
@@ -3242,12 +3257,20 @@
           if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
           else this.h1001.phase = "FIRST_WEP";
           this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 768);
+          const holdWasArmed = this.stickyPhaseLeaveArmed || this.stickyLeaveRethinks >= 1;
+          this.stickyPhaseLeaveArmed = true;
+          if (holdWasArmed) {
+            host.log("AUTO: TOOLS sticky \u2014 quiet hold phase yield (2054)");
+            this.cool = 8;
+            return false;
+          }
           this.noteAction("TOOLS sticky \u2014 break hold phase");
-          host.log("AUTO: TOOLS sticky \u2014 exploreKite/emerg hold phase leave (2053)");
+          host.log("AUTO: TOOLS sticky \u2014 exploreKite/emerg hold phase leave (2054)");
           if (w.wander) host.walkTo(w.wander.x, w.wander.y);
           else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
           else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-          this.setStatus(host, w, stance, "sticky leave \u2014 phase");
+          this.setStatus(host, w, stance, "phase cool");
+          this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 1);
           this.cool = 12;
           return true;
         }
@@ -3537,25 +3560,59 @@
       return false;
     }
     phaseFirstWep1001(host, w, stance) {
+      var _a, _b, _c, _d;
       if (w.hasMetalWeapon || w.hasStyleWeapon) {
         this.h1001.phase = "GEAR_FARM";
         return false;
       }
       if (this.beginnerToolsIncomplete(host)) {
-        if (host.hasTool("pickaxe") && (this.stuckWanderBreakActive() || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.hatchetChestBreakActive())) {
-          if (this.stickyExploreBlockActive()) {
+        if (host.hasTool("pickaxe") && (this.stuckWanderBreakActive() || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.hatchetChestBreakActive() || this.stickyExploreBlockActive())) {
+          if (this.stickyExploreBlockActive() || this.stickyPhaseLeaveArmed) {
             this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 640);
             this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 640);
-            this.noteAction("FIRST_WEP hold \u2014 block divert");
-            host.log("AUTO: FIRST_WEP hold \u2014 stickyExploreBlock divert (2053)");
-            if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-            else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+            this.stickyPhaseLeaveArmed = true;
+            const rock2 = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
+            if (rock2 && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rock2.x, rock2.y)) {
+              this.noteAction("FIRST_WEP hold \u2014 mine");
+              host.log("AUTO: FIRST_WEP hold \u2014 productive mine (2054)");
+              this.setStatus1001(host, w, stance, "first wep mine");
+              if (this.walkToTile(host, rock2.x, rock2.y)) {
+                this.cool = 8;
+                return true;
+              }
+              if (this.tryGather(host, w, stance, "mine first wep")) {
+                this.cool = 6;
+                return true;
+              }
+              this.blockGatherTile(rock2.x, rock2.y);
+            }
+            this.noteAction("FIRST_WEP hold \u2014 explore");
+            host.log("AUTO: FIRST_WEP hold \u2014 productive explore (2054)");
+            this.setStatus1001(host, w, stance, "first wep explore");
+            if (w.explore) {
+              this.desireXY = { x: w.explore.x, y: w.explore.y };
+              host.walkTo(w.explore.x, w.explore.y);
+            } else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
             else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-            this.setStatus(host, w, stance, "sticky leave \u2014 phase");
-            this.cool = 12;
+            this.cool = 10;
             return true;
           }
           return this.tryStickyProgressLeave(host, w, stance, "FIRST_WEP hold");
+        }
+        if (this.stickyExploreBlockActive() && host.hasTool("pickaxe")) {
+          this.stickyPhaseLeaveArmed = true;
+          const rock2 = (_d = (_c = w.seen) == null ? void 0 : _c.rock) != null ? _d : this.mem(w, "rock");
+          if (rock2 && !this.isGatherTileBlocked(rock2.x, rock2.y)) {
+            this.setStatus1001(host, w, stance, "first wep mine");
+            if (this.walkToTile(host, rock2.x, rock2.y)) return true;
+            if (this.tryGather(host, w, stance, "mine first wep")) return true;
+          }
+          this.setStatus1001(host, w, stance, "first wep explore");
+          if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+          else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+          else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+          this.cool = 8;
+          return true;
         }
         this.h1001.phase = "TOOLS";
         return false;
@@ -4992,21 +5049,28 @@
         const lethalKiteLive = this.statusFamilyHits(
           /lethal kite|lethal close|lethal cover|mob kite|kite outlook|approach kite/
         ) >= 1;
-        if (this.stickyExploreBlockActive() || lethalKiteLive || this.exploreKiteBreakActive() || this.statusFamilyHits(/sticky leave — phase|sticky-explore mono/) >= 1) {
+        if (this.stickyExploreBlockActive() || lethalKiteLive || this.exploreKiteBreakActive() || this.statusFamilyHits(/sticky leave — phase|sticky-explore mono|phase cool/) >= 1 || this.stickyPhaseLeaveArmed) {
           this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 896);
           this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 768);
           this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 768);
+          const oscWasArmed = this.stickyPhaseLeaveArmed;
+          this.stickyPhaseLeaveArmed = true;
           this.stuckRecentStatus = this.stuckRecentStatus.filter(
-            (s) => !/sticky progress|sticky leave|lethal|mob kite|kite outlook|stuck rethink/i.test(s)
+            (s) => !/sticky progress|sticky leave|lethal|mob kite|kite outlook|stuck rethink|phase cool/i.test(s)
           );
           if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
           else this.h1001.phase = "FIRST_WEP";
+          if (oscWasArmed) {
+            host.log("AUTO: status osc sticky \u2014 quiet phase divert (2054)");
+            this.cool = 8;
+            return true;
+          }
           this.noteAction("status osc sticky \u2014 phase divert");
-          host.log("AUTO: status osc sticky \u2014 phase divert no re-arm (2053)");
+          host.log("AUTO: status osc sticky \u2014 phase divert no re-arm (2054)");
           if (w.wander) host.walkTo(w.wander.x, w.wander.y);
           else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
           else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-          this.setStatus(host, w, stance, "sticky leave \u2014 phase");
+          this.setStatus(host, w, stance, "phase cool");
           this.cool = 14;
           return true;
         }
@@ -5211,7 +5275,14 @@
     }
     /** Eng 2053: cool after sticky explore hard-leave — block sticky progress re-arm. */
     stickyExploreBlockActive() {
-      return this.runTicks < this.stickyExploreBlockUntil;
+      if (this.runTicks >= this.stickyExploreBlockUntil) {
+        if (this.stickyPhaseLeaveArmed && this.stickyExploreBlockUntil > 0) {
+          this.stickyPhaseLeaveArmed = false;
+          this.stickyLeaveRethinks = 0;
+        }
+        return false;
+      }
+      return true;
     }
     /** Eng 2050: cool after GEAR camp_chain round-trip tree/shop/rock osc. */
     campChainBreakActive() {
@@ -5224,7 +5295,7 @@
      * Prefer rock mine → explore → wander → hub last. Extends stickies.
      */
     tryStickyProgressLeave(host, w, stance, why) {
-      var _a, _b;
+      var _a, _b, _c, _d;
       this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 768);
       this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 640);
       this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 480);
@@ -5240,21 +5311,35 @@
         this.h1001.phase = "FIRST_WEP";
       }
       if (this.stickyExploreBlockActive()) {
+        this.stickyPhaseLeaveArmed = true;
+        const rock2 = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
+        if (rock2 && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rock2.x, rock2.y)) {
+          this.noteAction(`sticky block mine (${why})`);
+          host.log(`AUTO: sticky explore block mine (${why}) (2054)`);
+          this.setStatus(host, w, stance, "phase cool mine");
+          if (this.walkToTile(host, rock2.x, rock2.y)) {
+            this.cool = 8;
+            return true;
+          }
+          if (this.tryGather(host, w, stance, "sticky block mine")) {
+            this.cool = 6;
+            return true;
+          }
+          this.blockGatherTile(rock2.x, rock2.y);
+        }
         this.noteAction(`sticky block divert (${why})`);
-        host.log(`AUTO: sticky explore block divert (${why}) (2053)`);
-        if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-        else if (w.explore) {
+        host.log(`AUTO: sticky explore block divert (${why}) (2054)`);
+        if (w.explore) {
           this.desireXY = { x: w.explore.x, y: w.explore.y };
           host.walkTo(w.explore.x, w.explore.y);
-        } else if (w.hub) {
-          host.walkTo(w.hub.x, w.hub.y);
-        }
-        this.setStatus(host, w, stance, "sticky leave \u2014 phase");
+        } else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        this.setStatus(host, w, stance, "phase cool");
         this.cool = 14;
         return true;
       }
       const mineMono = this.statusFamilyHits(/sticky progress — mine|sticky progress mine/) >= 3 || this.statusFamilyHits(/tools mine/) >= 3 || this.rockFindBreakActive();
-      const rock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
+      const rock = (_d = (_c = w.seen) == null ? void 0 : _c.rock) != null ? _d : this.mem(w, "rock");
       if (!mineMono && rock && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rock.x, rock.y)) {
         this.noteAction(`sticky progress \u2014 mine (${why})`);
         host.log(`AUTO: sticky progress \u2014 mine (${why}) (2050)`);
@@ -5306,7 +5391,7 @@
         return false;
       }
       const stickyLeave = this.stuckWanderBreakActive() || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.hatchetChestBreakActive();
-      const label = this.stickyExploreBlockActive() ? "sticky leave \u2014 phase" : stickyLeave ? "sticky progress \u2014 explore" : breaking ? "tools wander" : "tools find rock";
+      const label = this.stickyExploreBlockActive() ? "phase cool" : stickyLeave ? "sticky progress \u2014 explore" : breaking ? "tools wander" : "tools find rock";
       if (stickyLeave && !this.stickyExploreBlockActive()) {
         const mineMono = this.statusFamilyHits(/sticky progress — mine|sticky progress mine/) >= 3 || this.rockFindBreakActive();
         const rock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
@@ -6261,7 +6346,7 @@
       return null;
     }
     maybeRethinkIdle(host, w, stance) {
-      var _a, _b, _c, _d, _e, _f, _g, _h;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
       const combatBusy = w.foes.some((f) => f.alive && f.lit && f.dist <= 2);
       const gatherBusy = this.sameTargetHits > 0 && this.cool > 0 && !!w.gather;
       const striveBusy = !!this.mineStrive || !!this.anvilStrive;
@@ -6596,30 +6681,55 @@
       }
       const wanderSpin = /tools wander|tools explore|tools pickaxe|tools fund|mono divert|stuck-wander osc|stuck-wander thrash|tools wander thrash|sticky leave|sticky progress/i.test(stRethink);
       if (wanderSpin && host.hasTool("pickaxe")) {
+        if (this.stickyExploreBlockActive() && this.stickyPhaseLeaveArmed) {
+          if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
+          else this.h1001.phase = "FIRST_WEP";
+          const rock = (_j = (_i = w.seen) == null ? void 0 : _i.rock) != null ? _j : this.mem(w, "rock");
+          if (rock && !this.isGatherTileBlocked(rock.x, rock.y)) {
+            this.noteAction("wanderSpin \u2014 cool mine");
+            host.log("AUTO: wanderSpin \u2014 phase cool mine (2054)");
+            this.setStatus(host, w, stance, "phase cool mine");
+            if (this.walkToTile(host, rock.x, rock.y) || this.tryGather(host, w, stance, "wanderSpin cool mine")) {
+              this.cool = 10;
+              return;
+            }
+            this.blockGatherTile(rock.x, rock.y);
+          }
+          this.noteAction("wanderSpin \u2014 cool explore");
+          host.log("AUTO: wanderSpin \u2014 phase cool explore (2054)");
+          if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+          else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+          else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+          this.setStatus(host, w, stance, "phase cool");
+          this.cool = 14;
+          return;
+        }
         if (this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.stickyExploreBlockActive() || this.stickyLeaveRethinks >= 3 || this.statusFamilyHits(/stuck watchdog/) >= 1 || this.statusFamilyHits(/wanderSpin hard leave/) >= 2) {
-          this.stickyLeaveRethinks++;
+          this.stickyLeaveRethinks = Math.min(this.stickyLeaveRethinks + 1, 4);
           this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
           this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 896);
           this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 768);
           this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 1280);
+          this.stickyPhaseLeaveArmed = true;
           this.stuckRecentStatus = this.stuckRecentStatus.filter(
-            (s) => !/sticky progress|sticky leave|wanderSpin|tools wander|stuck watchdog|lethal|TOOLS sticky/i.test(s)
+            (s) => !/sticky progress|sticky leave|wanderSpin|tools wander|stuck watchdog|lethal|TOOLS sticky|phase cool/i.test(s)
           );
           if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
           else this.h1001.phase = "FIRST_WEP";
           this.noteAction(`wanderSpin hard leave#${this.stickyLeaveRethinks}`);
-          host.log("AUTO: wanderSpin \u2014 exploreKite/emerg/watchdog hard phase leave (2053)");
+          host.log("AUTO: wanderSpin \u2014 exploreKite/emerg/watchdog hard phase leave (2054)");
           if (w.wander) host.walkTo(w.wander.x, w.wander.y);
           else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
           else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-          this.setStatus(host, w, stance, "sticky leave \u2014 phase");
+          this.setStatus(host, w, stance, "phase cool");
           this.cool = 18;
           return;
         }
         if (this.stuckWanderBreakActive()) {
-          this.stickyLeaveRethinks++;
+          this.stickyLeaveRethinks = Math.min(this.stickyLeaveRethinks + 1, 4);
           if (this.stickyLeaveRethinks >= 2) {
             this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 896);
+            this.stickyPhaseLeaveArmed = true;
           }
           this.tryStickyProgressLeave(host, w, stance, `wanderSpin re-sticky#${this.stickyLeaveRethinks}`);
           return;
