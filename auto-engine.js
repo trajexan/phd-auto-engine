@@ -1,4 +1,4 @@
-/* phd auto-engine 2058 — pull via GET /api/auto-engine */
+/* phd auto-engine 2059 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2058";
+  var AUTO_ENGINE_VERSION = "2059";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1341,6 +1341,12 @@
       __publicField(this, "bagFindShopTile", "");
       /** Eng 2034: sticky SELL_TRIM while bag tight with sellables/raws — no GEAR_FARM ping-pong. */
       __publicField(this, "sellTrimStickyUntil", 0);
+      /** Eng 2059: cool-block SELL_TRIM re-entry after empty/keep-only trim (foodLow thrash). */
+      __publicField(this, "sellTrimEmptyUntil", 0);
+      /** Eng 2059: consecutive SELL_TRIM ticks with no sell/mats progress. */
+      __publicField(this, "sellTrimNoSellStreak", 0);
+      /** Eng 2059: consecutive FOOD_BUFFER find-pond ticks with no pond/food progress. */
+      __publicField(this, "findPondMonoStreak", 0);
       /**
        * Eng 2034 / 752huv: raw-sell-fund sameTile streak + cool-block.
        * Never perpetual sameTile return true when shop walk/sell stalls.
@@ -1485,6 +1491,9 @@
         this.bagFindShopUntil = 0;
         this.bagFindShopTile = "";
         this.sellTrimStickyUntil = 0;
+        this.sellTrimEmptyUntil = 0;
+        this.sellTrimNoSellStreak = 0;
+        this.findPondMonoStreak = 0;
         this.rawSellSameTile = 0;
         this.rawSellTile = "";
         this.rawSellBlockUntil = 0;
@@ -3695,7 +3704,7 @@
       if (anvil || w.anvilNearby || ((_b = (_a = host.listBagCombatGear) == null ? void 0 : _a.call(host)) != null ? _b : []).some((b) => b.slot === "weapon" || b.slot === "armour")) {
         if (this.tryScoreSmithEquip(host, w, stance, "gear score")) return true;
       }
-      if (this.runTicks < this.sellTrimStickyUntil && this.sellTrimStillNeeded(host, w)) {
+      if (!this.sellTrimEmptyBlocked() && this.runTicks < this.sellTrimStickyUntil && this.sellTrimStillNeeded(host, w)) {
         this.h1001.phase = "SELL_TRIM";
         return this.phaseSellTrim1001(host, w, stance);
       }
@@ -3709,9 +3718,11 @@
             this.setStatus1001(host, w, stance, "food buffer");
             return false;
           }
-          this.armSellTrimSticky(host, w);
-          this.h1001.phase = "SELL_TRIM";
-          return this.phaseSellTrim1001(host, w, stance);
+          if (!this.sellTrimEmptyBlocked() && this.sellTrimHasWork(host, w)) {
+            this.armSellTrimSticky(host, w);
+            this.h1001.phase = "SELL_TRIM";
+            return this.phaseSellTrim1001(host, w, stance);
+          }
         }
         if (hasForgeWork) {
           this.setStatus1001(host, w, stance, "hub forge/clean");
@@ -3729,9 +3740,17 @@
           if ((_e = host.craftClothesOnce) == null ? void 0 : _e.call(host)) return true;
           if ((_f = host.craftShieldOnce) == null ? void 0 : _f.call(host)) return true;
         }
-        this.armSellTrimSticky(host, w);
-        this.h1001.phase = "SELL_TRIM";
-        return this.phaseSellTrim1001(host, w, stance);
+        if (!this.sellTrimEmptyBlocked() && (matsFull || this.sellTrimHasWork(host, w))) {
+          this.armSellTrimSticky(host, w);
+          this.h1001.phase = "SELL_TRIM";
+          return this.phaseSellTrim1001(host, w, stance);
+        }
+        if (foodLow && !stance.healRich && !stance.stocked && !this.hasBagCookables(w)) {
+          this.h1001.phaseResume = "GEAR_FARM";
+          this.h1001.phase = "FOOD_BUFFER";
+          this.setStatus1001(host, w, stance, "food buffer");
+          return false;
+        }
       }
       if (w.anvilNearby || anvil && cheb(w.tile.x, w.tile.y, anvil.x, anvil.y) <= 2) {
         if (this.tryScoreSmithEquip(host, w, stance, "anvil score")) return true;
@@ -3819,31 +3838,94 @@
       }
       return false;
     }
-    /** Eng 2034: bag tight with raws/mats/junk weps → keep SELL_TRIM sticky. */
+    /**
+     * Eng 2059: real trim work exists (junk weps / mats / raws / bag crush).
+     * foodLow alone is NOT work — empty/keep-only bags must not re-enter SELL_TRIM.
+     */
+    sellTrimHasWork(host, w) {
+      return this.bagFloodedWeps(host, w) || this.hasSellableMats(w) || this.hasBagCookables(w) || w.bagFree <= 1;
+    }
+    sellTrimEmptyBlocked() {
+      return this.runTicks < this.sellTrimEmptyUntil;
+    }
+    /**
+     * Eng 2034/2059: stay sticky while junk weps remain OR bag tight with raws/mats.
+     * bagFloodedWeps sticky even with bagFree>2 — else sell↔fish/score osc (5bcpjx).
+     */
     sellTrimStillNeeded(host, w) {
+      if (this.bagFloodedWeps(host, w)) return true;
       if (w.bagFree > 2) return false;
-      return this.hasBagCookables(w) || this.hasSellableMats(w) || this.bagFloodedWeps(host, w);
+      return this.hasBagCookables(w) || this.hasSellableMats(w);
     }
     armSellTrimSticky(host, w) {
       if (this.sellTrimStillNeeded(host, w)) {
         this.sellTrimStickyUntil = Math.max(this.sellTrimStickyUntil, this.runTicks + 96);
       }
     }
+    /** Eng 2059: leave SELL_TRIM after empty/keep-only — cool-block + thrash mark. */
+    leaveSellTrimEmpty(host, w, stance, why) {
+      const firstLeave = this.runTicks >= this.sellTrimEmptyUntil;
+      this.sellTrimStickyUntil = 0;
+      this.sellTrimNoSellStreak = 0;
+      this.sellTrimEmptyUntil = this.runTicks + 128;
+      if (firstLeave || why !== "cool") {
+        this.markThrash = true;
+        host.equipUp();
+        host.log(`AUTO: sell trim empty \u2014 leave (${why}) (2059)`);
+        this.noteAction(`sell trim empty \u2014 ${why}`);
+      }
+      if (this.foodUrgency(w)) this.h1001.phase = "FOOD_BUFFER";
+      else if (stance.hungry && !stance.healRich && !stance.stocked) {
+        this.h1001.phaseResume = "GEAR_FARM";
+        this.h1001.phase = "FOOD_BUFFER";
+      } else {
+        const tool = bootstrapTool(host, w, this.h1001.nodes);
+        this.h1001.phase = tool ? "TOOLS" : "GEAR_FARM";
+      }
+      return false;
+    }
     phaseSellTrim1001(host, w, stance) {
       this.setStatus1001(host, w, stance, "sell trim");
-      if (this.hasBagCookables(w) && this.cookOwed(w, stance)) {
-        if (this.tryCookBagCookables(host, w, stance, "sell cook")) return true;
+      if (this.sellTrimEmptyBlocked() && !this.sellTrimHasWork(host, w)) {
+        this.sellTrimStickyUntil = 0;
+        this.h1001.phase = "GEAR_FARM";
+        return false;
       }
-      if (host.craftGemRingOnce()) return true;
+      if (this.hasBagCookables(w) && this.cookOwed(w, stance)) {
+        if (this.tryCookBagCookables(host, w, stance, "sell cook")) {
+          this.sellTrimNoSellStreak = 0;
+          return true;
+        }
+      }
+      if (host.craftGemRingOnce()) {
+        this.sellTrimNoSellStreak = 0;
+        return true;
+      }
       if (this.trySellUnusedOnce(host, w)) {
+        this.sellTrimNoSellStreak = 0;
         if (this.sellTrimStillNeeded(host, w)) this.armSellTrimSticky(host, w);
         else this.sellTrimStickyUntil = 0;
         return true;
       }
-      if (host.sellOreKeep(this.h1001.lockedMats && !w.hasArmour ? 2 : 0)) return true;
-      if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) return true;
+      if (host.sellOreKeep(this.h1001.lockedMats && !w.hasArmour ? 2 : 0)) {
+        this.sellTrimNoSellStreak = 0;
+        return true;
+      }
+      if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) {
+        this.sellTrimNoSellStreak = 0;
+        return true;
+      }
+      if (!this.hasSellableMats(w) && !this.hasBagCookables(w)) {
+        this.sellTrimNoSellStreak++;
+        if (this.sellTrimNoSellStreak >= 2 || !this.sellTrimHasWork(host, w) || this.bagFloodedWeps(host, w) && this.sellTrimNoSellStreak >= 1 && w.bagFree > 2) {
+          this.markThrash = true;
+          return this.leaveSellTrimEmpty(host, w, stance, "no-sell");
+        }
+      } else {
+        this.sellTrimNoSellStreak = 0;
+      }
       const shop = this.mem(w, "shop");
-      if (shop && cheb(w.tile.x, w.tile.y, shop.x, shop.y) > 1) {
+      if (shop && cheb(w.tile.x, w.tile.y, shop.x, shop.y) > 1 && this.sellTrimHasWork(host, w)) {
         this.armSellTrimSticky(host, w);
         this.desireXY = { x: shop.x, y: shop.y };
         host.walkTo(shop.x, shop.y);
@@ -3851,7 +3933,7 @@
       }
       const stillNeed = this.sellTrimStillNeeded(host, w);
       const sticky = this.runTicks < this.sellTrimStickyUntil;
-      if (stillNeed || sticky) {
+      if ((stillNeed || sticky) && this.sellTrimHasWork(host, w)) {
         this.h1001.phase = "SELL_TRIM";
         if (!stillNeed) {
           this.sellTrimStickyUntil = 0;
@@ -3862,12 +3944,9 @@
             host.walkTo(w.hub.x, w.hub.y);
             return true;
           }
-          if (w.explore) {
-            host.walkTo(w.explore.x, w.explore.y);
-            return true;
-          }
-          if (w.wander) {
-            host.walkTo(w.wander.x, w.wander.y);
+          if (shop) {
+            this.desireXY = { x: shop.x, y: shop.y };
+            host.walkTo(shop.x, shop.y);
             return true;
           }
         }
@@ -3877,6 +3956,9 @@
       if (this.foodUrgency(w)) this.h1001.phase = "FOOD_BUFFER";
       else if (stance.hungry || w.food < stance.minFood) {
         if (this.hasBagCookables(w) && this.cookOwed(w, stance)) {
+          this.h1001.phaseResume = "GEAR_FARM";
+          this.h1001.phase = "FOOD_BUFFER";
+        } else if (!stance.healRich && !stance.stocked) {
           this.h1001.phaseResume = "GEAR_FARM";
           this.h1001.phase = "FOOD_BUFFER";
         } else {
@@ -4549,7 +4631,7 @@
       }
       const onDoor = w.tile.x === door.x && w.tile.y === door.y;
       const adjDoor = Math.max(Math.abs(w.tile.x - door.x), Math.abs(w.tile.y - door.y)) <= 1;
-      const foodDoorStatus = /find pond|find shop|food buffer|enroute pond|food fish|food sell ore|sell ore|remembered door|door through|door open/i.test(this.lastStatus || "");
+      const foodDoorStatus = /find pond|find shop|food buffer|enroute pond|food fish|food sell ore|sell ore|sell trim|bag sell trim|bag find shop|remembered door|door through|door open/i.test(this.lastStatus || "");
       if (this.doorOnDoorLast && !onDoor && foodDoorStatus) {
         let retreated = true;
         if (desire) {
@@ -4673,7 +4755,7 @@
      * (pond/tools/shop loops otherwise never arm stuck/pondBreak).
      */
     statusIgnoresHpMpProgress(st) {
-      return /food fish|enroute pond|find pond|food last farm|food buffer|food mine break|round-trip pond|util fish|tools find rock|tools mine|tools explore|tools wander|tools pickaxe|tools fund|rock osc|food sell ore|food find shop|bag find shop|sell-ore osc|sell trim|round-trip rock|round-trip tree|round-trip shop|util chop|chop for fire|cook\b|first wep|mine first wep|first-wep osc|remembered door|door through|door open|door thrash|tools hatchet|open chest|chest soft-block|mono thrash|mono divert|hatchet osc|hatchet thrash|explore-kite osc|emerg-tools osc|status osc explore\/kite|lethal kite|lethal close|approach kite|mob kite|kite outlook|enroute loot|walk HV loot|walk loot|emerg hub|food-mine osc|food-fish mono|altar runecraft|stuck rethink|stuck-wander osc|wander-mob osc|sticky progress|sticky leave|camp-chain osc|camp-shop osc|camp-tree osc|camp-rock osc|gear-explore-kite|sticky-explore mono|lethal-loot osc|sticky leave — phase|lethal-cover osc|camp-rock osc|mono divert escalate|FIRST_WEP hold|first wep mine|camp-chain osc|camp-chain same|gear-explore-kite osc|first-wep-combat osc|phase cool|camp-chest osc|explore-kite osc — wander|first-wep osc — wander|tools-hatchet hang/i.test(st);
+      return /food fish|enroute pond|find pond|food last farm|food buffer|food mine break|round-trip pond|util fish|tools find rock|tools mine|tools explore|tools wander|tools pickaxe|tools fund|rock osc|food sell ore|food find shop|bag find shop|sell-ore osc|sell trim|round-trip rock|round-trip tree|round-trip shop|util chop|chop for fire|cook\b|first wep|mine first wep|first-wep osc|remembered door|door through|door open|door thrash|tools hatchet|open chest|chest soft-block|mono thrash|mono divert|hatchet osc|hatchet thrash|explore-kite osc|emerg-tools osc|status osc explore\/kite|lethal kite|lethal close|approach kite|mob kite|kite outlook|enroute loot|walk HV loot|walk loot|emerg hub|food-mine osc|food-fish mono|altar runecraft|stuck rethink|stuck-wander osc|wander-mob osc|sticky progress|sticky leave|camp-chain osc|camp-shop osc|camp-tree osc|camp-rock osc|gear-explore-kite|sticky-explore mono|lethal-loot osc|sticky leave — phase|lethal-cover osc|camp-rock osc|mono divert escalate|FIRST_WEP hold|first wep mine|camp-chain osc|camp-chain same|gear-explore-kite osc|first-wep-combat osc|phase cool|camp-chest osc|explore-kite osc — wander|first-wep osc — wander|tools-hatchet hang|camp-trim osc|pond-sell osc|sell trim empty|door thrash/i.test(st);
     }
     /**
      * Eng 2038 / R8 + t1760: arm breakers from status oscillation alone
@@ -4682,9 +4764,12 @@
     tryStatusOscBreak(host, w, stance) {
       var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E;
       const st = (this.lastStatus || "").toLowerCase();
-      const pondOsc = this.statusOscPair(/enroute pond|food last farm|round-trip pond/, /food fish|util fish|(^|\s)fish(\s|$)/) || this.statusOscPair(/find pond/, /enroute pond|food fish|remembered door|door through|door open/) || this.statusOscPair(/find shop|sell ore/, /door through|door open|remembered door/) || /find pond|find shop/i.test(st) && this.stuckRecentTiles.length >= 6 || /find pond|find shop|door through|door open/i.test(st) && this.doorOscStreak >= 2;
+      const pondOsc = this.statusOscPair(/enroute pond|food last farm|round-trip pond/, /food fish|util fish|(^|\s)fish(\s|$)/) || this.statusOscPair(/find pond/, /enroute pond|food fish|remembered door|door through|door open/) || this.statusOscPair(/find shop|sell ore|sell trim/, /door through|door open|remembered door/) || /find pond|find shop/i.test(st) && this.stuckRecentTiles.length >= 6 || /find pond|find shop|door through|door open|sell trim/i.test(st) && this.doorOscStreak >= 2 || this.findPondMonoStreak >= 8;
       if (pondOsc && !this.pondBreakActive()) {
         this.pondRethinks = 0;
+        this.markThrash = true;
+        if (this.doorOscStreak >= 2 || this.findPondMonoStreak >= 8) this.markStuck = true;
+        this.findPondMonoStreak = 0;
         this.pondBreakUntil = this.runTicks + 256;
         if (this.lastFoodFarm) {
           this.noteGatherFail(this.lastFoodFarm.x, this.lastFoodFarm.y);
@@ -4790,15 +4875,26 @@
         this.cool = 16;
         return true;
       }
-      if (this.statusOscPair(/round-trip rock|round-trip tree/, /sell trim/) || this.statusOscPair(/util chop/, /sell trim/)) {
+      if (this.statusOscPair(/round-trip rock|round-trip tree/, /sell trim/) || this.statusOscPair(/util chop|util mine/, /sell trim/) || this.statusOscPair(/sell trim/, /(?:^|\s)fish(?:\s|$)|gear score|explore|round-trip/) || this.statusOscPair(/bag sell trim/, /explore|fish|gear score/) || this.statusFamilyHits(/sell trim/) >= 4 && this.statusFamilyHits(/(?:^|\s)fish(?:\s|$)|gear score|explore|round-trip rock|round-trip tree/) >= 2) {
         this.sellTrimStickyUntil = 0;
+        this.sellTrimEmptyUntil = Math.max(this.sellTrimEmptyUntil, this.runTicks + 160);
+        this.sellTrimNoSellStreak = 0;
         this.chopBreakUntil = Math.max(this.chopBreakUntil, this.runTicks + 96);
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 96);
+        this.campChainBreakUntil = Math.max(this.campChainBreakUntil, this.runTicks + 256);
+        this.markThrash = true;
+        this.markClash = true;
+        this.stuckRecentStatus = this.stuckRecentStatus.filter(
+          (s) => !/sell trim|bag sell trim|camp-trim osc|fish|gear score|round-trip/i.test(s)
+        );
         this.noteAction("status osc camp/trim \u2014 explore");
-        host.log("AUTO: status osc round-trip rock|tree/sell trim \u2014 break (2041)");
+        host.log("AUTO: status osc sell-trim/fish|explore|rock \u2014 break (2059)");
         if (w.explore) host.walkTo(w.explore.x, w.explore.y);
         else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
         this.setStatus(host, w, stance, "camp-trim osc \u2014 explore");
-        this.cool = 6;
+        this.h1001.phase = "GEAR_FARM";
+        this.cool = 10;
         return true;
       }
       if (!this.campChainBreakActive() && (this.statusOscPair(/round-trip tree/, /util chop|explore/) || this.statusOscPair(/util chop/, /round-trip tree|explore/) || this.statusFamilyHits(/round-trip tree|util chop/) >= 4 || this.statusFamilyHits(/round-trip tree/) >= 3 || this.campChainSameHits >= 2 && /round-trip tree/i.test(this.lastStatus || ""))) {
@@ -5206,19 +5302,27 @@
         this.noteAction("status osc stuck-wander \u2014 progress");
         return this.tryStickyProgressLeave(host, w, stance, "stuck-wander osc");
       }
-      if (!this.pondBreakActive() && this.statusOscPair(/round-trip pond|util fish|food fish/, /sell trim/)) {
+      if (!this.pondBreakActive() && this.statusOscPair(/round-trip pond|util fish|food fish|(?:^|\s)fish(?:\s|$)/, /sell trim/)) {
         this.pondBreakUntil = this.runTicks + 384;
-        this.sellTrimStickyUntil = Math.max(this.sellTrimStickyUntil, this.runTicks + 256);
         this.dropEnroutePonds();
+        this.markThrash = true;
+        this.markClash = true;
+        if (this.sellTrimHasWork(host, w)) {
+          this.sellTrimStickyUntil = Math.max(this.sellTrimStickyUntil, this.runTicks + 256);
+        } else {
+          this.sellTrimStickyUntil = 0;
+          this.sellTrimEmptyUntil = Math.max(this.sellTrimEmptyUntil, this.runTicks + 160);
+        }
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
-          (s) => !/round-trip pond|util fish|food fish|sell trim|pond-sell osc/i.test(s)
+          (s) => !/round-trip pond|util fish|food fish|sell trim|pond-sell osc|(?:^|\s)fish(?:\s|$)/i.test(s)
         );
         this.noteAction("status osc pond/sell-trim \u2014 hub");
-        host.log("AUTO: status osc round-trip pond/sell trim \u2014 sticky (2048)");
+        host.log("AUTO: status osc round-trip pond/sell trim \u2014 break (2059)");
         if (w.hub) host.walkTo(w.hub.x, w.hub.y);
         else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
         else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         this.setStatus(host, w, stance, "pond-sell osc \u2014 hub");
+        this.h1001.phase = this.sellTrimHasWork(host, w) ? "SELL_TRIM" : "GEAR_FARM";
         this.cool = 12;
         return true;
       }
@@ -6573,6 +6677,11 @@
       for (const n of statusCounts.values()) if (n > topStatusHits) topStatusHits = n;
       const uniqueStatuses = statusCounts.size;
       const repeatedAction = topStatusHits >= 2 && this.stuckRecentStatus.length >= 2;
+      if (/find pond/i.test(stNow) && metersFlat && !combatBusy && !gatherBusy) {
+        this.findPondMonoStreak++;
+      } else if (!/find pond|door through|door open|remembered door/i.test(stNow)) {
+        this.findPondMonoStreak = 0;
+      }
       if (this.tryStatusOscBreak(host, w, stance)) {
         this.stuckTicks = 0;
         this.stuckRecentTiles = [];
@@ -6618,13 +6727,16 @@
         }
       }
       const doorThrash = this.doorOscStreak >= 2;
-      if (doorThrash) walkOsc = true;
-      const thrashNow = (metersFlat && repeatedAction && walkOsc || doorThrash) && !combatBusy && !gatherBusy && !striveBusy;
-      const clashNow = metersFlat && uniqueStatuses >= 2 && this.stuckRecentStatus.length >= 4 && !combatBusy && !gatherBusy && !striveBusy;
+      const sellTrimThrash = /sell trim|bag sell trim/i.test(stNow) && this.sellTrimNoSellStreak >= 2 && metersFlat;
+      const findPondThrash = /find pond/i.test(stNow) && this.findPondMonoStreak >= 6 && metersFlat;
+      if (doorThrash || sellTrimThrash || findPondThrash) walkOsc = true;
+      const thrashNow = (metersFlat && repeatedAction && walkOsc || doorThrash || sellTrimThrash || findPondThrash) && !combatBusy && !gatherBusy && !striveBusy;
+      const clashNow = (metersFlat && uniqueStatuses >= 2 && this.stuckRecentStatus.length >= 4 || metersFlat && /sell trim/i.test(stNow) && this.statusFamilyHits(/sell trim/) >= 2 && this.statusFamilyHits(/(?:^|\s)fish(?:\s|$)|gear score|explore|round-trip/) >= 2) && !combatBusy && !gatherBusy && !striveBusy;
       if (realProg || combatBusy || gatherBusy || striveBusy) {
         this.markThrash = false;
         this.markClash = false;
         this.markStuck = false;
+        if (realProg || gatherBusy) this.findPondMonoStreak = 0;
       } else {
         if (thrashNow) this.markThrash = true;
         if (clashNow) this.markClash = true;
