@@ -1,4 +1,4 @@
-/* phd auto-engine 2086 — pull via GET /api/auto-engine */
+/* phd auto-engine 2087 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2086";
+  var AUTO_ENGINE_VERSION = "2087";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -3531,6 +3531,13 @@
             this.cool = 8;
             return false;
           }
+          if (this.durableLeaveHierarchyReleased) {
+            this.stickyPhaseLeaveArmed = true;
+            this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+            host.log("AUTO: TOOLS sticky explore mono \u2014 quiet yield post RELEASE (2087)");
+            this.cool = 8;
+            return false;
+          }
           this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 896);
           this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 768);
           this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 640);
@@ -3565,6 +3572,13 @@
             this.stickyPhaseLeaveArmed = true;
             this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
             host.log("AUTO: TOOLS sticky \u2014 quiet hold phase yield cool-exit ban (2070)");
+            this.cool = 8;
+            return false;
+          }
+          if (this.durableLeaveHierarchyReleased) {
+            this.stickyPhaseLeaveArmed = true;
+            this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+            host.log("AUTO: TOOLS sticky \u2014 quiet hold phase yield post RELEASE (2087)");
             this.cool = 8;
             return false;
           }
@@ -5663,7 +5677,7 @@
         this.cool = 16;
         return true;
       }
-      const toolsPickaxeLethal = this.statusOscPair(/tools pickaxe/, /lethal kite|lethal close|lethal cover|mob kite|kite outlook|approach kite/) || this.statusFamilyHits(/tools pickaxe/) >= 4 && this.statusFamilyHits(/lethal kite|lethal close|lethal cover|mob kite|kite outlook|approach kite/) >= 3;
+      const toolsPickaxeLethal = this.statusOscPair(/tools pickaxe/, /lethal kite|lethal close|lethal cover|mob kite|kite outlook|approach kite|mob engage|approach engage/) || this.statusFamilyHits(/tools pickaxe/) >= 4 && this.statusFamilyHits(/lethal kite|lethal close|lethal cover|mob kite|kite outlook|approach kite|mob engage|approach engage/) >= 3;
       if ((!this.exploreKiteBreakActive() || toolsPickaxeLethal) && (this.statusOscPair(
         /tools explore|rock osc — explore|tools find rock|tools wander|tools pickaxe|tools hatchet|tools fund|tools mine|sticky leave|sticky progress/,
         /lethal kite|lethal close|lethal cover|approach kite|mob kite|kite outlook|\bkite\b/
@@ -5705,7 +5719,10 @@
       ) || this.statusOscPair(/tools fund hatchet|tools fund sell|tools hatchet/, /emerg hub fund|mob kite|approach kite/) || this.statusOscPair(
         /tools wander|tools explore|tools hatchet|sticky leave|sticky progress/,
         /mob engage|approach engage|high-ceiling loot|emerg hub fund/
-      ))) {
+      ) || this.statusOscPair(
+        /tools pickaxe|tools mine|tools find rock/,
+        /mob engage|approach engage/
+      ) || this.statusFamilyHits(/tools pickaxe/) >= 4 && this.statusFamilyHits(/mob engage|approach engage/) >= 4)) {
         this.emergToolsBreakUntil = this.runTicks + 640;
         this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 480);
         this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 512);
@@ -6292,17 +6309,23 @@
       }
       return this.finishDurableLeaveDone(host, w, stance, why);
     }
-    /** Eng 2084: expire cool stickies that keep kiteExploreCoolActive / park loops alive. */
+    /** Eng 2084: expire cool stickies that keep kiteExploreCoolActive / park loops alive.
+     *  Eng 2087 / R56: also clear emergTools + quiet escalate latch (grexs7 post-RELEASE
+     *  escalate leave sticky ↔ TOOLS sticky ↔ phase cool used leftover emerg + latch). */
     expireDurableCoolForHierarchy() {
       this.exploreKiteBreakUntil = Math.min(this.exploreKiteBreakUntil, this.runTicks);
       this.stickyExploreBlockUntil = Math.min(this.stickyExploreBlockUntil, this.runTicks);
       this.stuckWanderBreakUntil = Math.min(this.stuckWanderBreakUntil, this.runTicks);
       this.campChainBreakUntil = Math.min(this.campChainBreakUntil, this.runTicks);
       this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
+      this.emergToolsBreakUntil = Math.min(this.emergToolsBreakUntil, this.runTicks);
       this.kiteCoolExitUntil = Math.min(this.kiteCoolExitUntil, this.runTicks);
       this.kiteCoolReentryBanUntil = Math.min(this.kiteCoolReentryBanUntil, this.runTicks);
       this.kiteCoolWanderBanUntil = Math.min(this.kiteCoolWanderBanUntil, this.runTicks);
       this.kiteCoolParkHits = 0;
+      this.quietBreakEscalateUntil = Math.min(this.quietBreakEscalateUntil, this.runTicks);
+      this.quietEscalateLeaveHits = 0;
+      this.quietBreakEscalateHits = 0;
     }
     /** Eng 2084: mark hierarchy released (idempotent). */
     markDurableLeaveHierarchyReleased(host, why) {
@@ -6695,11 +6718,71 @@
     quietBreakEscalateActive() {
       return this.runTicks < this.quietBreakEscalateUntil;
     }
+    /**
+     * Eng 2087 / R56: post hierarchy RELEASE productive quiet — mine/wander/hub only.
+     * Never finishQuietBreakEscalated / escalate leave sticky / TOOLS sticky phase cool.
+     */
+    finishPostHierarchyReleaseQuiet(host, w, stance, why) {
+      var _a, _b, _c, _d;
+      this.expireDurableCoolForHierarchy();
+      this.stuckRecentStatus = this.stuckRecentStatus.filter(
+        (s) => !/quiet hold — escalate leave|TOOLS sticky|phase cool|sticky progress|sticky leave|durable leave settle|quiet hold — durable settle/i.test(s)
+      );
+      if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
+        this.h1001.phase = "GEAR_FARM";
+      } else if (host.hasTool("pickaxe")) {
+        this.h1001.phase = "FIRST_WEP";
+      } else {
+        this.h1001.phase = "TOOLS";
+      }
+      this.noteAction(`quiet hold \u2014 post RELEASE (${why})`);
+      host.log(`AUTO: post hierarchy RELEASE quiet (2087) ${why}`);
+      this.setStatus1001(host, w, stance, "quiet hold \u2014 post RELEASE");
+      const rock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
+      if (rock && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rock.x, rock.y)) {
+        if (this.walkToTile(host, rock.x, rock.y)) {
+          this.cool = 10;
+          return true;
+        }
+        if (this.tryGather(host, w, stance, "post-RELEASE mine")) {
+          this.cool = 8;
+          return true;
+        }
+      }
+      const chest = (_d = (_c = w.seen) == null ? void 0 : _c.chest) != null ? _d : this.mem(w, "chest");
+      if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) {
+        if (this.walkToTile(host, chest.x, chest.y)) {
+          this.cool = 10;
+          return true;
+        }
+      }
+      if (w.wander) {
+        host.walkTo(w.wander.x, w.wander.y);
+        this.cool = 12;
+        return true;
+      }
+      if (w.hub) {
+        host.walkTo(w.hub.x, w.hub.y);
+        this.cool = 10;
+        return true;
+      }
+      if (w.explore) {
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
+        host.walkTo(w.explore.x, w.explore.y);
+        this.cool = 12;
+        return true;
+      }
+      this.cool = 10;
+      return true;
+    }
     finishQuietHoldProgress(host, w, stance, why) {
       var _a, _b, _c, _d;
       this.stickyPhaseLeaveArmed = true;
       this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
       this.armPhaseCoolNoKiteEmit();
+      if (this.durableLeaveHierarchyReleased) {
+        return this.finishPostHierarchyReleaseQuiet(host, w, stance, why);
+      }
       if (!this.beginnerToolsIncomplete(host)) {
         this.quietBootstrapEmitHits = 0;
         this.quietBootstrapBreakUntil = 0;
