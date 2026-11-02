@@ -1,4 +1,4 @@
-/* phd auto-engine 2083 — pull via GET /api/auto-engine */
+/* phd auto-engine 2084 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2083";
+  var AUTO_ENGINE_VERSION = "2084";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1423,6 +1423,10 @@
       __publicField(this, "durableLeaveSettleDone", false);
       /** Eng 2083 / R52: non-soft settle finish emits; ≥6 → force done. */
       __publicField(this, "durableLeaveSettleHits", 0);
+      /** Eng 2084 / R53: non-soft finishDurableLeaveDone emits; ≥2 → release hierarchy. */
+      __publicField(this, "durableLeaveDoneHits", 0);
+      /** Eng 2084 / R53: after release, never re-enter finishDurableLeaveDone sink. */
+      __publicField(this, "durableLeaveHierarchyReleased", false);
       /** Eng 2049 / R19: rethinks while sticky leave already active → escalate to progress. */
       __publicField(this, "stickyLeaveRethinks", 0);
       /**
@@ -1597,6 +1601,8 @@
         this.durableLeaveSettleEmitUntil = 0;
         this.durableLeaveSettleDone = false;
         this.durableLeaveSettleHits = 0;
+        this.durableLeaveDoneHits = 0;
+        this.durableLeaveHierarchyReleased = false;
         this.stickyLeaveRethinks = 0;
         this.stickyExploreBlockUntil = 0;
         this.stickyPhaseLeaveArmed = false;
@@ -1812,7 +1818,7 @@
           return this.finishDurableLeaveSettle(host, w, stance, "cool-active");
         }
         if (this.durableLeaveSettleClosed()) {
-          return this.finishDurableLeaveDone(host, w, stance, "cool-active");
+          return this.routeDurableLeaveClosed(host, w, stance, "cool-active");
         }
         if (this.quietEscalateLeaveLatchActive()) {
           return this.durableEscalateLeaveExit(host, w, stance, "cool-active");
@@ -1951,7 +1957,7 @@
           return this.finishDurableLeaveSettle(host, w, stance, "post-exit-quiet");
         }
         if (this.durableLeaveSettleClosed()) {
-          return this.finishDurableLeaveDone(host, w, stance, "post-exit-quiet");
+          return this.routeDurableLeaveClosed(host, w, stance, "post-exit-quiet");
         }
         if (this.quietEscalateLeaveLatchActive()) {
           return this.durableEscalateLeaveExit(host, w, stance, "post-exit-quiet");
@@ -6059,7 +6065,7 @@
      * or wander/hub mono. 2068 adds hub|osc-hub on the left so hub↔lethal/flat re-breaks.
      */
     kiteCoolWanderTheater() {
-      if (this.durableLeaveSettleActive()) return false;
+      if (this.durableLeaveSettleActive() || this.durableLeaveSettleDone) return false;
       return this.statusOscPair(
         /kite cool wander|kite cool mine|kite cool hub|kite-cool-wander osc/,
         /flat thrash|flat rethink|phase cool|lethal kite|lethal close|lethal cover|mob engage|mob kite|kite outlook|approach kite|approach engage/
@@ -6095,7 +6101,7 @@
         return this.finishDurableLeaveSettle(host, w, stance, `park ${why}`);
       }
       if (this.durableLeaveSettleClosed()) {
-        return this.finishDurableLeaveDone(host, w, stance, `park ${why}`);
+        return this.routeDurableLeaveClosed(host, w, stance, `park ${why}`);
       }
       if (this.quietEscalateLeaveLatchActive()) {
         return this.durableEscalateLeaveExit(host, w, stance, `park ${why}`);
@@ -6141,7 +6147,7 @@
         return this.finishDurableLeaveSettle(host, w, stance, `wander-hub ${why}`);
       }
       if (this.durableLeaveSettleClosed()) {
-        return this.finishDurableLeaveDone(host, w, stance, `wander-hub ${why}`);
+        return this.routeDurableLeaveClosed(host, w, stance, `wander-hub ${why}`);
       }
       if (this.quietEscalateLeaveLatchActive()) {
         return this.durableEscalateLeaveExit(host, w, stance, `wander-hub ${why}`);
@@ -6213,6 +6219,38 @@
      */
     quietEscalateLeaveLatchActive() {
       return this.quietBreakEscalateActive() || this.quietEscalateLeaveHits >= 1 || this.statusFamilyHits(/quiet hold — escalate leave/) >= 1;
+    }
+    /**
+     * Eng 2084 / R53: after settle closed, one/two DONE emits then RELEASE to quiet
+     * hierarchy — never perpetual finishDurableLeaveDone (wander-hub osc).
+     */
+    routeDurableLeaveClosed(host, w, stance, why) {
+      if (this.durableLeaveHierarchyReleased || this.durableLeaveDoneHits >= 2) {
+        this.markDurableLeaveHierarchyReleased(host, why);
+        this.expireDurableCoolForHierarchy();
+        return this.finishQuietHoldProgress(host, w, stance, `post-durable ${why}`);
+      }
+      return this.finishDurableLeaveDone(host, w, stance, why);
+    }
+    /** Eng 2084: expire cool stickies that keep kiteExploreCoolActive / park loops alive. */
+    expireDurableCoolForHierarchy() {
+      this.exploreKiteBreakUntil = Math.min(this.exploreKiteBreakUntil, this.runTicks);
+      this.stickyExploreBlockUntil = Math.min(this.stickyExploreBlockUntil, this.runTicks);
+      this.stuckWanderBreakUntil = Math.min(this.stuckWanderBreakUntil, this.runTicks);
+      this.campChainBreakUntil = Math.min(this.campChainBreakUntil, this.runTicks);
+      this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
+      this.kiteCoolExitUntil = Math.min(this.kiteCoolExitUntil, this.runTicks);
+      this.kiteCoolReentryBanUntil = Math.min(this.kiteCoolReentryBanUntil, this.runTicks);
+      this.kiteCoolWanderBanUntil = Math.min(this.kiteCoolWanderBanUntil, this.runTicks);
+      this.kiteCoolParkHits = 0;
+    }
+    /** Eng 2084: mark hierarchy released (idempotent). */
+    markDurableLeaveHierarchyReleased(host, why) {
+      if (!this.durableLeaveHierarchyReleased) {
+        this.durableLeaveHierarchyReleased = true;
+        if (!this.durableLeaveSettleDone) this.markDurableLeaveSettleDone(host, why);
+        host.log(`AUTO: durable leave hierarchy RELEASED (2084) ${why}`);
+      }
     }
     /** Eng 2081 / R50: durable leave settle window (~1920t). */
     durableLeaveSettleActive() {
@@ -6347,20 +6385,30 @@
       return true;
     }
     /**
-     * Eng 2083 / R52: settle DONE — hierarchy wander/explore/chest/shop, NEVER settle label.
-     * Soft-continue emit so thrash isn't latched every tick; clear cool inputs that
-     * re-feed kiteExploreCoolActive → cool-active settle sink.
+     * Eng 2083 / R52 + Eng 2084 / R53: settle DONE — hierarchy, NEVER settle label.
+     * Soft-continue emit; clear cool inputs. 2084: doneHits≥2 → hierarchyReleased +
+     * finishQuietHoldProgress (stops done↔wander-hub prison).
      */
     finishDurableLeaveDone(host, w, stance, why) {
       var _a, _b, _c, _d;
       if (!this.durableLeaveSettleDone) this.markDurableLeaveSettleDone(host, why);
+      if (this.durableLeaveHierarchyReleased) {
+        this.expireDurableCoolForHierarchy();
+        return this.finishQuietHoldProgress(host, w, stance, `post-durable-released ${why}`);
+      }
       const soft = this.runTicks < this.durableLeaveSettleEmitUntil && this.statusFamilyHits(/FIRST_WEP hold — wander|quiet hold — progress|durable leave done/) >= 1;
       if (!soft) {
+        this.durableLeaveDoneHits++;
         this.latchThrash();
         this.latchClash();
         this.noteAction(`durable leave done (${why})`);
-        host.log(`AUTO: durable leave done \u2014 hierarchy not settle (2083) ${why}`);
+        host.log(`AUTO: durable leave done \u2014 hierarchy not settle (2084) ${why}`);
         this.durableLeaveSettleEmitUntil = this.runTicks + 160;
+      }
+      if (this.durableLeaveDoneHits >= 2) {
+        this.markDurableLeaveHierarchyReleased(host, `done-cap ${why}`);
+        this.expireDurableCoolForHierarchy();
+        return this.finishQuietHoldProgress(host, w, stance, `post-durable done-cap ${why}`);
       }
       this.kiteCoolExitUntil = Math.min(this.kiteCoolExitUntil, this.runTicks);
       this.kiteCoolReentryBanUntil = Math.min(this.kiteCoolReentryBanUntil, this.runTicks);
@@ -6449,7 +6497,7 @@
       }
       if (this.durableLeaveSettleClosed() || this.durableEscalateLeaveHits >= 1) {
         if (!this.durableLeaveSettleDone) this.markDurableLeaveSettleDone(host, why);
-        return this.finishDurableLeaveDone(host, w, stance, why);
+        return this.routeDurableLeaveClosed(host, w, stance, why);
       }
       this.durableEscalateLeaveHits++;
       this.durableLeaveSettleUntil = Math.max(this.durableLeaveSettleUntil, this.runTicks + 1920);
@@ -6942,7 +6990,7 @@
         return this.finishDurableLeaveSettle(host, w, stance, `sticky ${why}`);
       }
       if (this.durableLeaveSettleClosed()) {
-        return this.finishDurableLeaveDone(host, w, stance, `sticky ${why}`);
+        return this.routeDurableLeaveClosed(host, w, stance, `sticky ${why}`);
       }
       if (this.quietEscalateLeaveLatchActive()) {
         return this.durableEscalateLeaveExit(host, w, stance, `sticky ${why}`);
