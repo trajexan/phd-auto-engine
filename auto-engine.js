@@ -1,4 +1,4 @@
-/* phd auto-engine 2084 — pull via GET /api/auto-engine */
+/* phd auto-engine 2085 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2084";
+  var AUTO_ENGINE_VERSION = "2085";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1320,6 +1320,11 @@
       __publicField(this, "pondRethinks", 0);
       /** e47: runTicks until find-pond/farm-food desire allowed again after pond thrash break. */
       __publicField(this, "pondBreakUntil", 0);
+      /**
+       * Eng 2085 / R54: count fresh pondBreak arms this life (pondOsc / food-fish mono /
+       * stuck-rethink). ≥2 → escalate quiet leave instead of soft wander prison.
+       */
+      __publicField(this, "pondBreakArms", 0);
       /** e48: runTicks until chop-for-fire/lastTree allowed again after bag-stuck thrash. */
       __publicField(this, "chopBreakUntil", 0);
       /** e56: runTicks when the dry-ground walk started. 0 = not in it. */
@@ -1565,6 +1570,7 @@
         this.shopFireFails = 0;
         this.pondRethinks = 0;
         this.pondBreakUntil = 0;
+        this.pondBreakArms = 0;
         this.chopBreakUntil = 0;
         this.drySince = 0;
         this.ceilingRethinks = 0;
@@ -2580,6 +2586,9 @@
             this.blockGatherTile(live.x, live.y);
             this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 192);
           }
+        }
+        if (this.shouldEscalatePondBreakPrison(6) || this.pondBreakArms >= 2) {
+          return this.escalatePondBreakPrison(host, w, stance, `${labelPrefix}-wander-cap`);
         }
         this.armBreakerExploreCool(640);
         if (w.wander) {
@@ -5164,7 +5173,7 @@
         this.latchThrash();
         if (this.doorOscStreak >= 2 || this.findPondMonoStreak >= 8) this.latchStuck();
         this.findPondMonoStreak = 0;
-        this.pondBreakUntil = this.runTicks + 256;
+        this.armPondBreakSticky(768, true);
         if (this.lastFoodFarm) {
           this.noteGatherFail(this.lastFoodFarm.x, this.lastFoodFarm.y);
           this.lastFoodFarm = null;
@@ -5176,7 +5185,10 @@
         this.noteGatherFail(w.tile.x, w.tile.y);
         this.doorSeenUntil = this.runTicks + 120;
         this.noteAction("status osc pond \u2014 break");
-        host.log("AUTO: status osc pond/fish/find-pond \u2014 break (2041)");
+        host.log("AUTO: status osc pond/fish/find-pond \u2014 break (2085)");
+        if (this.shouldEscalatePondBreakPrison(8)) {
+          return this.escalatePondBreakPrison(host, w, stance, "pondOsc");
+        }
         if (host.hasTool("pickaxe")) {
           const live = (_c = (_b = w.seen) == null ? void 0 : _b.rock) != null ? _c : this.mem(w, "rock");
           if (live && !this.isGatherTileBlocked(live.x, live.y)) {
@@ -5253,8 +5265,10 @@
         this.noteAction("status osc sell-ore/shop \u2014 explore");
         host.log("AUTO: status osc sell ore/find shop \u2014 sticky break (2046)");
         this.clearFundIntent("food");
-        this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
-        if (host.hasTool("rod")) {
+        if (this.pondBreakArms < 1 && !this.foodUrgency(w) && !this.calmFoodHighPri(w, stance)) {
+          this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
+        }
+        if (host.hasTool("rod") && !this.pondBreakActive()) {
           const pond = this.resolvePond(w);
           if (pond && !this.isGatherTileBlocked(pond.x, pond.y)) {
             this.setStatus(host, w, stance, "sell-ore osc \u2014 fish");
@@ -5758,7 +5772,7 @@
         return this.tryStickyProgressLeave(host, w, stance, "stuck-wander osc");
       }
       if (!this.pondBreakActive() && this.statusOscPair(/round-trip pond|util fish|food fish|(?:^|\s)fish(?:\s|$)/, /sell trim/)) {
-        this.pondBreakUntil = this.runTicks + 384;
+        this.armPondBreakSticky(768, true);
         this.dropEnroutePonds();
         this.latchThrash();
         this.latchClash();
@@ -5840,14 +5854,18 @@
       if (!this.foodMineBreakActive() && (this.statusOscPair(/food mine break|mine break/, /altar runecraft|altar→forge|altar rune/) || this.statusOscPair(/food mine break|mine break/, /enroute pond|enroute toward gather|enroute gather/) || this.statusOscPair(/pond osc — mine|food mine break/, /altar|enroute/) || this.statusFamilyHits(/food mine break|mine break|pond osc — mine/) >= 5)) {
         this.foodMineBreakUntil = this.runTicks + 320;
         this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 256);
+        this.pondBreakUntil = Math.max(this.pondBreakUntil, this.runTicks + 768);
         const rk = (_y = (_x = w.seen) == null ? void 0 : _x.rock) != null ? _y : this.mem(w, "rock");
         if (rk) this.blockGatherTile(rk.x, rk.y);
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/food mine break|mine break|pond osc — mine|altar|enroute pond|enroute toward|enroute gather/i.test(s)
         );
         this.noteAction("status osc food-mine \u2014 wander");
-        host.log("AUTO: status osc food mine break/altar/enroute \u2014 sticky (2062)");
+        host.log("AUTO: status osc food mine break/altar/enroute \u2014 sticky (2085)");
         this.clearFundIntent("food");
+        if (this.shouldEscalatePondBreakPrison(8)) {
+          return this.escalatePondBreakPrison(host, w, stance, "food-mine-osc");
+        }
         this.armBreakerExploreCool(640);
         if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
@@ -5857,7 +5875,7 @@
         return true;
       }
       if (!this.pondBreakActive() && this.statusFamilyHits(/food fish|util fish|(^|\s)fish(\s|$)/) >= 5) {
-        this.pondBreakUntil = this.runTicks + 256;
+        this.armPondBreakSticky(768, true);
         this.dropEnroutePonds();
         if (this.lastFoodFarm) {
           this.noteGatherFail(this.lastFoodFarm.x, this.lastFoodFarm.y);
@@ -5869,7 +5887,10 @@
           (s) => !/food fish|util fish|enroute pond|fish /i.test(s)
         );
         this.noteAction("status osc food-fish mono \u2014 wander");
-        host.log("AUTO: food fish family mono \u2014 pond sticky (2062)");
+        host.log("AUTO: food fish family mono \u2014 pond sticky (2085)");
+        if (this.shouldEscalatePondBreakPrison(8)) {
+          return this.escalatePondBreakPrison(host, w, stance, "food-fish-mono");
+        }
         this.armBreakerExploreCool(640);
         if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
@@ -5912,7 +5933,7 @@
         const low = mono.toLowerCase();
         if (/food fish|food mine break|tools mine|tools find rock|tools explore|tools wander|tools pickaxe|tools fund|explore-kite|emerg-tools|tools hatchet|open chest|chest soft-block|hatchet osc|hatchet thrash|chop for fire|\bcook\b|rock osc|food sell ore|food find shop|sell ore|find shop|lethal kite|lethal close|approach kite|mob kite|kite outlook|enroute loot|emerg hub|sticky progress|stuck rethink|first wep|^explore\b|kite cool mine|kite cool wander|altar runecraft|gather fund/.test(low)) {
           if (/food fish|food mine break|rock osc/.test(low)) {
-            this.pondBreakUntil = Math.max(this.pondBreakUntil, this.runTicks + 256);
+            this.pondBreakUntil = Math.max(this.pondBreakUntil, this.runTicks + 768);
             this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 256);
             if (/food mine break/.test(low)) {
               this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 320);
@@ -6010,6 +6031,45 @@
     /** e47: cool window after pond thrash — block find-pond/farm-food desire re-entry. */
     pondBreakActive() {
       return this.runTicks < this.pondBreakUntil;
+    }
+    /** Eng 2085: pond-break / food-mine prison family hits this life window. */
+    pondBreakPrisonFamilyHits() {
+      return this.statusFamilyHits(
+        /pond break — wander|food-mine osc|pond osc — wander|emerg pond break|food pond break|food-fish mono/
+      );
+    }
+    /** Eng 2085: after 2 fresh arms or heavy soft-wander spam → quiet leave, not soft wander. */
+    shouldEscalatePondBreakPrison(familyMin = 8) {
+      return this.pondBreakArms >= 2 || this.pondBreakPrisonFamilyHits() >= familyMin;
+    }
+    /**
+     * Eng 2085: freshly arm pondBreak (inactive→active increments pondBreakArms).
+     * Always extends to at least runTicks+ticks.
+     */
+    armPondBreakSticky(ticks = 768, countArm = true) {
+      const wasActive = this.pondBreakActive();
+      this.pondBreakUntil = Math.max(this.pondBreakUntil, this.runTicks + ticks);
+      if (countArm && !wasActive) this.pondBreakArms++;
+    }
+    /**
+     * Eng 2085 / R54: stop find-pond↔break prison — latch + durable quiet leave.
+     */
+    escalatePondBreakPrison(host, w, stance, why) {
+      this.latchThrash();
+      this.pondBreakUntil = Math.max(this.pondBreakUntil, this.runTicks + 768);
+      this.armBreakerExploreCool(768);
+      this.clearFundIntent("food");
+      this.dropEnroutePonds();
+      if (this.lastFoodFarm) {
+        this.noteGatherFail(this.lastFoodFarm.x, this.lastFoodFarm.y);
+        this.lastFoodFarm = null;
+      }
+      this.stuckRecentStatus = this.stuckRecentStatus.filter(
+        (s) => !/pond break|pond osc|food-mine osc|food-fish mono|find pond|enroute pond|food fish|emerg pond/i.test(s)
+      );
+      this.noteAction(`pond-break-cap \u2014 ${why}`);
+      host.log(`AUTO: pond-break-cap escalate leave (2085) ${why}`);
+      return this.finishQuietHoldProgress(host, w, stance, "pond-break-cap");
     }
     /** Eng 2035/2037: cool after tools find rock/mine thrash — stop infinite find-rock. */
     rockFindBreakActive() {
@@ -6957,7 +7017,7 @@
      * While any of these stickies live, bare explore fallback is banned.
      */
     kiteExploreCoolActive() {
-      return this.exploreKiteBreakActive() || this.stickyExploreBlockActive() || this.stuckWanderBreakActive() || this.campChainBreakActive() || this.foodMineBreakActive();
+      return this.exploreKiteBreakActive() || this.stickyExploreBlockActive() || this.stuckWanderBreakActive() || this.campChainBreakActive() || this.foodMineBreakActive() || this.pondBreakActive();
     }
     /**
      * Eng 2062 / R31: when a breaker recovers via explore, latch sticky so the
@@ -8316,7 +8376,7 @@
           this.foodFarmSoftBlocks = 0;
           this.lastFoodFarm = null;
           this.laneBias = "gear";
-          this.pondBreakUntil = this.runTicks + 96;
+          this.pondBreakUntil = Math.max(this.pondBreakUntil, this.runTicks + 512);
           this.dropEnroutePonds();
           this.noteAction("food farm thrash \u2014 drop last farm");
           host.log("AUTO: food farm thrash \u2014 break to explore/fight");
@@ -8371,9 +8431,14 @@
         const pondMem = (_d = this.mem(w, "pond")) != null ? _d : this.resolvePond(w);
         if (pondMem) this.noteGatherFail(pondMem.x, pondMem.y);
         this.dropEnroutePonds();
-        this.pondBreakUntil = this.runTicks + (emptyFoodPath ? 96 : 48);
+        this.armPondBreakSticky(emptyFoodPath ? 768 : 512, true);
         this.noteAction("pond thrash \u2014 fight/XP");
-        host.log("AUTO: pond thrash \u2014 break to fight/XP");
+        host.log("AUTO: pond thrash \u2014 break to fight/XP (2085)");
+        if (this.shouldEscalatePondBreakPrison(8)) {
+          this.escalatePondBreakPrison(host, w, stance, "pond-thrash-rethink");
+          this.cool = 5;
+          return;
+        }
         if (host.hasTool("pickaxe")) {
           const live = (_f = (_e = w.seen) == null ? void 0 : _e.rock) != null ? _f : this.mem(w, "rock");
           if (live && !this.isGatherTileBlocked(live.x, live.y)) {
