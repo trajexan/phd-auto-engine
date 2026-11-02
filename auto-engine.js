@@ -1,4 +1,4 @@
-/* phd auto-engine 2078 — pull via GET /api/auto-engine */
+/* phd auto-engine 2079 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2078";
+  var AUTO_ENGINE_VERSION = "2079";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1401,6 +1401,11 @@
        */
       __publicField(this, "quietBreakEscalateUntil", 0);
       __publicField(this, "quietBreakEscalateHits", 0);
+      /**
+       * Eng 2079 / R48: escalate-leave emit count — leave↔grace theater (8f2a8t 66×).
+       * ≥3 → sticky progress leave + keep quiet window soft-ended.
+       */
+      __publicField(this, "quietEscalateLeaveHits", 0);
       /** Eng 2049 / R19: rethinks while sticky leave already active → escalate to progress. */
       __publicField(this, "stickyLeaveRethinks", 0);
       /**
@@ -1569,6 +1574,7 @@
         this.quietBreakEmitHits = 0;
         this.quietBreakEscalateUntil = 0;
         this.quietBreakEscalateHits = 0;
+        this.quietEscalateLeaveHits = 0;
         this.stickyLeaveRethinks = 0;
         this.stickyExploreBlockUntil = 0;
         this.stickyPhaseLeaveArmed = false;
@@ -6025,6 +6031,9 @@
       ) || this.quietBreakEmitHits >= 3 || this.runTicks < this.quietBootstrapBreakUntil || this.quietBreakEscalateHits >= 2 || this.runTicks < this.quietBreakEscalateUntil || this.statusFamilyHits(/quiet hold — break escalate/) >= 3 || this.statusOscPair(
         /quiet hold — break escalate/,
         /quiet hold — tools bootstrap|FIRST_WEP hold|kite cool exit grace/
+      ) || this.quietEscalateLeaveHits >= 2 || this.statusFamilyHits(/quiet hold — escalate leave/) >= 3 || this.statusOscPair(
+        /quiet hold — escalate leave/,
+        /kite cool exit grace|kite cool exit|phase cool/
       ) || this.statusFamilyHits(/kite cool wander/) >= 5 || this.statusFamilyHits(/kite cool hub/) >= 5;
     }
     /**
@@ -6175,6 +6184,7 @@
         this.quietBreakEmitHits = 0;
         this.quietBreakEscalateUntil = Math.min(this.quietBreakEscalateUntil, this.runTicks);
         this.quietBreakEscalateHits = 0;
+        this.quietEscalateLeaveHits = 0;
       }
       if (this.quietBreakEscalateActive() || this.quietBreakEscalateHits >= 3) {
         return this.finishQuietBreakEscalated(host, w, stance, why);
@@ -6317,6 +6327,7 @@
      * Eng 2078 / R47: arm durable quietBreakEscalateUntil so finishQuietHoldProgress
      * cannot re-enter tools bootstrap next tick (sukdr2/3qj9mc). Soft-end reentry ban
      * so tryStickyProgressLeave does not label FIRST_WEP hold — wander under quiet.
+     * Eng 2079 / R48: do NOT re-arm quiet window after escalate (leave↔grace 8f2a8t).
      */
     escalateQuietBreakMono(host, w, stance, why) {
       this.latchThrash();
@@ -6340,7 +6351,7 @@
       this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
       this.h1001.phase = "TOOLS";
       this.noteAction("quiet hold \u2014 break escalate");
-      host.log(`AUTO: quiet hold \u2014 break escalate kit/leave (2078) ${why}`);
+      host.log(`AUTO: quiet hold \u2014 break escalate kit/leave (2079) ${why}`);
       this.setStatus1001(host, w, stance, "quiet hold \u2014 break escalate");
       return this.finishQuietBreakEscalated(host, w, stance, `escalate ${why}`);
     }
@@ -6348,11 +6359,16 @@
      * Eng 2078 / R47: productive leave under escalate latch — no tools bootstrap,
      * no bootstrap break explore, no FIRST_WEP hold wander. One kit try if hits≤1;
      * else explore/chest/shop or sticky progress leave.
+     * Eng 2079 / R48: NEVER armPhaseCoolNoKiteEmit here — that re-armed
+     * kiteCoolReentryBanUntil and bounced into finishKiteCoolExitGrace → grace
+     * re-label → escalate leave forever (8f2a8t 66×/34×). Soft-end quiet window;
+     * cap leave emits → sticky progress leave.
      */
     finishQuietBreakEscalated(host, w, stance, why) {
       var _a, _b;
       this.latchThrash();
-      this.armPhaseCoolNoKiteEmit();
+      this.kiteCoolExitUntil = Math.min(this.kiteCoolExitUntil, this.runTicks);
+      this.kiteCoolReentryBanUntil = Math.min(this.kiteCoolReentryBanUntil, this.runTicks);
       this.stickyPhaseLeaveArmed = true;
       this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
       this.clearFundIntent("tool");
@@ -6363,10 +6379,23 @@
           this.runTicks + 640
         );
       }
+      this.quietEscalateLeaveHits++;
+      if (this.quietEscalateLeaveHits >= 3 || this.statusFamilyHits(/quiet hold — escalate leave/) >= 4 || this.statusOscPair(
+        /quiet hold — escalate leave/,
+        /kite cool exit grace|kite cool exit|phase cool/
+      )) {
+        this.stuckRecentStatus = this.stuckRecentStatus.filter(
+          (s) => !/kite cool exit grace|quiet hold — escalate leave|phase cool/i.test(s)
+        );
+        this.noteAction("quiet hold \u2014 escalate leave sticky");
+        host.log(`AUTO: quiet hold \u2014 escalate leave sticky (2079) ${why}`);
+        this.setStatus1001(host, w, stance, "quiet hold \u2014 escalate leave sticky");
+        return this.tryStickyProgressLeave(host, w, stance, `escalate-leave-cap ${why}`);
+      }
       this.noteAction("quiet hold \u2014 escalate leave");
-      host.log(`AUTO: quiet hold \u2014 escalate leave (2078) ${why}`);
+      host.log(`AUTO: quiet hold \u2014 escalate leave (2079) ${why}`);
       this.setStatus1001(host, w, stance, "quiet hold \u2014 escalate leave");
-      if (this.beginnerToolsIncomplete(host) && this.quietBreakEscalateHits <= 1 && this.runTicks >= this.kitAcquireBlockUntil) {
+      if (this.beginnerToolsIncomplete(host) && this.quietBreakEscalateHits <= 1 && this.quietEscalateLeaveHits <= 1 && this.runTicks >= this.kitAcquireBlockUntil) {
         const anvil2 = this.mem(w, "anvil");
         const needPick = !host.hasTool("pickaxe");
         const tool = needPick ? "pickaxe" : "hatchet";
@@ -6449,12 +6478,19 @@
       this.kiteCoolParkHits = 0;
       this.stickyPhaseLeaveArmed = true;
       this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+      if (this.quietBreakEscalateActive() || this.quietBreakEscalateHits >= 2 || this.quietEscalateLeaveHits >= 1 || this.statusFamilyHits(/quiet hold — escalate leave/) >= 1) {
+        this.kiteCoolExitUntil = Math.min(this.kiteCoolExitUntil, this.runTicks);
+        this.kiteCoolReentryBanUntil = Math.min(this.kiteCoolReentryBanUntil, this.runTicks);
+        return this.finishQuietBreakEscalated(host, w, stance, `grace-pre-escalated ${why}`);
+      }
       const graceTheater = this.statusFamilyHits(/kite cool exit grace/) >= 1 || this.statusFamilyHits(/phase cool|flat thrash|flat rethink/) >= 1;
       this.stuckRecentStatus = this.stuckRecentStatus.filter(
         (s) => !/kite cool exit grace|phase cool|flat thrash|flat rethink|kite cool wander|kite cool hub/i.test(s)
       );
       if (graceTheater) {
-        if (this.quietBreakEscalateActive() || this.quietBreakEscalateHits >= 2) {
+        if (this.quietBreakEscalateActive() || this.quietBreakEscalateHits >= 2 || this.quietEscalateLeaveHits >= 1 || this.statusFamilyHits(/quiet hold — escalate leave/) >= 1) {
+          this.kiteCoolExitUntil = Math.min(this.kiteCoolExitUntil, this.runTicks);
+          this.kiteCoolReentryBanUntil = Math.min(this.kiteCoolReentryBanUntil, this.runTicks);
           return this.finishQuietBreakEscalated(host, w, stance, `grace-escalated ${why}`);
         }
         if (this.quietBreakEmitHits >= 2 || this.statusFamilyHits(/quiet hold — bootstrap break/) >= 2 || this.statusFamilyHits(/quiet hold — break escalate/) >= 1 || this.statusOscPair(
