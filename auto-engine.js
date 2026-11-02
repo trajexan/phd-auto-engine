@@ -1,4 +1,4 @@
-/* phd auto-engine 2079 — pull via GET /api/auto-engine */
+/* phd auto-engine 2080 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2079";
+  var AUTO_ENGINE_VERSION = "2080";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1404,6 +1404,8 @@
       /**
        * Eng 2079 / R48: escalate-leave emit count — leave↔grace theater (8f2a8t 66×).
        * ≥3 → sticky progress leave + keep quiet window soft-ended.
+       * Eng 2080 / R49: under latch, sticky must not re-arm cool stickies / park must not
+       * re-open quiet window (7ewd83 leave-sticky↔sticky-explore↔kite-cool-wander).
        */
       __publicField(this, "quietEscalateLeaveHits", 0);
       /** Eng 2049 / R19: rethinks while sticky leave already active → escalate to progress. */
@@ -1786,6 +1788,9 @@
       if (this.runPhase1001(host, w, stance)) return true;
       if (this.runCalm1001(host, w, stance)) return true;
       if (this.kiteExploreCoolActive()) {
+        if (this.quietEscalateLeaveLatchActive()) {
+          return this.durableEscalateLeaveExit(host, w, stance, "cool-active");
+        }
         if (this.kiteCoolExitQuietActive()) {
           return this.finishKiteCoolExitGrace(host, w, stance, "cool-active");
         }
@@ -1916,6 +1921,9 @@
         return true;
       }
       if (this.kiteCoolExitQuietActive()) {
+        if (this.quietEscalateLeaveLatchActive()) {
+          return this.durableEscalateLeaveExit(host, w, stance, "post-exit-quiet");
+        }
         return this.finishQuietHoldProgress(host, w, stance, "post-exit-quiet");
       }
       if (this.h1001.phase === "TOOLS" && this.beginnerToolsIncomplete(host)) {
@@ -6034,7 +6042,10 @@
       ) || this.quietEscalateLeaveHits >= 2 || this.statusFamilyHits(/quiet hold — escalate leave/) >= 3 || this.statusOscPair(
         /quiet hold — escalate leave/,
         /kite cool exit grace|kite cool exit|phase cool/
-      ) || this.statusFamilyHits(/kite cool wander/) >= 5 || this.statusFamilyHits(/kite cool hub/) >= 5;
+      ) || this.statusOscPair(
+        /quiet hold — escalate leave|sticky progress — explore/,
+        /kite-cool-wander|kite cool wander|kite cool exit|kite cool park/
+      ) || this.statusFamilyHits(/quiet hold — escalate leave sticky|sticky progress — explore/) >= 4 && this.statusFamilyHits(/kite-cool-wander|kite cool exit|kite cool park/) >= 2 || this.statusFamilyHits(/kite cool wander/) >= 5 || this.statusFamilyHits(/kite cool hub/) >= 5;
     }
     /**
      * Eng 2068 / R37: cool park is temporary. Re-entry while wander-ban/hub live →
@@ -6044,6 +6055,9 @@
      * phase cool cannot re-park hub (v2tcev/qmq6aa/sp7npv/zynf9j/7k53tg).
      */
     exitKiteCoolPark(host, w, stance, why) {
+      if (this.quietEscalateLeaveLatchActive()) {
+        return this.durableEscalateLeaveExit(host, w, stance, `park ${why}`);
+      }
       this.latchThrash();
       this.latchClash();
       this.exploreKiteBreakUntil = Math.min(this.exploreKiteBreakUntil, this.runTicks);
@@ -6081,6 +6095,9 @@
      * Eng 2069 / R38: during exit grace, never re-arm bans + hub — finish grace walk.
      */
     breakKiteCoolWanderHub(host, w, stance, why) {
+      if (this.quietEscalateLeaveLatchActive()) {
+        return this.durableEscalateLeaveExit(host, w, stance, `wander-hub ${why}`);
+      }
       if (this.kiteCoolExitQuietActive()) {
         return this.finishKiteCoolExitGrace(host, w, stance, why);
       }
@@ -6141,6 +6158,80 @@
      */
     kiteCoolExitQuietActive() {
       return this.kiteCoolExitGraceActive() || this.kiteCoolReentryBanActive();
+    }
+    /**
+     * Eng 2080 / R49: escalate-leave latch — once leave/sticky fired, never re-open
+     * kite cool park quiet window (exitKiteCoolPark → grace → leave sticky WD).
+     */
+    quietEscalateLeaveLatchActive() {
+      return this.quietBreakEscalateActive() || this.quietEscalateLeaveHits >= 1 || this.statusFamilyHits(/quiet hold — escalate leave/) >= 1;
+    }
+    /**
+     * Eng 2080 / R49: durable leave under escalate latch — expire cool stickies that
+     * feed kiteExploreCoolActive, soft-end quiet window, walk explore/chest/shop.
+     * Never arm kiteCoolExitUntil / reentryBan (that reopened grace theater).
+     */
+    durableEscalateLeaveExit(host, w, stance, why) {
+      var _a, _b;
+      this.latchThrash();
+      this.latchClash();
+      this.exploreKiteBreakUntil = Math.min(this.exploreKiteBreakUntil, this.runTicks);
+      this.stickyExploreBlockUntil = Math.min(this.stickyExploreBlockUntil, this.runTicks);
+      this.stuckWanderBreakUntil = Math.min(this.stuckWanderBreakUntil, this.runTicks);
+      this.campChainBreakUntil = Math.min(this.campChainBreakUntil, this.runTicks);
+      this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
+      this.emergToolsBreakUntil = Math.min(this.emergToolsBreakUntil, this.runTicks);
+      this.kiteCoolWanderBanUntil = Math.min(this.kiteCoolWanderBanUntil, this.runTicks);
+      this.kiteCoolParkHits = 0;
+      this.kiteCoolExitUntil = Math.min(this.kiteCoolExitUntil, this.runTicks);
+      this.kiteCoolReentryBanUntil = Math.min(this.kiteCoolReentryBanUntil, this.runTicks);
+      this.stickyPhaseLeaveArmed = true;
+      this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+      this.clearFundIntent("tool");
+      this.stuckRecentStatus = this.stuckRecentStatus.filter(
+        (s) => !/kite cool|kite-cool-wander|quiet hold — escalate leave|sticky progress|sticky leave|phase cool|lethal|FIRST_WEP hold/i.test(s)
+      );
+      if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
+        this.h1001.phase = "GEAR_FARM";
+      } else if (host.hasTool("pickaxe")) {
+        this.h1001.phase = "FIRST_WEP";
+      } else {
+        this.h1001.phase = "TOOLS";
+      }
+      this.noteAction(`escalate leave durable (${why})`);
+      host.log(`AUTO: escalate leave durable \u2014 no quiet re-arm (2080) ${why}`);
+      this.setStatus1001(host, w, stance, "sticky progress \u2014 explore");
+      const chest = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
+      const shop = this.mem(w, "shop");
+      if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) {
+        if (this.walkToTile(host, chest.x, chest.y)) {
+          this.cool = 12;
+          return true;
+        }
+      }
+      if (shop) {
+        host.walkTo(shop.x, shop.y);
+        this.cool = 12;
+        return true;
+      }
+      if (w.explore) {
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
+        host.walkTo(w.explore.x, w.explore.y);
+        this.cool = 14;
+        return true;
+      }
+      if (w.wander) {
+        host.walkTo(w.wander.x, w.wander.y);
+        this.cool = 12;
+        return true;
+      }
+      if (w.hub) {
+        host.walkTo(w.hub.x, w.hub.y);
+        this.cool = 12;
+        return true;
+      }
+      this.cool = 10;
+      return true;
     }
     /**
      * Eng 2071 / R40: arm cool-exit ban the moment we enter phase cool from sticky
@@ -6363,6 +6454,8 @@
      * kiteCoolReentryBanUntil and bounced into finishKiteCoolExitGrace → grace
      * re-label → escalate leave forever (8f2a8t 66×/34×). Soft-end quiet window;
      * cap leave emits → sticky progress leave.
+     * Eng 2080 / R49: sticky cap routes through durableEscalateLeaveExit (no cool
+     * sticky re-arms / no park quiet reopen).
      */
     finishQuietBreakEscalated(host, w, stance, why) {
       var _a, _b;
@@ -6546,6 +6639,9 @@
      */
     tryStickyProgressLeave(host, w, stance, why) {
       var _a, _b, _c, _d;
+      if (this.quietEscalateLeaveLatchActive()) {
+        return this.durableEscalateLeaveExit(host, w, stance, `sticky ${why}`);
+      }
       if (this.kiteCoolExitQuietActive()) {
         this.stickyPhaseLeaveArmed = true;
         this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
