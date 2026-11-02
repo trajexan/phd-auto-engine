@@ -1,4 +1,4 @@
-/* phd auto-engine 2081 — pull via GET /api/auto-engine */
+/* phd auto-engine 2082 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2081";
+  var AUTO_ENGINE_VERSION = "2082";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1414,6 +1414,8 @@
        */
       __publicField(this, "durableEscalateLeaveHits", 0);
       __publicField(this, "durableLeaveSettleUntil", 0);
+      /** Eng 2082 / R51: soft-continue settle without re-latch thrash every tick. */
+      __publicField(this, "durableLeaveSettleEmitUntil", 0);
       /** Eng 2049 / R19: rethinks while sticky leave already active → escalate to progress. */
       __publicField(this, "stickyLeaveRethinks", 0);
       /**
@@ -1585,6 +1587,7 @@
         this.quietEscalateLeaveHits = 0;
         this.durableEscalateLeaveHits = 0;
         this.durableLeaveSettleUntil = 0;
+        this.durableLeaveSettleEmitUntil = 0;
         this.stickyLeaveRethinks = 0;
         this.stickyExploreBlockUntil = 0;
         this.stickyPhaseLeaveArmed = false;
@@ -1796,7 +1799,7 @@
       if (this.runPhase1001(host, w, stance)) return true;
       if (this.runCalm1001(host, w, stance)) return true;
       if (this.kiteExploreCoolActive()) {
-        if (this.durableLeaveSettleActive() || this.durableEscalateLeaveHits >= 1) {
+        if (this.durableLeaveSettleActive()) {
           return this.finishDurableLeaveSettle(host, w, stance, "cool-active");
         }
         if (this.quietEscalateLeaveLatchActive()) {
@@ -1932,7 +1935,7 @@
         return true;
       }
       if (this.kiteCoolExitQuietActive()) {
-        if (this.durableLeaveSettleActive() || this.durableEscalateLeaveHits >= 1) {
+        if (this.durableLeaveSettleActive()) {
           return this.finishDurableLeaveSettle(host, w, stance, "post-exit-quiet");
         }
         if (this.quietEscalateLeaveLatchActive()) {
@@ -6041,6 +6044,7 @@
      * or wander/hub mono. 2068 adds hub|osc-hub on the left so hub↔lethal/flat re-breaks.
      */
     kiteCoolWanderTheater() {
+      if (this.durableLeaveSettleActive()) return false;
       return this.statusOscPair(
         /kite cool wander|kite cool mine|kite cool hub|kite-cool-wander osc/,
         /flat thrash|flat rethink|phase cool|lethal kite|lethal close|lethal cover|mob engage|mob kite|kite outlook|approach kite|approach engage/
@@ -6072,7 +6076,7 @@
      * phase cool cannot re-park hub (v2tcev/qmq6aa/sp7npv/zynf9j/7k53tg).
      */
     exitKiteCoolPark(host, w, stance, why) {
-      if (this.durableLeaveSettleActive() || this.durableEscalateLeaveHits >= 1) {
+      if (this.durableLeaveSettleActive()) {
         return this.finishDurableLeaveSettle(host, w, stance, `park ${why}`);
       }
       if (this.quietEscalateLeaveLatchActive()) {
@@ -6115,7 +6119,7 @@
      * Eng 2069 / R38: during exit grace, never re-arm bans + hub — finish grace walk.
      */
     breakKiteCoolWanderHub(host, w, stance, why) {
-      if (this.durableLeaveSettleActive() || this.durableEscalateLeaveHits >= 1) {
+      if (this.durableLeaveSettleActive()) {
         return this.finishDurableLeaveSettle(host, w, stance, `wander-hub ${why}`);
       }
       if (this.quietEscalateLeaveLatchActive()) {
@@ -6194,15 +6198,27 @@
       return this.runTicks < this.durableLeaveSettleUntil;
     }
     /**
-     * Eng 2081 / R50: after first durable leave, productive settle — mine/kit/wander.
-     * Never re-label sticky progress explore / escalate leave durable (theater fuel).
+     * Eng 2081 / R50 + Eng 2082 / R51: after first durable leave, productive settle.
+     * 2082: emit-cool soft continue (no thrash latch spam); expire camp/food cool so
+     * kiteExploreCoolActive clears; do NOT extend settle when opts.rearm===false.
      */
-    finishDurableLeaveSettle(host, w, stance, why) {
+    finishDurableLeaveSettle(host, w, stance, why, opts = {}) {
       var _a, _b, _c, _d;
-      this.latchThrash();
-      this.latchClash();
-      this.durableLeaveSettleUntil = Math.max(this.durableLeaveSettleUntil, this.runTicks + 1920);
-      if (this.beginnerToolsIncomplete(host)) {
+      const rearm = opts.rearm !== false;
+      const soft = this.runTicks < this.durableLeaveSettleEmitUntil && this.statusFamilyHits(/quiet hold — durable settle/) >= 1;
+      if (!soft) {
+        this.latchThrash();
+        this.latchClash();
+        this.noteAction(`durable leave settle (${why})`);
+        host.log(`AUTO: durable leave settle \u2014 no re-durable (2082) ${why}`);
+        this.durableLeaveSettleEmitUntil = this.runTicks + 128;
+      }
+      if (rearm) {
+        if (!this.durableLeaveSettleActive()) {
+          this.durableLeaveSettleUntil = this.runTicks + 1920;
+        }
+      }
+      if (!soft && this.beginnerToolsIncomplete(host)) {
         this.quietBreakEscalateUntil = Math.max(
           this.quietBreakEscalateUntil,
           this.runTicks + 640
@@ -6214,12 +6230,16 @@
       this.exploreKiteBreakUntil = Math.min(this.exploreKiteBreakUntil, this.runTicks);
       this.stickyExploreBlockUntil = Math.min(this.stickyExploreBlockUntil, this.runTicks);
       this.stuckWanderBreakUntil = Math.min(this.stuckWanderBreakUntil, this.runTicks);
+      this.campChainBreakUntil = Math.min(this.campChainBreakUntil, this.runTicks);
+      this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
       this.stickyPhaseLeaveArmed = true;
       this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
       this.clearFundIntent("tool");
-      this.stuckRecentStatus = this.stuckRecentStatus.filter(
-        (s) => !/kite cool|kite-cool-wander|escalate leave durable|quiet hold — escalate leave|quiet hold — durable settle|sticky progress|sticky leave|phase cool|lethal|FIRST_WEP hold/i.test(s)
-      );
+      if (!soft) {
+        this.stuckRecentStatus = this.stuckRecentStatus.filter(
+          (s) => !/kite cool|kite-cool-wander|escalate leave durable|quiet hold — escalate leave|quiet hold — durable settle|sticky progress|sticky leave|phase cool|lethal|FIRST_WEP hold/i.test(s)
+        );
+      }
       if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
         this.h1001.phase = "GEAR_FARM";
       } else if (host.hasTool("pickaxe")) {
@@ -6227,8 +6247,6 @@
       } else {
         this.h1001.phase = "TOOLS";
       }
-      this.noteAction(`durable leave settle (${why})`);
-      host.log(`AUTO: durable leave settle \u2014 no re-durable (2081) ${why}`);
       this.setStatus1001(host, w, stance, "quiet hold \u2014 durable settle");
       const rock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
       if (rock && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rock.x, rock.y)) {
@@ -6286,16 +6304,21 @@
      * Eng 2080 / R49: durable leave under escalate latch — expire cool stickies that
      * feed kiteExploreCoolActive, soft-end quiet window, walk explore/chest/shop.
      * Never arm kiteCoolExitUntil / reentryBan (that reopened grace theater).
-     * Eng 2081 / R50: first durable only; further re-entry → finishDurableLeaveSettle
-     * (quietEscalateLeaveHits≥2 was keeping kiteCoolWanderTheater → durable loop WD).
+     * Eng 2081 / R50: first durable only; further re-entry → finishDurableLeaveSettle.
+     * Eng 2082 / R51: settle live → soft finish; hits≥1 after settle expire → finish
+     * with rearm:false (never perpetual settle prison / wander-hub osc).
      */
     durableEscalateLeaveExit(host, w, stance, why) {
       var _a, _b, _c, _d;
-      if (this.durableEscalateLeaveHits >= 1 || this.durableLeaveSettleActive()) {
+      if (this.durableLeaveSettleActive()) {
         return this.finishDurableLeaveSettle(host, w, stance, why);
+      }
+      if (this.durableEscalateLeaveHits >= 1) {
+        return this.finishDurableLeaveSettle(host, w, stance, why, { rearm: false });
       }
       this.durableEscalateLeaveHits++;
       this.durableLeaveSettleUntil = Math.max(this.durableLeaveSettleUntil, this.runTicks + 1920);
+      this.durableLeaveSettleEmitUntil = this.runTicks + 128;
       this.latchThrash();
       this.latchClash();
       this.exploreKiteBreakUntil = Math.min(this.exploreKiteBreakUntil, this.runTicks);
@@ -6328,7 +6351,7 @@
         this.h1001.phase = "TOOLS";
       }
       this.noteAction(`escalate leave durable (${why})`);
-      host.log(`AUTO: escalate leave durable \u2014 no quiet re-arm (2081) ${why}`);
+      host.log(`AUTO: escalate leave durable \u2014 no quiet re-arm (2082) ${why}`);
       this.setStatus1001(host, w, stance, "quiet hold \u2014 durable settle");
       const chest = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
       const shop = this.mem(w, "shop");
@@ -6414,6 +6437,7 @@
         this.quietEscalateLeaveHits = 0;
         this.durableEscalateLeaveHits = 0;
         this.durableLeaveSettleUntil = Math.min(this.durableLeaveSettleUntil, this.runTicks);
+        this.durableLeaveSettleEmitUntil = 0;
       }
       if (this.quietBreakEscalateActive() || this.quietBreakEscalateHits >= 3) {
         return this.finishQuietBreakEscalated(host, w, stance, why);
@@ -6777,7 +6801,7 @@
      */
     tryStickyProgressLeave(host, w, stance, why) {
       var _a, _b, _c, _d;
-      if (this.durableLeaveSettleActive() || this.durableEscalateLeaveHits >= 1) {
+      if (this.durableLeaveSettleActive()) {
         return this.finishDurableLeaveSettle(host, w, stance, `sticky ${why}`);
       }
       if (this.quietEscalateLeaveLatchActive()) {
