@@ -1,4 +1,4 @@
-/* phd auto-engine 2085 — pull via GET /api/auto-engine */
+/* phd auto-engine 2086 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2085";
+  var AUTO_ENGINE_VERSION = "2086";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1821,7 +1821,7 @@
       if (this.runCalm1001(host, w, stance)) return true;
       if (this.kiteExploreCoolActive()) {
         if (this.durableLeaveSettleActive()) {
-          return this.finishDurableLeaveSettle(host, w, stance, "cool-active");
+          return this.routeDurableLeaveSettleOrEscape(host, w, stance, "cool-active");
         }
         if (this.durableLeaveSettleClosed()) {
           return this.routeDurableLeaveClosed(host, w, stance, "cool-active");
@@ -1960,7 +1960,7 @@
       }
       if (this.kiteCoolExitQuietActive()) {
         if (this.durableLeaveSettleActive()) {
-          return this.finishDurableLeaveSettle(host, w, stance, "post-exit-quiet");
+          return this.routeDurableLeaveSettleOrEscape(host, w, stance, "post-exit-quiet");
         }
         if (this.durableLeaveSettleClosed()) {
           return this.routeDurableLeaveClosed(host, w, stance, "post-exit-quiet");
@@ -6158,7 +6158,7 @@
      */
     exitKiteCoolPark(host, w, stance, why) {
       if (this.durableLeaveSettleActive()) {
-        return this.finishDurableLeaveSettle(host, w, stance, `park ${why}`);
+        return this.routeDurableLeaveSettleOrEscape(host, w, stance, `park ${why}`);
       }
       if (this.durableLeaveSettleClosed()) {
         return this.routeDurableLeaveClosed(host, w, stance, `park ${why}`);
@@ -6204,7 +6204,7 @@
      */
     breakKiteCoolWanderHub(host, w, stance, why) {
       if (this.durableLeaveSettleActive()) {
-        return this.finishDurableLeaveSettle(host, w, stance, `wander-hub ${why}`);
+        return this.routeDurableLeaveSettleOrEscape(host, w, stance, `wander-hub ${why}`);
       }
       if (this.durableLeaveSettleClosed()) {
         return this.routeDurableLeaveClosed(host, w, stance, `wander-hub ${why}`);
@@ -6334,6 +6334,36 @@
       host.log(`AUTO: durable leave settle DONE \u2014 hierarchy (2083) ${why}`);
     }
     /**
+     * Eng 2086 / R55: settle sticky re-entry prison (dm7kcj) — after 2 non-soft settles
+     * OR heavy settle family, RELEASE quiet leave instead of more finishDurableLeaveSettle.
+     */
+    durableLeaveSettleCapReached() {
+      return this.durableLeaveSettleHits >= 2 || this.statusFamilyHits(
+        /quiet hold — durable settle|durable leave settle|durable settle mine/
+      ) >= 4;
+    }
+    /** Eng 2086: force settle DONE + hierarchy RELEASE → finishQuietHoldProgress. */
+    escapeDurableLeaveSettleCap(host, w, stance, why) {
+      this.latchThrash();
+      this.latchClash();
+      this.markDurableLeaveSettleDone(host, `settle-cap ${why}`);
+      this.markDurableLeaveHierarchyReleased(host, `settle-cap ${why}`);
+      this.expireDurableCoolForHierarchy();
+      this.noteAction(`durable settle-cap \u2014 ${why}`);
+      host.log(`AUTO: durable settle-cap RELEASE quiet leave (2086) ${why}`);
+      return this.finishQuietHoldProgress(host, w, stance, `post-durable settle-cap ${why}`);
+    }
+    /**
+     * Eng 2086: while settle live, sticky/cool/wander-hub/park either settle (early)
+     * or escape to RELEASE once cap reached — never perpetual settle mine.
+     */
+    routeDurableLeaveSettleOrEscape(host, w, stance, why) {
+      if (this.durableLeaveSettleCapReached()) {
+        return this.escapeDurableLeaveSettleCap(host, w, stance, why);
+      }
+      return this.finishDurableLeaveSettle(host, w, stance, why);
+    }
+    /**
      * Eng 2081 / R50 + Eng 2082 / R51 + Eng 2083 / R52: productive settle WHILE window live.
      * 2083: hit-cap (≥6 non-soft) forces DONE → finishDurableLeaveDone (no settle sink).
      * Never call after durableLeaveSettleClosed — use finishDurableLeaveDone instead.
@@ -6353,9 +6383,8 @@
         host.log(`AUTO: durable leave settle \u2014 no re-durable (2083) ${why}`);
         this.durableLeaveSettleEmitUntil = this.runTicks + 128;
       }
-      if (this.durableLeaveSettleHits >= 6) {
-        this.markDurableLeaveSettleDone(host, `hit-cap ${why}`);
-        return this.finishDurableLeaveDone(host, w, stance, `hit-cap ${why}`);
+      if (this.durableLeaveSettleHits >= 2) {
+        return this.escapeDurableLeaveSettleCap(host, w, stance, `hit-cap ${why}`);
       }
       if (rearm) {
         if (!this.durableLeaveSettleActive() && !this.durableLeaveSettleDone) {
@@ -6553,7 +6582,7 @@
     durableEscalateLeaveExit(host, w, stance, why) {
       var _a, _b, _c, _d;
       if (this.durableLeaveSettleActive()) {
-        return this.finishDurableLeaveSettle(host, w, stance, why);
+        return this.routeDurableLeaveSettleOrEscape(host, w, stance, why);
       }
       if (this.durableLeaveSettleClosed() || this.durableEscalateLeaveHits >= 1) {
         if (!this.durableLeaveSettleDone) this.markDurableLeaveSettleDone(host, why);
@@ -7047,7 +7076,7 @@
     tryStickyProgressLeave(host, w, stance, why) {
       var _a, _b, _c, _d;
       if (this.durableLeaveSettleActive()) {
-        return this.finishDurableLeaveSettle(host, w, stance, `sticky ${why}`);
+        return this.routeDurableLeaveSettleOrEscape(host, w, stance, `sticky ${why}`);
       }
       if (this.durableLeaveSettleClosed()) {
         return this.routeDurableLeaveClosed(host, w, stance, `sticky ${why}`);
