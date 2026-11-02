@@ -1,4 +1,4 @@
-/* phd auto-engine 2072 — pull via GET /api/auto-engine */
+/* phd auto-engine 2073 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2072";
+  var AUTO_ENGINE_VERSION = "2073";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -5664,6 +5664,23 @@
           /lethal kite|lethal close|lethal cover|mob kite|kite outlook|approach kite/
         ) >= 1;
         if (this.stickyExploreBlockActive() || lethalKiteLive || this.exploreKiteBreakActive() || this.statusFamilyHits(/sticky leave — phase|sticky-explore mono|phase cool/) >= 1 || this.stickyPhaseLeaveArmed) {
+          if (this.kiteCoolExitQuietActive()) {
+            this.stickyPhaseLeaveArmed = true;
+            this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+            this.stuckRecentStatus = this.stuckRecentStatus.filter(
+              (s) => !/sticky progress|sticky leave|lethal|mob kite|kite outlook|stuck rethink|phase cool|kite cool exit grace|flat thrash/i.test(s)
+            );
+            if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
+            else this.h1001.phase = "FIRST_WEP";
+            this.noteAction("FIRST_WEP hold \u2014 wander");
+            host.log("AUTO: status osc sticky \u2014 quiet hold no cool re-arm (2073)");
+            this.setStatus(host, w, stance, "FIRST_WEP hold \u2014 wander");
+            if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+            else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+            else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+            this.cool = 12;
+            return true;
+          }
           this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 896);
           this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 768);
           this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 768);
@@ -5922,12 +5939,17 @@
               this.h1001.phase = "FIRST_WEP";
             }
             this.noteAction("mono divert escalate \u2014 phase");
-            host.log("AUTO: mono divert escalate \u2014 hard phase leave (2071)");
             if (w.wander) host.walkTo(w.wander.x, w.wander.y);
             else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
             else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
-            this.armPhaseCoolNoKiteEmit();
-            this.setStatus(host, w, stance, "phase cool");
+            if (this.kiteCoolExitQuietActive()) {
+              host.log("AUTO: mono divert escalate \u2014 quiet hold (2073)");
+              this.setStatus(host, w, stance, "FIRST_WEP hold \u2014 wander");
+            } else {
+              host.log("AUTO: mono divert escalate \u2014 hard phase leave (2071)");
+              this.armPhaseCoolNoKiteEmit();
+              this.setStatus(host, w, stance, "phase cool");
+            }
             this.cool = 18;
             return true;
           }
@@ -6004,7 +6026,7 @@
       return this.statusOscPair(
         /kite cool wander|kite cool mine|kite cool hub|kite-cool-wander osc/,
         /flat thrash|flat rethink|phase cool|lethal kite|lethal close|lethal cover|mob engage|mob kite|kite outlook|approach kite|approach engage/
-      ) || this.statusFamilyHits(/kite cool wander|kite cool mine|kite cool hub|kite-cool-wander osc/) >= 3 && this.statusFamilyHits(/flat thrash|flat rethink|phase cool|camp-chain|lethal kite|lethal close|lethal cover|mob engage|mob kite|kite outlook|approach/) >= 2 || this.statusFamilyHits(/kite cool wander/) >= 3 && this.statusFamilyHits(/phase cool|flat rethink|flat thrash/) >= 2 || this.statusFamilyHits(/kite cool wander/) >= 1 && this.statusFamilyHits(/phase cool/) >= 1 || this.statusFamilyHits(/kite cool wander/) >= 5 || this.statusFamilyHits(/kite cool hub/) >= 5;
+      ) || this.statusFamilyHits(/kite cool wander|kite cool mine|kite cool hub|kite-cool-wander osc/) >= 3 && this.statusFamilyHits(/flat thrash|flat rethink|phase cool|camp-chain|lethal kite|lethal close|lethal cover|mob engage|mob kite|kite outlook|approach/) >= 2 || this.statusFamilyHits(/kite cool wander/) >= 3 && this.statusFamilyHits(/phase cool|flat rethink|flat thrash/) >= 2 || this.statusFamilyHits(/kite cool wander/) >= 1 && this.statusFamilyHits(/phase cool/) >= 1 || this.statusFamilyHits(/kite cool exit grace/) >= 2 && this.statusFamilyHits(/phase cool|flat thrash|flat rethink/) >= 2 || this.statusOscPair(/kite cool exit grace/, /phase cool|flat thrash|flat rethink/) || this.statusFamilyHits(/kite cool wander/) >= 5 || this.statusFamilyHits(/kite cool hub/) >= 5;
     }
     /**
      * Eng 2068 / R37: cool park is temporary. Re-entry while wander-ban/hub live →
@@ -6141,12 +6163,22 @@
       this.kiteCoolParkHits = 0;
       this.stickyPhaseLeaveArmed = true;
       this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
-      this.noteAction("kite cool exit grace");
-      host.log(`AUTO: kite cool exit grace \u2014 wander not explore (2072) ${why}`);
+      const graceTheater = this.statusFamilyHits(/kite cool exit grace/) >= 1 || this.statusFamilyHits(/phase cool|flat thrash|flat rethink/) >= 1;
+      this.stuckRecentStatus = this.stuckRecentStatus.filter(
+        (s) => !/kite cool exit grace|phase cool|flat thrash|flat rethink|kite cool wander|kite cool hub/i.test(s)
+      );
+      if (graceTheater) {
+        this.noteAction("FIRST_WEP hold \u2014 wander");
+        host.log(`AUTO: quiet hold \u2014 no grace\u2194phase re-label (2073) ${why}`);
+        this.setStatus(host, w, stance, "FIRST_WEP hold \u2014 wander");
+      } else {
+        this.noteAction("kite cool exit grace");
+        host.log(`AUTO: kite cool exit grace \u2014 wander not explore (2072) ${why}`);
+        this.setStatus(host, w, stance, "kite cool exit grace");
+      }
       if (w.wander) host.walkTo(w.wander.x, w.wander.y);
       else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
       else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
-      this.setStatus(host, w, stance, "kite cool exit grace");
       this.cool = 10;
       return true;
     }
@@ -7770,13 +7802,23 @@
       if (host.hasTool("pickaxe") && (this.stuckWanderBreakActive() || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.stickyExploreBlockActive() || /sticky leave|sticky progress|phase cool|FIRST_WEP hold/i.test(this.lastStatus || ""))) {
         this.stickyLeaveRethinks++;
         if (this.stickyLeaveRethinks >= 2 && (this.stickyExploreBlockActive() || this.stickyPhaseLeaveArmed)) {
+          this.stickyPhaseLeaveArmed = true;
+          this.stuckRecentStatus = this.stuckRecentStatus.filter(
+            (s) => !/sticky|phase cool|FIRST_WEP hold|first wep|flat thrash|flat rethink|kite cool exit grace/i.test(s)
+          );
+          if (this.kiteCoolExitQuietActive()) {
+            this.noteAction("FIRST_WEP hold \u2014 wander");
+            host.log("AUTO: flat thrash under quiet \u2014 hold no cool re-arm (2073)");
+            this.setStatus(host, w, stance, "FIRST_WEP hold \u2014 wander");
+            if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+            else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+            else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+            this.cool = 18;
+            return;
+          }
           this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 1024);
           this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 896);
           this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 768);
-          this.stickyPhaseLeaveArmed = true;
-          this.stuckRecentStatus = this.stuckRecentStatus.filter(
-            (s) => !/sticky|phase cool|FIRST_WEP hold|first wep|flat thrash|flat rethink/i.test(s)
-          );
           this.noteAction(
             thrashing ? `flat thrash#${this.stickyLeaveRethinks} \u2014 wander` : `flat rethink#${this.stickyLeaveRethinks} \u2014 wander`
           );
