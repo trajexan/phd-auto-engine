@@ -1,4 +1,4 @@
-/* phd auto-engine 2069 — pull via GET /api/auto-engine */
+/* phd auto-engine 2070 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2069";
+  var AUTO_ENGINE_VERSION = "2070";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1433,6 +1433,11 @@
        */
       __publicField(this, "kiteCoolExitUntil", 0);
       /**
+       * Eng 2070 / R39: post-exit reentry ban (~2560t, spans past grace). Blocks cool
+       * sticky re-arm / phase cool leave / kite cool wander emit (cnd27s/efz65k/825n5f).
+       */
+      __publicField(this, "kiteCoolReentryBanUntil", 0);
+      /**
        * Eng 2035 / R4 5wavp7: kit hatchet/pickaxe acquire sameTile hang — streak +
        * cool-block so we walk/explore instead of perpetual acquire claim.
        * Eng 2036 / R5: also tick-budget (moving ≠ progress) + kitPickRethinks break.
@@ -1553,6 +1558,7 @@
         this.kiteCoolWanderBanUntil = 0;
         this.kiteCoolParkHits = 0;
         this.kiteCoolExitUntil = 0;
+        this.kiteCoolReentryBanUntil = 0;
         this.kitAcquireSameTile = 0;
         this.kitAcquireTile = "";
         this.kitAcquireBlockUntil = 0;
@@ -1750,7 +1756,7 @@
       if (this.runPhase1001(host, w, stance)) return true;
       if (this.runCalm1001(host, w, stance)) return true;
       if (this.kiteExploreCoolActive()) {
-        if (this.kiteCoolExitGraceActive()) {
+        if (this.kiteCoolExitQuietActive()) {
           return this.finishKiteCoolExitGrace(host, w, stance, "cool-active");
         }
         if (this.kiteCoolWanderBanActive()) {
@@ -3424,10 +3430,10 @@
         if (stickyExploreHits >= 3 || stickyLethalPair || stickyWatchdog || stickyExploreHits >= 2 && this.exploreKiteBreakActive() || this.stickyExploreBlockActive() || this.stickyLeaveRethinks >= 3 || this.stickyPhaseLeaveArmed) {
           if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
           else this.h1001.phase = "FIRST_WEP";
-          if (this.kiteCoolExitGraceActive()) {
+          if (this.kiteCoolExitQuietActive()) {
             this.stickyPhaseLeaveArmed = true;
             this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
-            host.log("AUTO: TOOLS sticky explore mono \u2014 quiet yield grace (2069)");
+            host.log("AUTO: TOOLS sticky explore mono \u2014 quiet yield cool-exit ban (2070)");
             this.cool = 8;
             return false;
           }
@@ -3460,10 +3466,10 @@
         if (this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.stickyExploreBlockActive()) {
           if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
           else this.h1001.phase = "FIRST_WEP";
-          if (this.kiteCoolExitGraceActive()) {
+          if (this.kiteCoolExitQuietActive()) {
             this.stickyPhaseLeaveArmed = true;
             this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
-            host.log("AUTO: TOOLS sticky \u2014 quiet hold phase yield grace (2069)");
+            host.log("AUTO: TOOLS sticky \u2014 quiet hold phase yield cool-exit ban (2070)");
             this.cool = 8;
             return false;
           }
@@ -3786,7 +3792,7 @@
       if (this.beginnerToolsIncomplete(host)) {
         if (host.hasTool("pickaxe") && (this.stuckWanderBreakActive() || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.hatchetChestBreakActive() || this.stickyExploreBlockActive())) {
           if (this.stickyExploreBlockActive() || this.stickyPhaseLeaveArmed) {
-            if (!this.kiteCoolExitGraceActive()) {
+            if (!this.kiteCoolExitQuietActive()) {
               this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 640);
               this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 640);
             }
@@ -3825,6 +3831,18 @@
             }
             if (this.kiteCoolExitGraceActive()) {
               return this.finishKiteCoolExitGrace(host, w, stance, "first-wep-hold");
+            }
+            if (this.kiteCoolReentryBanActive()) {
+              this.noteAction("FIRST_WEP hold \u2014 wander");
+              host.log("AUTO: FIRST_WEP hold \u2014 plain wander cool-exit ban (2070)");
+              this.setStatus1001(host, w, stance, "FIRST_WEP hold \u2014 wander");
+              if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+              else if (w.explore) {
+                this.desireXY = { x: w.explore.x, y: w.explore.y };
+                host.walkTo(w.explore.x, w.explore.y);
+              } else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+              this.cool = 12;
+              return true;
             }
             if (this.kiteCoolWanderBanActive()) {
               this.kiteCoolParkHits++;
@@ -3882,6 +3900,16 @@
           }
           if (this.kiteCoolExitGraceActive()) {
             return this.finishKiteCoolExitGrace(host, w, stance, "first-wep-sticky");
+          }
+          if (this.kiteCoolReentryBanActive()) {
+            this.noteAction("FIRST_WEP hold \u2014 wander");
+            host.log("AUTO: FIRST_WEP sticky \u2014 plain wander cool-exit ban (2070)");
+            this.setStatus1001(host, w, stance, "FIRST_WEP hold \u2014 wander");
+            if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+            else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+            else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+            this.cool = 10;
+            return true;
           }
           if (this.kiteCoolWanderBanActive()) {
             this.kiteCoolParkHits++;
@@ -5449,10 +5477,12 @@
         /lethal kite|lethal close|lethal cover|approach kite|mob kite|kite outlook|mob engage|approach engage/
       ) || this.statusFamilyHits(/auto — explore\s*\||auto — first wep explore/) >= 3 && this.statusFamilyHits(/lethal kite|lethal close|lethal cover|mob engage|mob kite|kite outlook|approach engage/) >= 3;
       if ((!this.exploreKiteBreakActive() || bareExploreLethal) && bareExploreLethal) {
-        this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 1280);
-        this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 1280);
-        this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
-        this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 768);
+        if (!this.kiteCoolExitQuietActive()) {
+          this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 1280);
+          this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 1280);
+          this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
+          this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 768);
+        }
         this.stickyPhaseLeaveArmed = true;
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/auto — explore\s*\||auto — first wep explore|lethal|kite|mob engage|approach engage|gear-explore-kite|explore-kite|kite cool/i.test(s)
@@ -5463,7 +5493,9 @@
           this.h1001.phase = "FIRST_WEP";
         }
         this.noteAction("status osc gear-explore/kite \u2014 wander");
-        host.log("AUTO: status osc explore\u2194lethal/mob \u2014 wander break (2061)");
+        host.log(
+          this.kiteCoolExitQuietActive() ? "AUTO: status osc explore\u2194lethal/mob \u2014 wander quiet cool-exit ban (2070)" : "AUTO: status osc explore\u2194lethal/mob \u2014 wander break (2061)"
+        );
         if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
         else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
@@ -5928,7 +5960,7 @@
       return this.statusOscPair(
         /kite cool wander|kite cool mine|kite cool hub|kite-cool-wander osc/,
         /flat thrash|flat rethink|phase cool|lethal kite|lethal close|lethal cover|mob engage|mob kite|kite outlook|approach kite|approach engage/
-      ) || this.statusFamilyHits(/kite cool wander|kite cool mine|kite cool hub|kite-cool-wander osc/) >= 3 && this.statusFamilyHits(/flat thrash|flat rethink|phase cool|camp-chain|lethal kite|lethal close|lethal cover|mob engage|mob kite|kite outlook|approach/) >= 2 || this.statusFamilyHits(/kite cool wander/) >= 5 || this.statusFamilyHits(/kite cool hub/) >= 5;
+      ) || this.statusFamilyHits(/kite cool wander|kite cool mine|kite cool hub|kite-cool-wander osc/) >= 3 && this.statusFamilyHits(/flat thrash|flat rethink|phase cool|camp-chain|lethal kite|lethal close|lethal cover|mob engage|mob kite|kite outlook|approach/) >= 2 || this.statusFamilyHits(/kite cool wander/) >= 3 && this.statusFamilyHits(/phase cool|flat rethink|flat thrash/) >= 2 || this.statusFamilyHits(/kite cool wander/) >= 5 || this.statusFamilyHits(/kite cool hub/) >= 5;
     }
     /**
      * Eng 2068 / R37: cool park is temporary. Re-entry while wander-ban/hub live →
@@ -5949,6 +5981,7 @@
       this.kiteCoolMineBanUntil = this.runTicks + 256;
       this.kiteCoolParkHits = 0;
       this.kiteCoolExitUntil = this.runTicks + 1280;
+      this.kiteCoolReentryBanUntil = this.runTicks + 2560;
       this.dropEnroutePonds();
       this.stickyPhaseLeaveArmed = true;
       this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
@@ -5961,7 +5994,7 @@
         this.h1001.phase = "FIRST_WEP";
       }
       this.noteAction("kite cool park \u2014 exit");
-      host.log(`AUTO: kite cool park exit \u2014 clear cool + 2069 grace ${why}`);
+      host.log(`AUTO: kite cool park exit \u2014 clear cool + 2070 grace/ban ${why}`);
       if (w.explore) host.walkTo(w.explore.x, w.explore.y);
       else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
       else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
@@ -5974,11 +6007,11 @@
      * Eng 2069 / R38: during exit grace, never re-arm bans + hub — finish grace walk.
      */
     breakKiteCoolWanderHub(host, w, stance, why) {
-      if (this.kiteCoolExitGraceActive()) {
+      if (this.kiteCoolExitQuietActive()) {
         return this.finishKiteCoolExitGrace(host, w, stance, why);
       }
       this.kiteCoolParkHits++;
-      const reentry = this.kiteCoolWanderBanActive() || this.statusFamilyHits(/kite cool hub|kite-cool-wander osc/) >= 2 || this.kiteCoolParkHits >= 2;
+      const reentry = this.kiteCoolWanderBanActive() || this.statusFamilyHits(/kite cool hub|kite-cool-wander osc/) >= 2 || this.kiteCoolParkHits >= 2 || this.statusFamilyHits(/kite cool wander/) >= 3 && this.statusFamilyHits(/phase cool|flat rethink/) >= 2;
       if (reentry) {
         return this.exitKiteCoolPark(host, w, stance, why);
       }
@@ -6024,9 +6057,21 @@
     kiteCoolExitGraceActive() {
       return this.runTicks < this.kiteCoolExitUntil;
     }
+    /** Eng 2070 / R39: post-exit reentry ban (~2560t). */
+    kiteCoolReentryBanActive() {
+      return this.runTicks < this.kiteCoolReentryBanUntil;
+    }
+    /**
+     * Eng 2070 / R39: grace OR reentry ban — quiet cool-exit window (no hub / no
+     * sticky re-arm / no kite cool wander emit).
+     */
+    kiteCoolExitQuietActive() {
+      return this.kiteCoolExitGraceActive() || this.kiteCoolReentryBanActive();
+    }
     /**
      * Eng 2069 / R38: while grace live, expire cool inputs again + walk explore —
      * never set kite cool hub / re-arm wander ban (prevents hub re-park).
+     * Eng 2070 / R39: also used under reentry ban when cool stickies reappear.
      */
     finishKiteCoolExitGrace(host, w, stance, why) {
       this.exploreKiteBreakUntil = Math.min(this.exploreKiteBreakUntil, this.runTicks);
@@ -6039,7 +6084,7 @@
       this.stickyPhaseLeaveArmed = true;
       this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
       this.noteAction("kite cool exit grace");
-      host.log(`AUTO: kite cool exit grace \u2014 no hub re-park (2069) ${why}`);
+      host.log(`AUTO: kite cool exit grace \u2014 no hub re-park (2070) ${why}`);
       if (w.explore) host.walkTo(w.explore.x, w.explore.y);
       else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
       else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
@@ -7502,6 +7547,16 @@
         if (this.stickyExploreBlockActive() && this.stickyPhaseLeaveArmed) {
           if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
           else this.h1001.phase = "FIRST_WEP";
+          if (this.kiteCoolExitQuietActive()) {
+            this.noteAction("wanderSpin \u2014 cool-exit ban wander");
+            host.log("AUTO: wanderSpin \u2014 plain wander cool-exit ban (2070)");
+            if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+            else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+            else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+            this.setStatus(host, w, stance, "FIRST_WEP hold \u2014 wander");
+            this.cool = 14;
+            return;
+          }
           const rock = (_j = (_i = w.seen) == null ? void 0 : _i.rock) != null ? _j : this.mem(w, "rock");
           if (rock && !this.isGatherTileBlocked(rock.x, rock.y)) {
             this.noteAction("wanderSpin \u2014 cool mine");
