@@ -1,4 +1,4 @@
-/* phd auto-engine 2087 — pull via GET /api/auto-engine */
+/* phd auto-engine 2088 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2087";
+  var AUTO_ENGINE_VERSION = "2088";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1432,6 +1432,14 @@
       __publicField(this, "durableLeaveDoneHits", 0);
       /** Eng 2084 / R53: after release, never re-enter finishDurableLeaveDone sink. */
       __publicField(this, "durableLeaveHierarchyReleased", false);
+      /**
+       * Eng 2088 / R57: post-RELEASE quiet emit hits. Cap → escape wander (5366ma/6d6r8k
+       * same-tile post-RELEASE mine / sticky TOOLS theater forever → WD).
+       */
+      __publicField(this, "postHierarchyReleaseHits", 0);
+      /** Eng 2088: last post-RELEASE mine tile key + consecutive hits on that tile. */
+      __publicField(this, "postHierarchyReleaseMineKey", "");
+      __publicField(this, "postHierarchyReleaseMineHits", 0);
       /** Eng 2049 / R19: rethinks while sticky leave already active → escalate to progress. */
       __publicField(this, "stickyLeaveRethinks", 0);
       /**
@@ -1609,6 +1617,9 @@
         this.durableLeaveSettleHits = 0;
         this.durableLeaveDoneHits = 0;
         this.durableLeaveHierarchyReleased = false;
+        this.postHierarchyReleaseHits = 0;
+        this.postHierarchyReleaseMineKey = "";
+        this.postHierarchyReleaseMineHits = 0;
         this.stickyLeaveRethinks = 0;
         this.stickyExploreBlockUntil = 0;
         this.stickyPhaseLeaveArmed = false;
@@ -3534,9 +3545,8 @@
           if (this.durableLeaveHierarchyReleased) {
             this.stickyPhaseLeaveArmed = true;
             this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
-            host.log("AUTO: TOOLS sticky explore mono \u2014 quiet yield post RELEASE (2087)");
-            this.cool = 8;
-            return false;
+            host.log("AUTO: TOOLS sticky explore mono \u2014 post RELEASE escape path (2088)");
+            return this.finishPostHierarchyReleaseQuiet(host, w, stance, "sticky TOOLS sticky explore mono");
           }
           this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 896);
           this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 768);
@@ -3578,9 +3588,8 @@
           if (this.durableLeaveHierarchyReleased) {
             this.stickyPhaseLeaveArmed = true;
             this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
-            host.log("AUTO: TOOLS sticky \u2014 quiet hold phase yield post RELEASE (2087)");
-            this.cool = 8;
-            return false;
+            host.log("AUTO: TOOLS sticky \u2014 post RELEASE escape path (2088)");
+            return this.finishPostHierarchyReleaseQuiet(host, w, stance, "sticky TOOLS sticky");
           }
           this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 768);
           const holdWasArmed = this.stickyPhaseLeaveArmed || this.stickyLeaveRethinks >= 1;
@@ -5172,14 +5181,14 @@
      * (pond/tools/shop loops otherwise never arm stuck/pondBreak).
      */
     statusIgnoresHpMpProgress(st) {
-      return /food fish|enroute pond|find pond|food last farm|food buffer|food mine break|round-trip pond|util fish|tools find rock|tools mine|tools explore|tools wander|tools pickaxe|tools fund|rock osc|food sell ore|food find shop|bag find shop|sell-ore osc|sell trim|round-trip rock|round-trip tree|round-trip shop|util chop|chop for fire|cook\b|first wep|mine first wep|first-wep osc|remembered door|door through|door open|door thrash|tools hatchet|open chest|chest soft-block|mono thrash|mono divert|hatchet osc|hatchet thrash|explore-kite osc|emerg-tools osc|status osc explore\/kite|lethal kite|lethal close|approach kite|mob kite|kite outlook|enroute loot|walk HV loot|walk loot|emerg hub|food-mine osc|food-fish mono|altar runecraft|stuck rethink|stuck-wander osc|wander-mob osc|sticky progress|sticky leave|camp-chain osc|camp-shop osc|camp-tree osc|camp-rock osc|gear-explore-kite|sticky-explore mono|lethal-loot osc|sticky leave — phase|lethal-cover osc|camp-rock osc|mono divert escalate|FIRST_WEP hold|first wep mine|camp-chain osc|camp-chain same|gear-explore-kite osc|first-wep-combat osc|phase cool|camp-chest osc|explore-kite osc — wander|first-wep osc — wander|tools-hatchet hang|camp-trim osc|pond-sell osc|sell trim empty|door thrash|kite cool|FIRST_WEP hold — wander|quiet hold — tools bootstrap|quiet hold — bootstrap break|quiet hold — break escalate|quiet hold — escalate leave|quiet hold — progress mine|pond break — wander|pond osc — wander|camp-tree osc — wander|camp-rock osc — wander|camp-shop osc — wander|camp-chest osc — wander|camp-chain osc — wander|food-mine osc — wander|food-fish mono — wander|altar-fund osc — wander|kite-cool-lethal osc — hub|kite-cool-lethal osc|kite-cool-wander osc — hub|kite-cool-wander osc|kite cool hub|kite cool exit|kite cool exit grace/i.test(st);
+      return /food fish|enroute pond|find pond|food last farm|food buffer|food mine break|round-trip pond|util fish|tools find rock|tools mine|tools explore|tools wander|tools pickaxe|tools fund|rock osc|food sell ore|food find shop|bag find shop|sell-ore osc|sell trim|round-trip rock|round-trip tree|round-trip shop|util chop|chop for fire|cook\b|first wep|mine first wep|first-wep osc|remembered door|door through|door open|door thrash|tools hatchet|open chest|chest soft-block|mono thrash|mono divert|hatchet osc|hatchet thrash|explore-kite osc|emerg-tools osc|status osc explore\/kite|lethal kite|lethal close|approach kite|mob kite|kite outlook|enroute loot|walk HV loot|walk loot|emerg hub|food-mine osc|food-fish mono|altar runecraft|stuck rethink|stuck-wander osc|wander-mob osc|sticky progress|sticky leave|camp-chain osc|camp-shop osc|camp-tree osc|camp-rock osc|gear-explore-kite|sticky-explore mono|lethal-loot osc|sticky leave — phase|lethal-cover osc|camp-rock osc|mono divert escalate|FIRST_WEP hold|first wep mine|camp-chain osc|camp-chain same|gear-explore-kite osc|first-wep-combat osc|phase cool|camp-chest osc|explore-kite osc — wander|first-wep osc — wander|tools-hatchet hang|camp-trim osc|pond-sell osc|sell trim empty|door thrash|kite cool|FIRST_WEP hold — wander|quiet hold — tools bootstrap|quiet hold — bootstrap break|quiet hold — break escalate|quiet hold — escalate leave|quiet hold — progress mine|quiet hold — post RELEASE|post-RELEASE mine|post-RELEASE escape|pond break — wander|pond osc — wander|camp-tree osc — wander|camp-rock osc — wander|camp-shop osc — wander|camp-chest osc — wander|camp-chain osc — wander|food-mine osc — wander|food-fish mono — wander|altar-fund osc — wander|kite-cool-lethal osc — hub|kite-cool-lethal osc|kite-cool-wander osc — hub|kite-cool-wander osc|kite cool hub|kite cool exit|kite cool exit grace/i.test(st);
     }
     /**
      * Eng 2038 / R8 + t1760: arm breakers from status oscillation alone
      * (before IDLE_STUCK_TICKS). Returns true if a break walk was issued.
      */
     tryStatusOscBreak(host, w, stance) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G;
       const st = (this.lastStatus || "").toLowerCase();
       const pondOsc = this.statusOscPair(/enroute pond|food last farm|round-trip pond/, /food fish|util fish|(^|\s)fish(\s|$)/) || this.statusOscPair(/find pond/, /enroute pond|food fish|remembered door|door through|door open/) || this.statusOscPair(/find shop|sell ore|sell trim/, /door through|door open|remembered door/) || /find pond|find shop/i.test(st) && this.stuckRecentTiles.length >= 6 || /find pond|find shop|door through|door open|sell trim/i.test(st) && this.doorOscStreak >= 2 || this.findPondMonoStreak >= 8;
       if (pondOsc && !this.pondBreakActive()) {
@@ -5710,6 +5719,33 @@
         this.cool = 18;
         return true;
       }
+      if (this.statusFamilyHits(/tools pickaxe/) >= 6 || this.statusOscPair(/tools pickaxe/, /stuck rethink/) || this.statusFamilyHits(/tools pickaxe/) >= 4 && this.statusFamilyHits(/stuck rethink/) >= 2) {
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 768);
+        this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 768);
+        this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 640);
+        this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 384);
+        this.clearFundIntent("tool");
+        this.latchThrash();
+        this.latchClash();
+        this.stuckRecentStatus = this.stuckRecentStatus.filter(
+          (s) => !/tools pickaxe|tools mine|tools find rock|stuck rethink|emerg-tools|mob engage/i.test(s)
+        );
+        const rock = (_w = (_v = w.seen) == null ? void 0 : _v.rock) != null ? _w : this.mem(w, "rock");
+        if (rock) this.blockGatherTile(rock.x, rock.y);
+        if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
+          this.h1001.phase = "GEAR_FARM";
+        } else if (host.hasTool("pickaxe")) {
+          this.h1001.phase = "FIRST_WEP";
+        }
+        this.noteAction("tools pickaxe mono \u2014 wander");
+        host.log("AUTO: tools pickaxe mono \u2014 wander break (2088)");
+        if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+        this.setStatus(host, w, stance, "tools pickaxe mono \u2014 wander");
+        this.cool = 18;
+        return true;
+      }
       if ((!this.emergToolsBreakActive() || this.statusOscPair(/sticky leave|sticky progress/, /emerg hub fund|emerg find pond|mob engage/)) && (this.statusOscPair(
         /tools explore|tools find rock|tools mine|tools wander|tools hatchet|tools fund|tools pickaxe|sticky leave|sticky progress/,
         /emerg hub fund|emerg find pond/
@@ -5847,7 +5883,7 @@
         this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 768);
         this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 640);
         this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 640);
-        const rk = (_w = (_v = w.seen) == null ? void 0 : _v.rock) != null ? _w : this.mem(w, "rock");
+        const rk = (_y = (_x = w.seen) == null ? void 0 : _x.rock) != null ? _y : this.mem(w, "rock");
         if (rk) this.blockGatherTile(rk.x, rk.y);
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/first wep|mine first wep|explore|enroute toward|enroute gather|first-wep osc|FIRST_WEP hold|phase cool|sticky block/i.test(s)
@@ -5872,7 +5908,7 @@
         this.foodMineBreakUntil = this.runTicks + 320;
         this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 256);
         this.pondBreakUntil = Math.max(this.pondBreakUntil, this.runTicks + 768);
-        const rk = (_y = (_x = w.seen) == null ? void 0 : _x.rock) != null ? _y : this.mem(w, "rock");
+        const rk = (_A = (_z = w.seen) == null ? void 0 : _z.rock) != null ? _A : this.mem(w, "rock");
         if (rk) this.blockGatherTile(rk.x, rk.y);
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/food mine break|mine break|pond osc — mine|altar|enroute pond|enroute toward|enroute gather/i.test(s)
@@ -5898,7 +5934,7 @@
           this.noteGatherFail(this.lastFoodFarm.x, this.lastFoodFarm.y);
           this.lastFoodFarm = null;
         }
-        const pondMem = (_z = this.mem(w, "pond")) != null ? _z : this.resolvePond(w);
+        const pondMem = (_B = this.mem(w, "pond")) != null ? _B : this.resolvePond(w);
         if (pondMem) this.noteGatherFail(pondMem.x, pondMem.y);
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/food fish|util fish|enroute pond|fish /i.test(s)
@@ -5957,14 +5993,14 @@
             }
             this.dropEnroutePonds();
             if (w.gather) this.noteGatherFail(w.gather.x, w.gather.y);
-            const rk = (_B = (_A = w.seen) == null ? void 0 : _A.rock) != null ? _B : this.mem(w, "rock");
+            const rk = (_D = (_C = w.seen) == null ? void 0 : _C.rock) != null ? _D : this.mem(w, "rock");
             if (rk) this.blockGatherTile(rk.x, rk.y);
           }
           if (/tools mine|tools find rock|kite cool mine/.test(low)) {
             this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 256);
             this.kiteCoolMineKey = "";
             this.kiteCoolMineHits = 0;
-            const rk = (_D = (_C = w.seen) == null ? void 0 : _C.rock) != null ? _D : this.mem(w, "rock");
+            const rk = (_F = (_E = w.seen) == null ? void 0 : _E.rock) != null ? _F : this.mem(w, "rock");
             if (rk) this.blockGatherTile(rk.x, rk.y);
           }
           if (/altar runecraft|gather fund/.test(low)) {
@@ -5987,7 +6023,7 @@
             this.chopBreakUntil = Math.max(this.chopBreakUntil, this.runTicks + 128);
           }
           if (/tools hatchet|open chest|chest soft-block|hatchet osc|hatchet thrash/.test(low)) {
-            if ((_E = w.seen) == null ? void 0 : _E.chest) this.softBlockChest(host, w, w.seen.chest.x, w.seen.chest.y, "mono chest/hatchet");
+            if ((_G = w.seen) == null ? void 0 : _G.chest) this.softBlockChest(host, w, w.seen.chest.x, w.seen.chest.y, "mono chest/hatchet");
             this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 160);
             this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 480);
           }
@@ -6721,9 +6757,11 @@
     /**
      * Eng 2087 / R56: post hierarchy RELEASE productive quiet — mine/wander/hub only.
      * Never finishQuietBreakEscalated / escalate leave sticky / TOOLS sticky phase cool.
+     * Eng 2088 / R57: hit-cap + same-tile gather block — 2087 looped post-RELEASE mine
+     * / sticky TOOLS / pond-break-cap forever (5366ma/6d6r8k/rmg8sf WD).
      */
     finishPostHierarchyReleaseQuiet(host, w, stance, why) {
-      var _a, _b, _c, _d;
+      var _a, _b, _c, _d, _e, _f;
       this.expireDurableCoolForHierarchy();
       this.stuckRecentStatus = this.stuckRecentStatus.filter(
         (s) => !/quiet hold — escalate leave|TOOLS sticky|phase cool|sticky progress|sticky leave|durable leave settle|quiet hold — durable settle/i.test(s)
@@ -6735,21 +6773,69 @@
       } else {
         this.h1001.phase = "TOOLS";
       }
-      this.noteAction(`quiet hold \u2014 post RELEASE (${why})`);
-      host.log(`AUTO: post hierarchy RELEASE quiet (2087) ${why}`);
-      this.setStatus1001(host, w, stance, "quiet hold \u2014 post RELEASE");
-      const rock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
-      if (rock && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rock.x, rock.y)) {
-        if (this.walkToTile(host, rock.x, rock.y)) {
-          this.cool = 10;
-          return true;
+      this.postHierarchyReleaseHits++;
+      const familyHits = this.statusFamilyHits(/quiet hold — post RELEASE|post-RELEASE mine|post-RELEASE escape/);
+      const stickyWhy = /sticky TOOLS sticky|sticky emerg-tools|sticky stuck-wander|pond-break-cap|first-wep-hold|cool-active/i.test(why);
+      const escape = this.postHierarchyReleaseHits >= 8 || familyHits >= 6 || stickyWhy && this.postHierarchyReleaseHits >= 4 || this.postHierarchyReleaseMineHits >= 3;
+      if (escape) {
+        this.latchThrash();
+        this.latchClash();
+        const rockEsc = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
+        if (rockEsc) this.blockGatherTile(rockEsc.x, rockEsc.y);
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 768);
+        this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 768);
+        this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 640);
+        this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
+        this.postHierarchyReleaseHits = 0;
+        this.postHierarchyReleaseMineKey = "";
+        this.postHierarchyReleaseMineHits = 0;
+        this.stuckRecentStatus = this.stuckRecentStatus.filter(
+          (s) => !/quiet hold — post RELEASE|post-RELEASE mine|TOOLS sticky|emerg-tools|pond-break-cap|stuck-wander|first-wep-hold/i.test(s)
+        );
+        this.noteAction(`post-RELEASE escape (${why})`);
+        host.log(`AUTO: post hierarchy RELEASE escape wander (2088) ${why}`);
+        this.setStatus1001(host, w, stance, "post-RELEASE escape");
+        if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        else if (w.explore) {
+          this.desireXY = { x: w.explore.x, y: w.explore.y };
+          host.walkTo(w.explore.x, w.explore.y);
         }
-        if (this.tryGather(host, w, stance, "post-RELEASE mine")) {
-          this.cool = 8;
-          return true;
-        }
+        this.cool = 16;
+        return true;
       }
-      const chest = (_d = (_c = w.seen) == null ? void 0 : _c.chest) != null ? _d : this.mem(w, "chest");
+      this.noteAction(`quiet hold \u2014 post RELEASE (${why})`);
+      host.log(`AUTO: post hierarchy RELEASE quiet (2088) ${why}`);
+      this.setStatus1001(host, w, stance, "quiet hold \u2014 post RELEASE");
+      const rock = (_d = (_c = w.seen) == null ? void 0 : _c.rock) != null ? _d : this.mem(w, "rock");
+      if (rock && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rock.x, rock.y)) {
+        const key = `${rock.x},${rock.y}`;
+        if (key === this.postHierarchyReleaseMineKey) {
+          this.postHierarchyReleaseMineHits++;
+        } else {
+          this.postHierarchyReleaseMineKey = key;
+          this.postHierarchyReleaseMineHits = 1;
+        }
+        if (this.postHierarchyReleaseMineHits >= 3) {
+          this.blockGatherTile(rock.x, rock.y);
+          this.postHierarchyReleaseMineKey = "";
+          this.postHierarchyReleaseMineHits = 0;
+          host.log(`AUTO: post-RELEASE same-tile mine block (2088) ${key}`);
+        } else {
+          if (this.walkToTile(host, rock.x, rock.y)) {
+            this.cool = 10;
+            return true;
+          }
+          if (this.tryGather(host, w, stance, "post-RELEASE mine")) {
+            this.cool = 8;
+            return true;
+          }
+        }
+      } else {
+        this.postHierarchyReleaseMineKey = "";
+        this.postHierarchyReleaseMineHits = 0;
+      }
+      const chest = (_f = (_e = w.seen) == null ? void 0 : _e.chest) != null ? _f : this.mem(w, "chest");
       if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) {
         if (this.walkToTile(host, chest.x, chest.y)) {
           this.cool = 10;
