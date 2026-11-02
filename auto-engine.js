@@ -1,4 +1,4 @@
-/* phd auto-engine 2088 — pull via GET /api/auto-engine */
+/* phd auto-engine 2089 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2088";
+  var AUTO_ENGINE_VERSION = "2089";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1440,6 +1440,13 @@
       /** Eng 2088: last post-RELEASE mine tile key + consecutive hits on that tile. */
       __publicField(this, "postHierarchyReleaseMineKey", "");
       __publicField(this, "postHierarchyReleaseMineHits", 0);
+      /**
+       * Eng 2089 / R58: after post-RELEASE escape, ban re-entry to quiet sink while cool
+       * (6pajs5/wbx74t/k7ehgt escape↔quiet forever — 2088 reset hits + expire cleared breaks).
+       */
+      __publicField(this, "postHierarchyReleaseEscapeUntil", 0);
+      /** Eng 2089: escape fires this life; ≥2 → permanent quiet ban. */
+      __publicField(this, "postHierarchyReleaseEscapeCount", 0);
       /** Eng 2049 / R19: rethinks while sticky leave already active → escalate to progress. */
       __publicField(this, "stickyLeaveRethinks", 0);
       /**
@@ -1620,6 +1627,8 @@
         this.postHierarchyReleaseHits = 0;
         this.postHierarchyReleaseMineKey = "";
         this.postHierarchyReleaseMineHits = 0;
+        this.postHierarchyReleaseEscapeUntil = 0;
+        this.postHierarchyReleaseEscapeCount = 0;
         this.stickyLeaveRethinks = 0;
         this.stickyExploreBlockUntil = 0;
         this.stickyPhaseLeaveArmed = false;
@@ -3545,7 +3554,12 @@
           if (this.durableLeaveHierarchyReleased) {
             this.stickyPhaseLeaveArmed = true;
             this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
-            host.log("AUTO: TOOLS sticky explore mono \u2014 post RELEASE escape path (2088)");
+            if (this.postHierarchyReleaseEscapeActive() || this.postHierarchyReleaseEscapeCount >= 2) {
+              host.log("AUTO: TOOLS sticky explore mono \u2014 post RELEASE escape cool yield (2089)");
+              this.cool = 8;
+              return false;
+            }
+            host.log("AUTO: TOOLS sticky explore mono \u2014 post RELEASE escape path (2089)");
             return this.finishPostHierarchyReleaseQuiet(host, w, stance, "sticky TOOLS sticky explore mono");
           }
           this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 896);
@@ -3588,7 +3602,12 @@
           if (this.durableLeaveHierarchyReleased) {
             this.stickyPhaseLeaveArmed = true;
             this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
-            host.log("AUTO: TOOLS sticky \u2014 post RELEASE escape path (2088)");
+            if (this.postHierarchyReleaseEscapeActive() || this.postHierarchyReleaseEscapeCount >= 2) {
+              host.log("AUTO: TOOLS sticky \u2014 post RELEASE escape cool yield (2089)");
+              this.cool = 8;
+              return false;
+            }
+            host.log("AUTO: TOOLS sticky \u2014 post RELEASE escape path (2089)");
             return this.finishPostHierarchyReleaseQuiet(host, w, stance, "sticky TOOLS sticky");
           }
           this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 768);
@@ -5308,6 +5327,26 @@
         this.cool = 16;
         return true;
       }
+      if (this.statusOscPair(/food sell/, /pond break — wander|food pond break|emerg pond break/) || this.statusFamilyHits(/food sell/) >= 6 && this.statusFamilyHits(/pond break — wander|food pond break|emerg pond break/) >= 6) {
+        this.latchThrash();
+        this.latchClash();
+        this.armPondBreakSticky(1280, true);
+        this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 768);
+        this.sellOreKeepBlockUntil = Math.max(this.sellOreKeepBlockUntil, this.runTicks + 768);
+        this.dropEnroutePonds();
+        this.clearFundIntent("food");
+        this.stuckRecentStatus = this.stuckRecentStatus.filter(
+          (s) => !/food sell|pond break|food pond|emerg pond|pond-sell osc|food mine break/i.test(s)
+        );
+        this.noteAction("status osc food-sell/pond-break \u2014 wander");
+        host.log("AUTO: status osc food sell \u2194 pond break \u2014 wander (2089)");
+        if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+        this.setStatus(host, w, stance, "pond-sell osc \u2014 wander");
+        this.cool = 18;
+        return true;
+      }
       if (this.statusOscPair(/round-trip rock|round-trip tree/, /sell trim/) || this.statusOscPair(/util chop|util mine/, /sell trim/) || this.statusOscPair(/sell trim/, /(?:^|\s)fish(?:\s|$)|gear score|explore|round-trip/) || this.statusOscPair(/bag sell trim/, /explore|fish|gear score/) || this.statusFamilyHits(/sell trim/) >= 4 && this.statusFamilyHits(/(?:^|\s)fish(?:\s|$)|gear score|explore|round-trip rock|round-trip tree/) >= 2) {
         this.sellTrimStickyUntil = 0;
         this.sellTrimEmptyUntil = Math.max(this.sellTrimEmptyUntil, this.runTicks + 160);
@@ -6759,10 +6798,24 @@
      * Never finishQuietBreakEscalated / escalate leave sticky / TOOLS sticky phase cool.
      * Eng 2088 / R57: hit-cap + same-tile gather block — 2087 looped post-RELEASE mine
      * / sticky TOOLS / pond-break-cap forever (5366ma/6d6r8k/rmg8sf WD).
+     * Eng 2089 / R58: do NOT expireDurableCoolForHierarchy on every quiet emit (cleared
+     * escape breakers → escape↔quiet prison 6pajs5/wbx74t/k7ehgt). Escape cool latch +
+     * escape-count≥2 ban → yield false so FIRST_WEP/combat hierarchy can run.
      */
+    postHierarchyReleaseEscapeActive() {
+      return this.runTicks < this.postHierarchyReleaseEscapeUntil;
+    }
     finishPostHierarchyReleaseQuiet(host, w, stance, why) {
       var _a, _b, _c, _d, _e, _f;
-      this.expireDurableCoolForHierarchy();
+      if (this.postHierarchyReleaseEscapeActive() || this.postHierarchyReleaseEscapeCount >= 2) {
+        this.stickyPhaseLeaveArmed = true;
+        this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+        this.latchThrash();
+        this.latchClash();
+        host.log(`AUTO: post hierarchy RELEASE escape cool yield (2089) ${why}`);
+        this.cool = 8;
+        return false;
+      }
       this.stuckRecentStatus = this.stuckRecentStatus.filter(
         (s) => !/quiet hold — escalate leave|TOOLS sticky|phase cool|sticky progress|sticky leave|durable leave settle|quiet hold — durable settle/i.test(s)
       );
@@ -6783,17 +6836,20 @@
         const rockEsc = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
         if (rockEsc) this.blockGatherTile(rockEsc.x, rockEsc.y);
         this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 768);
-        this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 768);
-        this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 640);
+        this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
+        this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 768);
+        this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 1024);
         this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
         this.postHierarchyReleaseHits = 0;
         this.postHierarchyReleaseMineKey = "";
         this.postHierarchyReleaseMineHits = 0;
+        this.postHierarchyReleaseEscapeCount++;
+        this.postHierarchyReleaseEscapeUntil = this.runTicks + 1536;
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/quiet hold — post RELEASE|post-RELEASE mine|TOOLS sticky|emerg-tools|pond-break-cap|stuck-wander|first-wep-hold/i.test(s)
         );
         this.noteAction(`post-RELEASE escape (${why})`);
-        host.log(`AUTO: post hierarchy RELEASE escape wander (2088) ${why}`);
+        host.log(`AUTO: post hierarchy RELEASE escape wander (2089) #${this.postHierarchyReleaseEscapeCount} ${why}`);
         this.setStatus1001(host, w, stance, "post-RELEASE escape");
         if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
@@ -6805,7 +6861,7 @@
         return true;
       }
       this.noteAction(`quiet hold \u2014 post RELEASE (${why})`);
-      host.log(`AUTO: post hierarchy RELEASE quiet (2088) ${why}`);
+      host.log(`AUTO: post hierarchy RELEASE quiet (2089) ${why}`);
       this.setStatus1001(host, w, stance, "quiet hold \u2014 post RELEASE");
       const rock = (_d = (_c = w.seen) == null ? void 0 : _c.rock) != null ? _d : this.mem(w, "rock");
       if (rock && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rock.x, rock.y)) {
@@ -6820,7 +6876,7 @@
           this.blockGatherTile(rock.x, rock.y);
           this.postHierarchyReleaseMineKey = "";
           this.postHierarchyReleaseMineHits = 0;
-          host.log(`AUTO: post-RELEASE same-tile mine block (2088) ${key}`);
+          host.log(`AUTO: post-RELEASE same-tile mine block (2089) ${key}`);
         } else {
           if (this.walkToTile(host, rock.x, rock.y)) {
             this.cool = 10;
