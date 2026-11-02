@@ -1,4 +1,4 @@
-/* phd auto-engine 2063 — pull via GET /api/auto-engine */
+/* phd auto-engine 2064 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2063";
+  var AUTO_ENGINE_VERSION = "2064";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1411,6 +1411,7 @@
        * Eng 2062 / R31: kite cool mine same-tile hang (qnnhhd/wg7gn7/rsfa7s WD) —
        * 2061 banned bare explore then preferred mine forever on one rock.
        * Eng 2063 / R32: after same-tile≥3, ban mine for 768t (no remine while cool live).
+       * Eng 2064 / R33: FIRST_WEP hold shares this hit/ban (hold mined outside fallback).
        */
       __publicField(this, "kiteCoolMineKey", "");
       __publicField(this, "kiteCoolMineHits", 0);
@@ -3704,19 +3705,36 @@
             this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 640);
             this.stickyPhaseLeaveArmed = true;
             const rock2 = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
-            if (rock2 && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rock2.x, rock2.y) && !this.kiteCoolMineBanActive()) {
-              this.noteAction("FIRST_WEP hold \u2014 mine");
-              host.log("AUTO: FIRST_WEP hold \u2014 productive mine (2054)");
-              this.setStatus1001(host, w, stance, "first wep mine");
-              if (this.walkToTile(host, rock2.x, rock2.y)) {
-                this.cool = 8;
-                return true;
+            const canHoldMine = !!rock2 && host.hasTool("pickaxe") && host.hasTool("hatchet") && !this.isGatherTileBlocked(rock2.x, rock2.y) && !this.kiteCoolMineBanActive();
+            if (canHoldMine && rock2) {
+              const mk = `${rock2.x},${rock2.y}`;
+              if (mk === this.kiteCoolMineKey) this.kiteCoolMineHits++;
+              else {
+                this.kiteCoolMineKey = mk;
+                this.kiteCoolMineHits = 1;
               }
-              if (this.tryGather(host, w, stance, "mine first wep")) {
-                this.cool = 6;
-                return true;
+              if (this.kiteCoolMineHits >= 3) {
+                this.blockGatherTile(rock2.x, rock2.y);
+                this.kiteCoolMineBanUntil = this.runTicks + 768;
+                this.kiteCoolMineKey = "";
+                this.kiteCoolMineHits = 0;
+                host.log("AUTO: FIRST_WEP hold mine same-tile \u2014 ban mine (2064)");
+              } else {
+                this.noteAction("FIRST_WEP hold \u2014 mine");
+                host.log("AUTO: FIRST_WEP hold \u2014 productive mine (2064)");
+                this.setStatus1001(host, w, stance, "first wep mine");
+                if (this.walkToTile(host, rock2.x, rock2.y)) {
+                  this.cool = 8;
+                  return true;
+                }
+                if (this.tryGather(host, w, stance, "mine first wep")) {
+                  this.cool = 6;
+                  return true;
+                }
+                this.blockGatherTile(rock2.x, rock2.y);
+                this.kiteCoolMineKey = "";
+                this.kiteCoolMineHits = 0;
               }
-              this.blockGatherTile(rock2.x, rock2.y);
             }
             this.noteAction("FIRST_WEP hold \u2014 wander");
             host.log("AUTO: FIRST_WEP hold \u2014 kite cool wander (2061)");
@@ -3735,10 +3753,27 @@
         if (this.stickyExploreBlockActive() && host.hasTool("pickaxe")) {
           this.stickyPhaseLeaveArmed = true;
           const rock2 = (_d = (_c = w.seen) == null ? void 0 : _c.rock) != null ? _d : this.mem(w, "rock");
-          if (rock2 && !this.isGatherTileBlocked(rock2.x, rock2.y) && !this.kiteCoolMineBanActive()) {
-            this.setStatus1001(host, w, stance, "first wep mine");
-            if (this.walkToTile(host, rock2.x, rock2.y)) return true;
-            if (this.tryGather(host, w, stance, "mine first wep")) return true;
+          if (rock2 && host.hasTool("hatchet") && !this.isGatherTileBlocked(rock2.x, rock2.y) && !this.kiteCoolMineBanActive()) {
+            const mk = `${rock2.x},${rock2.y}`;
+            if (mk === this.kiteCoolMineKey) this.kiteCoolMineHits++;
+            else {
+              this.kiteCoolMineKey = mk;
+              this.kiteCoolMineHits = 1;
+            }
+            if (this.kiteCoolMineHits >= 3) {
+              this.blockGatherTile(rock2.x, rock2.y);
+              this.kiteCoolMineBanUntil = this.runTicks + 768;
+              this.kiteCoolMineKey = "";
+              this.kiteCoolMineHits = 0;
+              host.log("AUTO: FIRST_WEP sticky mine same-tile \u2014 ban mine (2064)");
+            } else {
+              this.setStatus1001(host, w, stance, "first wep mine");
+              if (this.walkToTile(host, rock2.x, rock2.y)) return true;
+              if (this.tryGather(host, w, stance, "mine first wep")) return true;
+              this.blockGatherTile(rock2.x, rock2.y);
+              this.kiteCoolMineKey = "";
+              this.kiteCoolMineHits = 0;
+            }
           }
           this.setStatus1001(host, w, stance, "kite cool wander");
           if (w.wander) host.walkTo(w.wander.x, w.wander.y);
@@ -5288,10 +5323,13 @@
         this.cool = 6;
         return true;
       }
-      if (this.statusOscPair(/mine first wep/, /first wep/) || this.statusOscPair(/chop first wep/, /first wep/) || this.statusOscPair(/first-wep osc/, /first wep|mine first wep/) || this.statusFamilyHits(/mine first wep|first wep mine/) >= 4) {
+      if (this.statusOscPair(/mine first wep/, /first wep/) || this.statusOscPair(/chop first wep/, /first wep/) || this.statusOscPair(/first-wep osc/, /first wep|mine first wep/) || this.statusOscPair(/FIRST_WEP hold — mine/, /FIRST_WEP hold — wander|kite cool wander/) || this.statusFamilyHits(/mine first wep|first wep mine|FIRST_WEP hold — mine/) >= 3) {
         this.noteAction("status osc first-wep \u2014 explore");
-        host.log("AUTO: status osc first wep \u2014 break (2055)");
+        host.log("AUTO: status osc first wep \u2014 break (2064)");
         this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 480);
+        this.kiteCoolMineBanUntil = Math.max(this.kiteCoolMineBanUntil, this.runTicks + 768);
+        this.kiteCoolMineKey = "";
+        this.kiteCoolMineHits = 0;
         const rk = (_t = (_s = w.seen) == null ? void 0 : _s.rock) != null ? _t : this.mem(w, "rock");
         if (rk) this.blockGatherTile(rk.x, rk.y);
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
@@ -5713,7 +5751,7 @@
       }
       return true;
     }
-    /** Eng 2063 / R32: mine banned under kite cool after same-tile thrash. */
+    /** Eng 2063–2064: mine banned under kite cool / FIRST_WEP hold after same-tile thrash. */
     kiteCoolMineBanActive() {
       return this.runTicks < this.kiteCoolMineBanUntil;
     }
