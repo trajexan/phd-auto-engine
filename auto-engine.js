@@ -1,4 +1,4 @@
-/* phd auto-engine 2071 — pull via GET /api/auto-engine */
+/* phd auto-engine 2072 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2071";
+  var AUTO_ENGINE_VERSION = "2072";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1894,6 +1894,17 @@
           return true;
         }
         this.setStatus1001(host, w, stance, "kite cool wander");
+        if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+        this.cool = 10;
+        return true;
+      }
+      if (this.kiteCoolExitQuietActive()) {
+        this.stickyPhaseLeaveArmed = true;
+        this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 1);
+        this.setStatus1001(host, w, stance, "FIRST_WEP hold \u2014 wander");
+        host.log("AUTO: post-exit quiet \u2014 ban bare explore (2072)");
         if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
         else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
@@ -5510,7 +5521,7 @@
         }
         this.stickyPhaseLeaveArmed = true;
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
-          (s) => !/auto — explore\s*\||auto — first wep explore|lethal|kite|mob engage|approach engage|gear-explore-kite|explore-kite|kite cool/i.test(s)
+          (s) => !/auto — explore\s*\||auto — first wep explore|explore\s*\||lethal|kite|mob engage|approach engage|gear-explore-kite|explore-kite|kite cool|sticky progress|FIRST_WEP hold/i.test(s)
         );
         if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
           this.h1001.phase = "GEAR_FARM";
@@ -5519,11 +5530,15 @@
         }
         this.noteAction("status osc gear-explore/kite \u2014 wander");
         host.log(
-          this.kiteCoolExitQuietActive() ? "AUTO: status osc explore\u2194lethal/mob \u2014 wander quiet cool-exit ban (2070)" : "AUTO: status osc explore\u2194lethal/mob \u2014 wander break (2061)"
+          this.kiteCoolExitQuietActive() ? "AUTO: status osc explore\u2194lethal/mob \u2014 wander quiet cool-exit ban (2072)" : "AUTO: status osc explore\u2194lethal/mob \u2014 wander break (2061)"
         );
         if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
         else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+        if (this.kiteCoolExitQuietActive()) {
+          this.stickyPhaseLeaveArmed = true;
+          this.armPhaseCoolNoKiteEmit();
+        }
         this.setStatus(host, w, stance, "gear-explore-kite osc \u2014 wander");
         this.cool = 18;
         return true;
@@ -5964,8 +5979,10 @@
     stickyExploreBlockActive() {
       if (this.runTicks >= this.stickyExploreBlockUntil) {
         if (this.stickyPhaseLeaveArmed && this.stickyExploreBlockUntil > 0) {
-          this.stickyPhaseLeaveArmed = false;
-          this.stickyLeaveRethinks = 0;
+          if (!this.kiteCoolExitQuietActive()) {
+            this.stickyPhaseLeaveArmed = false;
+            this.stickyLeaveRethinks = 0;
+          }
         }
         return false;
       }
@@ -6021,10 +6038,10 @@
         this.h1001.phase = "FIRST_WEP";
       }
       this.noteAction("kite cool park \u2014 exit");
-      host.log(`AUTO: kite cool park exit \u2014 clear cool + 2070 grace/ban ${why}`);
-      if (w.explore) host.walkTo(w.explore.x, w.explore.y);
-      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+      host.log(`AUTO: kite cool park exit \u2014 clear cool + 2072 wander/ban ${why}`);
+      if (w.wander) host.walkTo(w.wander.x, w.wander.y);
       else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+      else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
       this.setStatus(host, w, stance, "kite cool exit");
       this.cool = 8;
       return true;
@@ -6125,10 +6142,10 @@
       this.stickyPhaseLeaveArmed = true;
       this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
       this.noteAction("kite cool exit grace");
-      host.log(`AUTO: kite cool exit grace \u2014 no hub re-park (2070) ${why}`);
-      if (w.explore) host.walkTo(w.explore.x, w.explore.y);
-      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+      host.log(`AUTO: kite cool exit grace \u2014 wander not explore (2072) ${why}`);
+      if (w.wander) host.walkTo(w.wander.x, w.wander.y);
       else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+      else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
       this.setStatus(host, w, stance, "kite cool exit grace");
       this.cool = 10;
       return true;
@@ -6169,6 +6186,25 @@
      */
     tryStickyProgressLeave(host, w, stance, why) {
       var _a, _b, _c, _d;
+      if (this.kiteCoolExitQuietActive()) {
+        this.stickyPhaseLeaveArmed = true;
+        this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+        this.clearFundIntent("tool");
+        this.stuckRecentStatus = this.stuckRecentStatus.filter(
+          (s) => !/stuck rethink|sticky leave|sticky progress|tools wander|tools explore|lethal|explore-kite|gear-explore-kite|kite cool exit|first wep|FIRST_WEP hold/i.test(s)
+        );
+        this.noteAction(`quiet sticky wander (${why})`);
+        host.log(`AUTO: quiet sticky \u2014 wander not explore (2072) ${why}`);
+        this.setStatus(host, w, stance, "FIRST_WEP hold \u2014 wander");
+        if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        else if (w.explore) {
+          this.desireXY = { x: w.explore.x, y: w.explore.y };
+          host.walkTo(w.explore.x, w.explore.y);
+        }
+        this.cool = 12;
+        return true;
+      }
       this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 768);
       this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 640);
       this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 480);
