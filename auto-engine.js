@@ -1,4 +1,4 @@
-/* phd auto-engine 2064 — pull via GET /api/auto-engine */
+/* phd auto-engine 2065 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2064";
+  var AUTO_ENGINE_VERSION = "2065";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1412,6 +1412,7 @@
        * 2061 banned bare explore then preferred mine forever on one rock.
        * Eng 2063 / R32: after same-tile≥3, ban mine for 768t (no remine while cool live).
        * Eng 2064 / R33: FIRST_WEP hold shares this hit/ban (hold mined outside fallback).
+       * Eng 2065 / R34: also armed by camp-tree/camp-rock osc; gates FIRST_WEP camp_chain gather.
        */
       __publicField(this, "kiteCoolMineKey", "");
       __publicField(this, "kiteCoolMineHits", 0);
@@ -4152,10 +4153,14 @@
         }
         if (n.kind === "tree") {
           if (this.chopBreakActive() || this.campChainBreakActive()) return false;
+          if (!host.hasTool("hatchet")) return false;
+          if (this.firstWepCampGatherBanActive()) return false;
           if (this.isGatherTileBlocked(n.x, n.y)) return false;
         }
         if (n.kind === "rock") {
           if (this.rockFindBreakActive() || this.campChainBreakActive()) return false;
+          if (!host.hasTool("pickaxe")) return false;
+          if (this.firstWepCampGatherBanActive()) return false;
           if (this.isGatherTileBlocked(n.x, n.y)) return false;
         }
         if (n.kind === "shop") {
@@ -4186,8 +4191,13 @@
           this.campChainSameKey = "";
           this.campChainSameHits = 0;
           this.armBreakerExploreCool(640);
+          if (next.kind === "tree" || next.kind === "rock") {
+            this.kiteCoolMineBanUntil = Math.max(this.kiteCoolMineBanUntil, this.runTicks + 768);
+            this.kiteCoolMineKey = "";
+            this.kiteCoolMineHits = 0;
+          }
           this.noteAction(`camp-chain same \u2014 wander (${next.kind})`);
-          host.log(`AUTO: camp_chain same-node ${next.kind} @(${next.x},${next.y}) \u2014 wander (2063)`);
+          host.log(`AUTO: camp_chain same-node ${next.kind} @(${next.x},${next.y}) \u2014 wander (2065)`);
           if (w.wander) host.walkTo(w.wander.x, w.wander.y);
           else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
           else if (w.explore) {
@@ -4211,6 +4221,7 @@
         }
         if (o.id === "mine" && (this.rockFindBreakActive() || this.campChainBreakActive())) return false;
         if (o.id === "chop" && (this.chopBreakActive() || this.campChainBreakActive())) return false;
+        if ((o.id === "mine" || o.id === "chop") && this.firstWepCampGatherBanActive()) return false;
         if (o.id === "shop" && (this.sellOreBreakActive() || this.campChainBreakActive())) return false;
         if (o.id === "mine") return host.hasTool("pickaxe");
         if (o.id === "chop") return host.hasTool("hatchet");
@@ -4277,11 +4288,24 @@
       }
       if (kind === "mine" || kind === "rock") {
         if (this.rockFindBreakActive() || this.campChainBreakActive() || this.isGatherTileBlocked(x, y)) return false;
+        if (!host.hasTool("pickaxe") || this.firstWepCampGatherBanActive()) {
+          if (!host.hasTool("pickaxe")) {
+            this.kiteCoolMineBanUntil = Math.max(this.kiteCoolMineBanUntil, this.runTicks + 768);
+          }
+          return false;
+        }
         if (this.walkToTile(host, x, y)) return true;
         return this.tryGather(host, w, stance, "util mine");
       }
       if (kind === "chop" || kind === "tree") {
         if (this.chopBreakActive() || this.campChainBreakActive() || this.isGatherTileBlocked(x, y)) return false;
+        if (!host.hasTool("hatchet") || this.firstWepCampGatherBanActive()) {
+          if (!host.hasTool("hatchet")) {
+            this.kiteCoolMineBanUntil = Math.max(this.kiteCoolMineBanUntil, this.runTicks + 768);
+            host.log("AUTO: camp gather skip \u2014 no hatchet (2065)");
+          }
+          return false;
+        }
         if (this.walkToTile(host, x, y)) return true;
         return this.tryGather(host, w, stance, "util chop");
       }
@@ -5045,6 +5069,9 @@
       if (!this.campChainBreakActive() && (this.statusOscPair(/round-trip tree/, /util chop|explore/) || this.statusOscPair(/util chop/, /round-trip tree|explore/) || this.statusFamilyHits(/round-trip tree|util chop/) >= 4 || this.statusFamilyHits(/round-trip tree/) >= 3 || this.campChainSameHits >= 2 && /round-trip tree/i.test(this.lastStatus || ""))) {
         this.campChainBreakUntil = this.runTicks + 768;
         this.chopBreakUntil = Math.max(this.chopBreakUntil, this.runTicks + 512);
+        this.kiteCoolMineBanUntil = Math.max(this.kiteCoolMineBanUntil, this.runTicks + 768);
+        this.kiteCoolMineKey = "";
+        this.kiteCoolMineHits = 0;
         this.campChainSameKey = "";
         this.campChainSameHits = 0;
         const tree = (_j = (_i = (_h = w.seen) == null ? void 0 : _h.tree) != null ? _i : this.mem(w, "tree")) != null ? _j : this.lastTree;
@@ -5053,7 +5080,7 @@
           (s) => !/round-trip tree|util chop|camp-tree osc|camp-chain osc/i.test(s)
         );
         this.noteAction("status osc camp-tree \u2014 wander");
-        host.log("AUTO: status osc round-trip tree/util chop \u2014 break (2062)");
+        host.log("AUTO: status osc round-trip tree/util chop \u2014 break (2065)");
         this.armBreakerExploreCool(768);
         if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
@@ -5084,6 +5111,9 @@
         this.campChainBreakUntil = this.runTicks + 768;
         this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 640);
         this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 512);
+        this.kiteCoolMineBanUntil = Math.max(this.kiteCoolMineBanUntil, this.runTicks + 768);
+        this.kiteCoolMineKey = "";
+        this.kiteCoolMineHits = 0;
         this.campChainSameKey = "";
         this.campChainSameHits = 0;
         const rk = (_l = (_k = w.seen) == null ? void 0 : _k.rock) != null ? _l : this.mem(w, "rock");
@@ -5092,7 +5122,7 @@
           (s) => !/round-trip rock|util mine|camp-rock osc|camp-chain osc/i.test(s)
         );
         this.noteAction("status osc camp-rock \u2014 wander");
-        host.log("AUTO: status osc round-trip rock/util mine \u2014 break (2062)");
+        host.log("AUTO: status osc round-trip rock/util mine \u2014 break (2065)");
         this.armBreakerExploreCool(768);
         if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
@@ -5751,9 +5781,17 @@
       }
       return true;
     }
-    /** Eng 2063–2064: mine banned under kite cool / FIRST_WEP hold after same-tile thrash. */
+    /** Eng 2063–2065: mine/gather banned under kite cool / FIRST_WEP hold after same-tile thrash. */
     kiteCoolMineBanActive() {
       return this.runTicks < this.kiteCoolMineBanUntil;
+    }
+    /**
+     * Eng 2065 / R34: FIRST_WEP must not re-enter camp_chain tree/rock (or util chop/mine)
+     * while kite cool wander / kiteCoolMineBan is live — osc→wander→rechop was the R34 WD class.
+     */
+    firstWepCampGatherBanActive() {
+      if (this.h1001.phase !== "FIRST_WEP") return false;
+      return this.kiteExploreCoolActive() || this.kiteCoolMineBanActive();
     }
     /**
      * Eng 2061 / R30: explore↔lethal / FIRST_WEP hold-explore cool window.
