@@ -1,4 +1,4 @@
-/* phd auto-engine 2073 — pull via GET /api/auto-engine */
+/* phd auto-engine 2074 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2073";
+  var AUTO_ENGINE_VERSION = "2074";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1820,14 +1820,7 @@
             return this.breakKiteCoolWanderHub(host, w, stance, "no-hatchet");
           }
           if (this.phaseCoolNoKiteWander()) {
-            this.armPhaseCoolNoKiteEmit();
-            this.setStatus1001(host, w, stance, "FIRST_WEP hold \u2014 wander");
-            host.log("AUTO: kite cool fallback \u2014 plain wander phase-cool ban (2071 no-hatchet)");
-            if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-            else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-            else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
-            this.cool = 10;
-            return true;
+            return this.finishQuietHoldProgress(host, w, stance, "kite-cool-no-hatchet");
           }
           this.setStatus1001(host, w, stance, "kite cool wander");
           if (w.wander) host.walkTo(w.wander.x, w.wander.y);
@@ -1884,14 +1877,7 @@
           return this.breakKiteCoolWanderHub(host, w, stance, "fallback");
         }
         if (this.phaseCoolNoKiteWander()) {
-          this.armPhaseCoolNoKiteEmit();
-          this.setStatus1001(host, w, stance, "FIRST_WEP hold \u2014 wander");
-          host.log("AUTO: kite cool fallback \u2014 plain wander phase-cool ban (2071)");
-          if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-          else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-          else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
-          this.cool = 10;
-          return true;
+          return this.finishQuietHoldProgress(host, w, stance, "kite-cool-fallback");
         }
         this.setStatus1001(host, w, stance, "kite cool wander");
         if (w.wander) host.walkTo(w.wander.x, w.wander.y);
@@ -1901,15 +1887,7 @@
         return true;
       }
       if (this.kiteCoolExitQuietActive()) {
-        this.stickyPhaseLeaveArmed = true;
-        this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 1);
-        this.setStatus1001(host, w, stance, "FIRST_WEP hold \u2014 wander");
-        host.log("AUTO: post-exit quiet \u2014 ban bare explore (2072)");
-        if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-        else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-        else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
-        this.cool = 10;
-        return true;
+        return this.finishQuietHoldProgress(host, w, stance, "post-exit-quiet");
       }
       if (this.h1001.phase === "TOOLS" && this.beginnerToolsIncomplete(host)) {
         this.setStatus1001(
@@ -3867,17 +3845,7 @@
               return this.finishKiteCoolExitGrace(host, w, stance, "first-wep-hold");
             }
             if (this.phaseCoolNoKiteWander()) {
-              this.armPhaseCoolNoKiteEmit();
-              this.noteAction("FIRST_WEP hold \u2014 wander");
-              host.log("AUTO: FIRST_WEP hold \u2014 plain wander phase-cool ban (2071)");
-              this.setStatus1001(host, w, stance, "FIRST_WEP hold \u2014 wander");
-              if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-              else if (w.explore) {
-                this.desireXY = { x: w.explore.x, y: w.explore.y };
-                host.walkTo(w.explore.x, w.explore.y);
-              } else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-              this.cool = 12;
-              return true;
+              return this.finishQuietHoldProgress(host, w, stance, "first-wep-hold");
             }
             if (this.kiteCoolWanderBanActive()) {
               this.kiteCoolParkHits++;
@@ -3937,15 +3905,7 @@
             return this.finishKiteCoolExitGrace(host, w, stance, "first-wep-sticky");
           }
           if (this.phaseCoolNoKiteWander()) {
-            this.armPhaseCoolNoKiteEmit();
-            this.noteAction("FIRST_WEP hold \u2014 wander");
-            host.log("AUTO: FIRST_WEP sticky \u2014 plain wander phase-cool ban (2071)");
-            this.setStatus1001(host, w, stance, "FIRST_WEP hold \u2014 wander");
-            if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-            else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
-            else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-            this.cool = 10;
-            return true;
+            return this.finishQuietHoldProgress(host, w, stance, "first-wep-sticky");
           }
           if (this.kiteCoolWanderBanActive()) {
             this.kiteCoolParkHits++;
@@ -5114,7 +5074,7 @@
      * (pond/tools/shop loops otherwise never arm stuck/pondBreak).
      */
     statusIgnoresHpMpProgress(st) {
-      return /food fish|enroute pond|find pond|food last farm|food buffer|food mine break|round-trip pond|util fish|tools find rock|tools mine|tools explore|tools wander|tools pickaxe|tools fund|rock osc|food sell ore|food find shop|bag find shop|sell-ore osc|sell trim|round-trip rock|round-trip tree|round-trip shop|util chop|chop for fire|cook\b|first wep|mine first wep|first-wep osc|remembered door|door through|door open|door thrash|tools hatchet|open chest|chest soft-block|mono thrash|mono divert|hatchet osc|hatchet thrash|explore-kite osc|emerg-tools osc|status osc explore\/kite|lethal kite|lethal close|approach kite|mob kite|kite outlook|enroute loot|walk HV loot|walk loot|emerg hub|food-mine osc|food-fish mono|altar runecraft|stuck rethink|stuck-wander osc|wander-mob osc|sticky progress|sticky leave|camp-chain osc|camp-shop osc|camp-tree osc|camp-rock osc|gear-explore-kite|sticky-explore mono|lethal-loot osc|sticky leave — phase|lethal-cover osc|camp-rock osc|mono divert escalate|FIRST_WEP hold|first wep mine|camp-chain osc|camp-chain same|gear-explore-kite osc|first-wep-combat osc|phase cool|camp-chest osc|explore-kite osc — wander|first-wep osc — wander|tools-hatchet hang|camp-trim osc|pond-sell osc|sell trim empty|door thrash|kite cool|FIRST_WEP hold — wander|pond break — wander|pond osc — wander|camp-tree osc — wander|camp-rock osc — wander|camp-shop osc — wander|camp-chest osc — wander|camp-chain osc — wander|food-mine osc — wander|food-fish mono — wander|altar-fund osc — wander|kite-cool-lethal osc — hub|kite-cool-lethal osc|kite-cool-wander osc — hub|kite-cool-wander osc|kite cool hub|kite cool exit|kite cool exit grace/i.test(st);
+      return /food fish|enroute pond|find pond|food last farm|food buffer|food mine break|round-trip pond|util fish|tools find rock|tools mine|tools explore|tools wander|tools pickaxe|tools fund|rock osc|food sell ore|food find shop|bag find shop|sell-ore osc|sell trim|round-trip rock|round-trip tree|round-trip shop|util chop|chop for fire|cook\b|first wep|mine first wep|first-wep osc|remembered door|door through|door open|door thrash|tools hatchet|open chest|chest soft-block|mono thrash|mono divert|hatchet osc|hatchet thrash|explore-kite osc|emerg-tools osc|status osc explore\/kite|lethal kite|lethal close|approach kite|mob kite|kite outlook|enroute loot|walk HV loot|walk loot|emerg hub|food-mine osc|food-fish mono|altar runecraft|stuck rethink|stuck-wander osc|wander-mob osc|sticky progress|sticky leave|camp-chain osc|camp-shop osc|camp-tree osc|camp-rock osc|gear-explore-kite|sticky-explore mono|lethal-loot osc|sticky leave — phase|lethal-cover osc|camp-rock osc|mono divert escalate|FIRST_WEP hold|first wep mine|camp-chain osc|camp-chain same|gear-explore-kite osc|first-wep-combat osc|phase cool|camp-chest osc|explore-kite osc — wander|first-wep osc — wander|tools-hatchet hang|camp-trim osc|pond-sell osc|sell trim empty|door thrash|kite cool|FIRST_WEP hold — wander|quiet hold — tools bootstrap|quiet hold — progress mine|pond break — wander|pond osc — wander|camp-tree osc — wander|camp-rock osc — wander|camp-shop osc — wander|camp-chest osc — wander|camp-chain osc — wander|food-mine osc — wander|food-fish mono — wander|altar-fund osc — wander|kite-cool-lethal osc — hub|kite-cool-lethal osc|kite-cool-wander osc — hub|kite-cool-wander osc|kite cool hub|kite cool exit|kite cool exit grace/i.test(st);
     }
     /**
      * Eng 2038 / R8 + t1760: arm breakers from status oscillation alone
@@ -5396,6 +5356,9 @@
         this.cool = 14;
         return true;
       }
+      if (this.statusOscPair(/tools fund sell|tools fund sell mats|tools-hatchet hang/, /FIRST_WEP hold/) || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 4 && this.statusFamilyHits(/FIRST_WEP hold/) >= 4) {
+        return this.finishQuietHoldProgress(host, w, stance, "fund-hold-osc");
+      }
       if (this.statusFamilyHits(/tools hatchet|tools fund sell|kit hatchet/) >= 3 || this.statusOscPair(/tools hatchet|kit hatchet/, /tools fund sell|tools fund sell mats|tools mine/) || this.statusOscPair(/tools fund sell mats|tools fund sell/, /tools hatchet|kit hatchet|tools mine/)) {
         this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 384);
         this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 320);
@@ -5404,6 +5367,9 @@
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/tools hatchet|kit hatchet|tools fund sell|tools fund|tools mine/i.test(s)
         );
+        if (this.kiteCoolExitQuietActive() || this.phaseCoolNoKiteWander()) {
+          return this.finishQuietHoldProgress(host, w, stance, "tools-hatchet-hang");
+        }
         if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
           this.h1001.phase = "GEAR_FARM";
         } else if (host.hasTool("pickaxe")) {
@@ -5943,13 +5909,11 @@
             else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
             else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
             if (this.kiteCoolExitQuietActive()) {
-              host.log("AUTO: mono divert escalate \u2014 quiet hold (2073)");
-              this.setStatus(host, w, stance, "FIRST_WEP hold \u2014 wander");
-            } else {
-              host.log("AUTO: mono divert escalate \u2014 hard phase leave (2071)");
-              this.armPhaseCoolNoKiteEmit();
-              this.setStatus(host, w, stance, "phase cool");
+              return this.finishQuietHoldProgress(host, w, stance, "mono-divert");
             }
+            host.log("AUTO: mono divert escalate \u2014 hard phase leave (2071)");
+            this.armPhaseCoolNoKiteEmit();
+            this.setStatus(host, w, stance, "phase cool");
             this.cool = 18;
             return true;
           }
@@ -6026,7 +5990,7 @@
       return this.statusOscPair(
         /kite cool wander|kite cool mine|kite cool hub|kite-cool-wander osc/,
         /flat thrash|flat rethink|phase cool|lethal kite|lethal close|lethal cover|mob engage|mob kite|kite outlook|approach kite|approach engage/
-      ) || this.statusFamilyHits(/kite cool wander|kite cool mine|kite cool hub|kite-cool-wander osc/) >= 3 && this.statusFamilyHits(/flat thrash|flat rethink|phase cool|camp-chain|lethal kite|lethal close|lethal cover|mob engage|mob kite|kite outlook|approach/) >= 2 || this.statusFamilyHits(/kite cool wander/) >= 3 && this.statusFamilyHits(/phase cool|flat rethink|flat thrash/) >= 2 || this.statusFamilyHits(/kite cool wander/) >= 1 && this.statusFamilyHits(/phase cool/) >= 1 || this.statusFamilyHits(/kite cool exit grace/) >= 2 && this.statusFamilyHits(/phase cool|flat thrash|flat rethink/) >= 2 || this.statusOscPair(/kite cool exit grace/, /phase cool|flat thrash|flat rethink/) || this.statusFamilyHits(/kite cool wander/) >= 5 || this.statusFamilyHits(/kite cool hub/) >= 5;
+      ) || this.statusFamilyHits(/kite cool wander|kite cool mine|kite cool hub|kite-cool-wander osc/) >= 3 && this.statusFamilyHits(/flat thrash|flat rethink|phase cool|camp-chain|lethal kite|lethal close|lethal cover|mob engage|mob kite|kite outlook|approach/) >= 2 || this.statusFamilyHits(/kite cool wander/) >= 3 && this.statusFamilyHits(/phase cool|flat rethink|flat thrash/) >= 2 || this.statusFamilyHits(/kite cool wander/) >= 1 && this.statusFamilyHits(/phase cool/) >= 1 || this.statusFamilyHits(/kite cool exit grace/) >= 2 && this.statusFamilyHits(/phase cool|flat thrash|flat rethink/) >= 2 || this.statusOscPair(/kite cool exit grace/, /phase cool|flat thrash|flat rethink/) || this.statusFamilyHits(/FIRST_WEP hold/) >= 8 || this.statusOscPair(/FIRST_WEP hold/, /tools fund sell|tools-hatchet hang|kite cool exit grace/) || this.statusFamilyHits(/FIRST_WEP hold/) >= 4 && this.statusFamilyHits(/tools fund sell|tools-hatchet hang/) >= 4 || this.statusFamilyHits(/kite cool wander/) >= 5 || this.statusFamilyHits(/kite cool hub/) >= 5;
     }
     /**
      * Eng 2068 / R37: cool park is temporary. Re-entry while wander-ban/hub live →
@@ -6144,6 +6108,71 @@
       this.stickyPhaseLeaveArmed = true;
       this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 1);
     }
+    /**
+     * Eng 2074 / R43: quiet hold must stay productive — 2073 latched FIRST_WEP hold
+     * wander until WD (43gv3d/ry9qp5/psuhcg; ec8una/m3xush fund↔hold). Quiet still
+     * bans cool sticky re-arm / grace re-label; it must NOT freeze kit bootstrap.
+     */
+    finishQuietHoldProgress(host, w, stance, why) {
+      var _a, _b;
+      this.stickyPhaseLeaveArmed = true;
+      this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+      this.armPhaseCoolNoKiteEmit();
+      const holdHits = this.statusFamilyHits(/FIRST_WEP hold|quiet hold — tools|quiet hold — progress/);
+      if (this.beginnerToolsIncomplete(host)) {
+        this.clearFundIntent("food");
+        this.h1001.phase = "TOOLS";
+        const anvil = this.mem(w, "anvil");
+        const needPick = !host.hasTool("pickaxe");
+        const tool = needPick ? "pickaxe" : "hatchet";
+        if (this.tryKitAcquireWalk(host, w, stance, tool, anvil)) {
+          host.log(`AUTO: quiet hold \u2014 tools bootstrap ${tool} (2074) ${why}`);
+          this.cool = 8;
+          return true;
+        }
+        this.noteAction("quiet hold \u2014 tools bootstrap");
+        host.log(`AUTO: quiet hold \u2014 tools bootstrap wander (2074) ${why}`);
+        this.setStatus1001(host, w, stance, "quiet hold \u2014 tools bootstrap");
+        const shop = this.mem(w, "shop");
+        const dest = anvil || shop || w.hub || w.wander;
+        if (dest) host.walkTo(dest.x, dest.y);
+        else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+        this.cool = 10;
+        return true;
+      }
+      if (holdHits >= 6 || this.statusOscPair(/FIRST_WEP hold/, /tools fund sell|tools-hatchet hang|kite cool exit grace/) || this.statusFamilyHits(/tools fund sell/) >= 4 && holdHits >= 3) {
+        this.stuckRecentStatus = this.stuckRecentStatus.filter(
+          (s) => !/FIRST_WEP hold|tools fund sell|tools-hatchet hang|kite cool exit grace|quiet hold/i.test(s)
+        );
+        this.clearFundIntent("tool");
+        this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 192);
+        const rock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
+        if (rock && host.hasTool("pickaxe") && host.hasTool("hatchet") && !this.isGatherTileBlocked(rock.x, rock.y) && !this.kiteCoolMineBanActive()) {
+          this.noteAction("quiet hold \u2014 progress mine");
+          host.log(`AUTO: quiet hold \u2014 progress mine (2074) ${why}`);
+          this.setStatus1001(host, w, stance, "quiet hold \u2014 progress mine");
+          if (this.walkToTile(host, rock.x, rock.y)) {
+            this.cool = 8;
+            return true;
+          }
+          if (this.tryGather(host, w, stance, "quiet hold mine")) {
+            this.cool = 6;
+            return true;
+          }
+          this.blockGatherTile(rock.x, rock.y);
+        }
+        host.log(`AUTO: quiet hold \u2014 sticky progress leave (2074) ${why}`);
+        return this.tryStickyProgressLeave(host, w, stance, `quiet-hold ${why}`);
+      }
+      this.noteAction("FIRST_WEP hold \u2014 wander");
+      host.log(`AUTO: quiet hold \u2014 wander (2074) ${why}`);
+      this.setStatus1001(host, w, stance, "FIRST_WEP hold \u2014 wander");
+      if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+      else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+      this.cool = 10;
+      return true;
+    }
     /** Eng 2071: sticky phase leave or phase cool already in ring → no kite cool emit. */
     phaseCoolNoKiteWander() {
       return this.stickyPhaseLeaveArmed || this.kiteCoolReentryBanActive() || this.statusFamilyHits(/phase cool/) >= 1;
@@ -6168,14 +6197,11 @@
         (s) => !/kite cool exit grace|phase cool|flat thrash|flat rethink|kite cool wander|kite cool hub/i.test(s)
       );
       if (graceTheater) {
-        this.noteAction("FIRST_WEP hold \u2014 wander");
-        host.log(`AUTO: quiet hold \u2014 no grace\u2194phase re-label (2073) ${why}`);
-        this.setStatus(host, w, stance, "FIRST_WEP hold \u2014 wander");
-      } else {
-        this.noteAction("kite cool exit grace");
-        host.log(`AUTO: kite cool exit grace \u2014 wander not explore (2072) ${why}`);
-        this.setStatus(host, w, stance, "kite cool exit grace");
+        return this.finishQuietHoldProgress(host, w, stance, `grace-theater ${why}`);
       }
+      this.noteAction("kite cool exit grace");
+      host.log(`AUTO: kite cool exit grace \u2014 wander not explore (2072) ${why}`);
+      this.setStatus(host, w, stance, "kite cool exit grace");
       if (w.wander) host.walkTo(w.wander.x, w.wander.y);
       else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
       else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
