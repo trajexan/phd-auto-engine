@@ -1,4 +1,4 @@
-/* phd auto-engine 2089 — pull via GET /api/auto-engine */
+/* phd auto-engine 2090 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2089";
+  var AUTO_ENGINE_VERSION = "2090";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1445,8 +1445,15 @@
        * (6pajs5/wbx74t/k7ehgt escape↔quiet forever — 2088 reset hits + expire cleared breaks).
        */
       __publicField(this, "postHierarchyReleaseEscapeUntil", 0);
-      /** Eng 2089: escape fires this life; ≥2 → permanent quiet ban. */
+      /** Eng 2089: escape fires this life; ≥2 → permanent quiet ban.
+       *  Eng 2090 / R59: ≥1 bans quiet (single escape was still re-quiet theater). */
       __publicField(this, "postHierarchyReleaseEscapeCount", 0);
+      /**
+       * Eng 2090 / R59: food sell ↔ pond break prison latched this life.
+       * Soft wander (2089) re-fueled sell/mine under pondBreak → WD (avsnmu/jmg85x).
+       * Once set: escalate prison only; never soft sell/wander under break.
+       */
+      __publicField(this, "pondSellPrisonLatched", false);
       /** Eng 2049 / R19: rethinks while sticky leave already active → escalate to progress. */
       __publicField(this, "stickyLeaveRethinks", 0);
       /**
@@ -1629,6 +1636,7 @@
         this.postHierarchyReleaseMineHits = 0;
         this.postHierarchyReleaseEscapeUntil = 0;
         this.postHierarchyReleaseEscapeCount = 0;
+        this.pondSellPrisonLatched = false;
         this.stickyLeaveRethinks = 0;
         this.stickyExploreBlockUntil = 0;
         this.stickyPhaseLeaveArmed = false;
@@ -2588,12 +2596,15 @@
           this.noteGatherFail(this.lastFoodFarm.x, this.lastFoodFarm.y);
           this.lastFoodFarm = null;
         }
+        if (this.pondSellPrisonLatched) {
+          return this.escalatePondBreakPrison(host, w, stance, `${labelPrefix}-sell-latch`);
+        }
         if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) {
-          this.setStatus1001(host, w, stance, `${labelPrefix} sell mats`);
+          this.setStatus1001(host, w, stance, `${labelPrefix} break liquidate`);
           return true;
         }
         if (this.trySellUnusedOnce(host, w)) {
-          this.setStatus1001(host, w, stance, `${labelPrefix} sell`);
+          this.setStatus1001(host, w, stance, `${labelPrefix} break liquidate`);
           return true;
         }
         if (host.hasTool("pickaxe") && !this.foodMineBreakActive()) {
@@ -3554,8 +3565,8 @@
           if (this.durableLeaveHierarchyReleased) {
             this.stickyPhaseLeaveArmed = true;
             this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
-            if (this.postHierarchyReleaseEscapeActive() || this.postHierarchyReleaseEscapeCount >= 2) {
-              host.log("AUTO: TOOLS sticky explore mono \u2014 post RELEASE escape cool yield (2089)");
+            if (this.postHierarchyReleaseEscapeActive() || this.postHierarchyReleaseEscapeCount >= 1) {
+              host.log("AUTO: TOOLS sticky explore mono \u2014 post RELEASE escape cool yield (2090)");
               this.cool = 8;
               return false;
             }
@@ -3602,8 +3613,8 @@
           if (this.durableLeaveHierarchyReleased) {
             this.stickyPhaseLeaveArmed = true;
             this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
-            if (this.postHierarchyReleaseEscapeActive() || this.postHierarchyReleaseEscapeCount >= 2) {
-              host.log("AUTO: TOOLS sticky \u2014 post RELEASE escape cool yield (2089)");
+            if (this.postHierarchyReleaseEscapeActive() || this.postHierarchyReleaseEscapeCount >= 1) {
+              host.log("AUTO: TOOLS sticky \u2014 post RELEASE escape cool yield (2090)");
               this.cool = 8;
               return false;
             }
@@ -5327,25 +5338,22 @@
         this.cool = 16;
         return true;
       }
-      if (this.statusOscPair(/food sell/, /pond break — wander|food pond break|emerg pond break/) || this.statusFamilyHits(/food sell/) >= 6 && this.statusFamilyHits(/pond break — wander|food pond break|emerg pond break/) >= 6) {
+      if (this.pondSellPrisonLatched || this.statusOscPair(/food sell/, /pond break — wander|food pond break|emerg pond break/) || this.statusOscPair(/food mine break/, /pond break — wander|food pond break|emerg pond break/) || this.statusFamilyHits(/food sell/) >= 4 && this.statusFamilyHits(/pond break — wander|food pond break|emerg pond break/) >= 4 || this.statusFamilyHits(/food mine break/) >= 4 && this.statusFamilyHits(/pond break — wander|food pond break|emerg pond break/) >= 4) {
         this.latchThrash();
         this.latchClash();
-        this.armPondBreakSticky(1280, true);
-        this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 768);
-        this.sellOreKeepBlockUntil = Math.max(this.sellOreKeepBlockUntil, this.runTicks + 768);
+        this.pondSellPrisonLatched = true;
+        this.armPondBreakSticky(2048, true);
+        this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 1536);
+        this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 1536);
+        this.sellOreKeepBlockUntil = Math.max(this.sellOreKeepBlockUntil, this.runTicks + 1536);
         this.dropEnroutePonds();
         this.clearFundIntent("food");
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/food sell|pond break|food pond|emerg pond|pond-sell osc|food mine break/i.test(s)
         );
-        this.noteAction("status osc food-sell/pond-break \u2014 wander");
-        host.log("AUTO: status osc food sell \u2194 pond break \u2014 wander (2089)");
-        if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-        else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-        else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
-        this.setStatus(host, w, stance, "pond-sell osc \u2014 wander");
-        this.cool = 18;
-        return true;
+        this.noteAction("status osc food-sell/pond-break \u2014 prison");
+        host.log("AUTO: status osc food sell \u2194 pond break \u2014 prison escalate (2090)");
+        return this.escalatePondBreakPrison(host, w, stance, "pond-sell-2090");
       }
       if (this.statusOscPair(/round-trip rock|round-trip tree/, /sell trim/) || this.statusOscPair(/util chop|util mine/, /sell trim/) || this.statusOscPair(/sell trim/, /(?:^|\s)fish(?:\s|$)|gear score|explore|round-trip/) || this.statusOscPair(/bag sell trim/, /explore|fish|gear score/) || this.statusFamilyHits(/sell trim/) >= 4 && this.statusFamilyHits(/(?:^|\s)fish(?:\s|$)|gear score|explore|round-trip rock|round-trip tree/) >= 2) {
         this.sellTrimStickyUntil = 0;
@@ -6800,19 +6808,21 @@
      * / sticky TOOLS / pond-break-cap forever (5366ma/6d6r8k/rmg8sf WD).
      * Eng 2089 / R58: do NOT expireDurableCoolForHierarchy on every quiet emit (cleared
      * escape breakers → escape↔quiet prison 6pajs5/wbx74t/k7ehgt). Escape cool latch +
-     * escape-count≥2 ban → yield false so FIRST_WEP/combat hierarchy can run.
+     * escape-count ban → yield false so FIRST_WEP/combat hierarchy can run.
+     * Eng 2090 / R59: ban after first escape (≥1); arm foodMine/sellOre/pond break on
+     * escape so food sell↔pond cannot re-prison after RELEASE (avsnmu/jmg85x/ybtec8).
      */
     postHierarchyReleaseEscapeActive() {
       return this.runTicks < this.postHierarchyReleaseEscapeUntil;
     }
     finishPostHierarchyReleaseQuiet(host, w, stance, why) {
       var _a, _b, _c, _d, _e, _f;
-      if (this.postHierarchyReleaseEscapeActive() || this.postHierarchyReleaseEscapeCount >= 2) {
+      if (this.postHierarchyReleaseEscapeActive() || this.postHierarchyReleaseEscapeCount >= 1) {
         this.stickyPhaseLeaveArmed = true;
         this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
         this.latchThrash();
         this.latchClash();
-        host.log(`AUTO: post hierarchy RELEASE escape cool yield (2089) ${why}`);
+        host.log(`AUTO: post hierarchy RELEASE escape cool yield (2090) ${why}`);
         this.cool = 8;
         return false;
       }
@@ -6844,12 +6854,15 @@
         this.postHierarchyReleaseMineKey = "";
         this.postHierarchyReleaseMineHits = 0;
         this.postHierarchyReleaseEscapeCount++;
-        this.postHierarchyReleaseEscapeUntil = this.runTicks + 1536;
+        this.postHierarchyReleaseEscapeUntil = this.runTicks + 2048;
+        this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 1024);
+        this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 1024);
+        this.armPondBreakSticky(1024, true);
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/quiet hold — post RELEASE|post-RELEASE mine|TOOLS sticky|emerg-tools|pond-break-cap|stuck-wander|first-wep-hold/i.test(s)
         );
         this.noteAction(`post-RELEASE escape (${why})`);
-        host.log(`AUTO: post hierarchy RELEASE escape wander (2089) #${this.postHierarchyReleaseEscapeCount} ${why}`);
+        host.log(`AUTO: post hierarchy RELEASE escape wander (2090) #${this.postHierarchyReleaseEscapeCount} ${why}`);
         this.setStatus1001(host, w, stance, "post-RELEASE escape");
         if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
@@ -6861,7 +6874,7 @@
         return true;
       }
       this.noteAction(`quiet hold \u2014 post RELEASE (${why})`);
-      host.log(`AUTO: post hierarchy RELEASE quiet (2089) ${why}`);
+      host.log(`AUTO: post hierarchy RELEASE quiet (2090) ${why}`);
       this.setStatus1001(host, w, stance, "quiet hold \u2014 post RELEASE");
       const rock = (_d = (_c = w.seen) == null ? void 0 : _c.rock) != null ? _d : this.mem(w, "rock");
       if (rock && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rock.x, rock.y)) {
