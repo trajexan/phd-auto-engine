@@ -1,4 +1,4 @@
-/* phd auto-engine 3024 — pull via GET /api/auto-engine */
+/* phd auto-engine 3025 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3024";
+  var AUTO_ENGINE_VERSION = "3025";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -4137,6 +4137,9 @@
       if (this.beginnerToolsIncomplete(host)) {
         if (host.hasTool("pickaxe") && (this.stuckWanderBreakActive() || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.hatchetChestBreakActive() || this.stickyExploreBlockActive())) {
           if (this.stickyExploreBlockActive() || this.stickyPhaseLeaveArmed) {
+            if (this.aleFwTheaterBanned()) {
+              return this.aleSpentFwHoldDivert(host, w, stance, "first-wep-hold-sticky");
+            }
             if (!this.kiteCoolExitQuietActive()) {
               this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 640);
               this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 640);
@@ -5441,7 +5444,7 @@
       if (/first_wep hold — wander|first wep hold — wander|quiet hold — wander/.test(k)) return "hold-wander";
       if (/wanderspin hard leave/.test(k)) return "leave-spin";
       if (/^phase cool$|phase cool$/.test(k) || k === "phase cool") return "phase-cool";
-      if (/tools wander thrash|tools-rock-wander prison|trw-prison|trw-wander-aba|trw-reenter-ban|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|after-life-escape-combat-ban|after-life-escape-tools-ban|first_wep hold — explore|first wep hold — explore/.test(k)) {
+      if (/tools wander thrash|tools-rock-wander prison|trw-prison|trw-wander-aba|trw-reenter-ban|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|after-life-escape-combat-ban|after-life-escape-tools-ban|after-life-escape-fw-hold-ban|first_wep hold — explore|first wep hold — explore/.test(k)) {
         return "divert-product";
       }
       if (/tools wander/.test(k)) return "tools-wander";
@@ -5451,14 +5454,14 @@
       if (/insta osc — cool|pond-cap — cool/.test(k)) return "osc-cool";
       if (/insta osc/.test(k)) return "insta-leave";
       if (/post-release escape|post hierarchy release/.test(k)) return "release-cool";
-      if (/after life escape|after cool exhaust|life-spent divert|post-exhaust divert|wd divert|early osc divert|productive quiet|divert-product scrub|gear farm — after|explore — after|gear farm — wd|explore — wd|gear farm — early|explore — early|phase intent|tools-rock-wander prison|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|after-life-escape-combat-ban|after-life-escape-tools-ban|first_wep hold — explore|first wep hold — explore/.test(k)) {
+      if (/after life escape|after cool exhaust|life-spent divert|post-exhaust divert|wd divert|early osc divert|productive quiet|divert-product scrub|gear farm — after|explore — after|gear farm — wd|explore — wd|gear farm — early|explore — early|phase intent|tools-rock-wander prison|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|after-life-escape-combat-ban|after-life-escape-tools-ban|after-life-escape-fw-hold-ban|first_wep hold — explore|first wep hold — explore/.test(k)) {
         return "divert-product";
       }
       return k;
     }
     /** Eng 3012: true if fam is a divert-product (ignore in insta-osc ABA). */
     isDivertProductFam(k) {
-      return k === "divert-product" || /divert-product|after life escape|after cool exhaust|wd divert|early osc divert|life-spent divert|post-exhaust divert|productive quiet|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|after-life-escape-tools-ban|phase intent hold — hunt|phase intent — hunt|first_wep hold — explore|first wep hold — explore/i.test(k);
+      return k === "divert-product" || /divert-product|after life escape|after cool exhaust|wd divert|early osc divert|life-spent divert|post-exhaust divert|productive quiet|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|after-life-escape-tools-ban|after-life-escape-fw-hold-ban|phase intent hold — hunt|phase intent — hunt|first_wep hold — explore|first wep hold — explore/i.test(k);
     }
     /**
      * Eng 3016 / R76: note trw-prison-clear; ≥2 clears this life → ban TRW re-enter.
@@ -5557,6 +5560,57 @@
       this.cool = 0;
       return true;
     }
+    /** Eng 3025: after ALE spent/capped — ban FIRST_WEP hold-wander / quiet bootstrap theater. */
+    noteAleFwHoldBan(host, why) {
+      if (!this.actions.some((s) => /after-life-escape-fw-hold-ban/i.test(s))) {
+        this.noteAction("after-life-escape-fw-hold-ban");
+        host.log(`AUTO: after-life-escape fw-hold BAN (3025) ${why}`);
+      }
+      this.noteAleToolsBan(host, `fw-hold:${why}`);
+    }
+    /**
+     * Eng 3025: when ALE spent/capped, do not park on FIRST_WEP hold — wander or
+     * re-enter quiet bootstrap/escalate TOOLS ladder. Durable shop/hub + free brain.
+     * Reuses cool/leave family only (t1800 — no new named timer).
+     */
+    aleSpentFwHoldDivert(host, w, stance, why) {
+      this.noteAleFwHoldBan(host, why);
+      this.latchThrash();
+      this.quietBootstrapEmitHits = 0;
+      this.quietBootstrapBreakUntil = Math.min(this.quietBootstrapBreakUntil, this.runTicks);
+      this.quietBreakEmitHits = 0;
+      this.quietBreakEscalateUntil = Math.min(this.quietBreakEscalateUntil, this.runTicks);
+      this.quietBreakEscalateHits = 0;
+      this.quietEscalateLeaveHits = 0;
+      this.stickyPhaseLeaveArmed = false;
+      this.clearPhaseIntent();
+      this.phaseIntentMineMonoHits = 0;
+      this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1280);
+      this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1024);
+      this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
+      this.stuckRecentStatus = this.stuckRecentStatus.filter(
+        (s) => !/FIRST_WEP hold|quiet hold — tools|quiet hold — bootstrap|quiet hold — break escalate|quiet hold — escalate leave|kite cool wander|hold-wander/i.test(s)
+      );
+      this.actions = this.actions.filter(
+        (s) => !/FIRST_WEP hold — wander|quiet hold — tools bootstrap|quiet hold — bootstrap break|quiet hold — break escalate|quiet hold — escalate leave/i.test(s)
+      );
+      if (host.hasTool("pickaxe")) {
+        this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
+      }
+      const shop = this.mem(w, "shop");
+      if (shop) host.walkTo(shop.x, shop.y);
+      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+      else if (w.explore) {
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
+        host.walkTo(w.explore.x, w.explore.y);
+      }
+      if (this.afterLifeEscapeCapped) {
+        if (this.tryAleSpentFwCap(host, w, stance, `fw-hold:${why}`)) return true;
+      }
+      this.cool = 0;
+      return true;
+    }
     /**
      * Eng 3021–3022: post-ALE-spent FIRST_WEP theater cap. Camp-chain / emerg-tools
      * / approach↔mob / round-trip after spent → fw-cap + durable hub + free brain.
@@ -5567,7 +5621,7 @@
       if (!this.afterLifeEscapeCapped) return false;
       this.afterLifeEscapeFwMonoHits++;
       this.latchThrash();
-      const early = /emerg|approach|mob engage|mob kite|lethal|fw-theater|tools-mine|find-rock|phase-intent-mine|tools-rock/i.test(why);
+      const early = /emerg|approach|mob engage|mob kite|lethal|fw-theater|tools-mine|find-rock|phase-intent-mine|tools-rock|fw-hold|hold-wander|bootstrap|escalate leave|first-wep-hold/i.test(why);
       const need = early ? 1 : 2;
       this.campChainBreakUntil = Math.max(this.campChainBreakUntil, this.runTicks + 1280);
       this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 1280);
@@ -6995,6 +7049,9 @@
         this.cool = 14;
         return true;
       }
+      if (this.aleFwTheaterBanned() && (this.statusFamilyHits(/FIRST_WEP hold — wander/) >= 2 || this.statusOscPair(/FIRST_WEP hold — wander/, /stuck watchdog|life-spent divert|open chest|high-ceiling|phase cool/) || this.statusFamilyHits(/quiet hold — bootstrap break|quiet hold — escalate leave|quiet hold — tools bootstrap/) >= 3)) {
+        return this.aleSpentFwHoldDivert(host, w, stance, "fw-hold-wander-mono");
+      }
       if (this.statusFamilyHits(/tools mine/) >= (this.aleFwTheaterBanned() ? 2 : 4) || this.statusOscPair(/tools mine/, /open chest|looting|tools hatchet|scan HV loot/)) {
         const rk = (_r = (_q = w.seen) == null ? void 0 : _q.rock) != null ? _r : this.mem(w, "rock");
         if (rk) this.blockGatherTile(rk.x, rk.y);
@@ -7367,6 +7424,9 @@
             );
             if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
             else this.h1001.phase = "FIRST_WEP";
+            if (this.aleFwTheaterBanned()) {
+              return this.aleSpentFwHoldDivert(host, w, stance, "first-wep-quiet-hold");
+            }
             if (this.oscCoolDivertActive()) {
               return this.coolHoldOscDivert(host, w, stance, "first-wep-quiet-hold");
             }
@@ -8549,6 +8609,9 @@
       this.armPhaseCoolNoKiteEmit();
       if (this.durableLeaveHierarchyReleased) {
         return this.finishPostHierarchyReleaseQuiet(host, w, stance, why);
+      }
+      if (this.aleFwTheaterBanned() && host.hasTool("pickaxe")) {
+        return this.aleSpentFwHoldDivert(host, w, stance, `quiet-hold:${why}`);
       }
       if (!this.beginnerToolsIncomplete(host)) {
         this.quietBootstrapEmitHits = 0;
