@@ -1,4 +1,4 @@
-/* phd auto-engine 3022 — pull via GET /api/auto-engine */
+/* phd auto-engine 3023 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3022";
+  var AUTO_ENGINE_VERSION = "3023";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2481,17 +2481,30 @@
       return true;
     }
     evLethal(host, w, stance) {
-      var _a, _b;
+      var _a, _b, _c;
       const hpPct = w.maxHp > 0 ? w.hp / w.maxHp : 1;
       const pressing = w.foes.some(
         (f) => f.alive && f.lit && (f.danger === "deadly" || f.danger === "threat" && f.dist <= 3 || f.dist <= 1 && f.danger !== "prey")
       );
       if (!pressing) return false;
+      if (this.aleFwTheaterBanned()) {
+        this.h1001.topEvent = "lethal";
+        host.clearEngage();
+        if (w.food > 0 || w.healReserve > 0) {
+          if (!((_a = host.drinkOnce) == null ? void 0 : _a.call(host, "hurt"))) host.eat();
+        }
+        this.noteAleCombatBan(host, "evLethal");
+        if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
+        this.cool = 0;
+        return true;
+      }
       const pressFoe = w.foes.filter(
         (f) => f.alive && f.lit && (f.danger === "deadly" || f.danger === "threat" && f.dist <= 3 || f.dist <= 1 && f.danger !== "prey")
       ).sort((a, b) => a.dist - b.dist)[0];
       if (pressFoe) {
-        const o = (_a = host.fightOutlook) == null ? void 0 : _a.call(host, pressFoe);
+        const o = (_b = host.fightOutlook) == null ? void 0 : _b.call(host, pressFoe);
         if (o && o.win && o.winRate >= 0.7 && o.hpLossExpected < w.hp * 0.5) {
           return false;
         }
@@ -2500,7 +2513,7 @@
       this.h1001.topEvent = "lethal";
       host.clearEngage();
       if (w.food > 0 || w.healReserve > 0) {
-        if (!((_b = host.drinkOnce) == null ? void 0 : _b.call(host, "hurt"))) host.eat();
+        if (!((_c = host.drinkOnce) == null ? void 0 : _c.call(host, "hurt"))) host.eat();
         this.setStatus1001(host, w, stance, "lethal run+eat");
         if (w.hub) host.walkTo(w.hub.x, w.hub.y);
         else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
@@ -2926,16 +2939,18 @@
         allowThreat: worn,
         minWinRate: worn ? 0.4 : 0.5
       });
+      if (this.aleFwTheaterBanned()) {
+        host.clearEngage();
+        this.noteAleCombatBan(host, "evMobSudden");
+        if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        this.cool = 0;
+        return true;
+      }
       if (!ok) {
         host.clearEngage();
         if (w.hub) host.walkTo(w.hub.x, w.hub.y);
         this.setStatus1001(host, w, stance, host.fightOutlook ? "mob kite outlook" : "mob kite");
-        return true;
-      }
-      if (this.aleFwTheaterBanned()) {
-        host.clearEngage();
-        if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-        this.cool = 0;
         return true;
       }
       this.engageSmart(host, w, stance, melee, "melee");
@@ -2974,6 +2989,7 @@
       });
       if (this.aleFwTheaterBanned()) {
         host.clearEngage();
+        this.noteAleCombatBan(host, "evMobApproach");
         if (w.hub) host.walkTo(w.hub.x, w.hub.y);
         else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         this.cool = 0;
@@ -5400,7 +5416,7 @@
       if (/first_wep hold — wander|first wep hold — wander|quiet hold — wander/.test(k)) return "hold-wander";
       if (/wanderspin hard leave/.test(k)) return "leave-spin";
       if (/^phase cool$|phase cool$/.test(k) || k === "phase cool") return "phase-cool";
-      if (/tools wander thrash|tools-rock-wander prison|trw-prison|trw-wander-aba|trw-reenter-ban|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|first_wep hold — explore|first wep hold — explore/.test(k)) {
+      if (/tools wander thrash|tools-rock-wander prison|trw-prison|trw-wander-aba|trw-reenter-ban|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|after-life-escape-combat-ban|first_wep hold — explore|first wep hold — explore/.test(k)) {
         return "divert-product";
       }
       if (/tools wander/.test(k)) return "tools-wander";
@@ -5410,7 +5426,7 @@
       if (/insta osc — cool|pond-cap — cool/.test(k)) return "osc-cool";
       if (/insta osc/.test(k)) return "insta-leave";
       if (/post-release escape|post hierarchy release/.test(k)) return "release-cool";
-      if (/after life escape|after cool exhaust|life-spent divert|post-exhaust divert|wd divert|early osc divert|productive quiet|divert-product scrub|gear farm — after|explore — after|gear farm — wd|explore — wd|gear farm — early|explore — early|phase intent|tools-rock-wander prison|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|first_wep hold — explore|first wep hold — explore/.test(k)) {
+      if (/after life escape|after cool exhaust|life-spent divert|post-exhaust divert|wd divert|early osc divert|productive quiet|divert-product scrub|gear farm — after|explore — after|gear farm — wd|explore — wd|gear farm — early|explore — early|phase intent|tools-rock-wander prison|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|after-life-escape-combat-ban|first_wep hold — explore|first wep hold — explore/.test(k)) {
         return "divert-product";
       }
       return k;
@@ -5449,7 +5465,7 @@
       this.afterLifeEscapeMonoHits = Math.max(this.afterLifeEscapeMonoHits, 6);
       if (!this.actions.some((s) => /after-life-escape-spent/i.test(s))) {
         this.noteAction("after-life-escape-spent");
-        host.log(`AUTO: after-life-escape SPENT \u2014 latch cool FW (3022) ${why}`);
+        host.log(`AUTO: after-life-escape SPENT \u2014 latch cool FW (3023) ${why}`);
       }
       this.markLifeEscapeSpent(host, `ale-spent:${why}`);
       this.clearPhaseIntent();
@@ -5464,11 +5480,16 @@
       this.armBreakerExploreCool(1024);
       this.cool = 0;
     }
-    /** Eng 3022: after fw-cap / spent — ban approach↔emerg↔mob theater re-entry. */
+    /** Eng 3023: after ALE spent/capped — ban combat theater (lethal/mob/approach/emerg). */
     aleFwTheaterBanned() {
-      if (!this.afterLifeEscapeCapped && !this.lifeEscapeSpent) return false;
-      if (this.afterLifeEscapeFwMonoHits >= 1) return true;
-      return this.actions.some((s) => /after-life-escape-fw-cap|after-life-escape-fw-spent/i.test(s));
+      return this.afterLifeEscapeCapped || this.lifeEscapeSpent;
+    }
+    /** Eng 3023: one mark when post-spent combat path is sealed (diagnosis). */
+    noteAleCombatBan(host, why) {
+      if (!this.actions.some((s) => /after-life-escape-combat-ban/i.test(s))) {
+        this.noteAction("after-life-escape-combat-ban");
+        host.log(`AUTO: after-life-escape combat BAN (3023) ${why}`);
+      }
     }
     /**
      * Eng 3021–3022: post-ALE-spent FIRST_WEP theater cap. Camp-chain / emerg-tools
@@ -5496,7 +5517,7 @@
       if (!this.actions.some((s) => /after-life-escape-fw-spent/i.test(s))) {
         this.noteAction("after-life-escape-fw-spent");
       }
-      host.log(`AUTO: after-life-escape FW CAP hits=${this.afterLifeEscapeFwMonoHits} (3022) ${why}`);
+      host.log(`AUTO: after-life-escape FW CAP hits=${this.afterLifeEscapeFwMonoHits} (3023) ${why}`);
       this.latchStuck();
       this.latchClash();
       this.latchAleSpentCool(host, `fw-cap:${why}`);
@@ -5513,7 +5534,7 @@
         (s) => !/camp-chain|camp-chest|camp-rock|camp-shop|round-trip|emerg hub|emerg-tools|approach engage|mob engage|approach kite|mob kite|lethal kite|lethal close|high-ceiling|open chest|hatchet|after life escape|gear farm — after|explore — after/i.test(s)
       );
       this.actions = this.actions.filter(
-        (s) => !/camp-chain|camp-chest|round-trip|emerg hub|approach engage|mob engage|lethal kite/i.test(s)
+        (s) => !/camp-chain|camp-chest|round-trip|emerg hub|approach engage|mob engage|lethal kite|mob kite|approach kite|lethal cover/i.test(s)
       );
       this.clearPhaseIntent();
       const shop = this.mem(w, "shop");
@@ -7198,6 +7219,11 @@
         this.setStatus(host, w, stance, "tools pickaxe mono \u2014 wander");
         this.cool = 18;
         return true;
+      }
+      if (this.afterLifeEscapeCapped && (this.statusFamilyHits(/lethal kite|lethal cover|lethal close/) >= 2 || this.statusFamilyHits(/mob kite|mob kite outlook|approach kite/) >= 2 || this.statusOscPair(/lethal kite|lethal cover|lethal close/, /mob kite|approach kite|mob kite outlook/) || this.statusOscPair(/mob kite|mob kite outlook/, /approach kite|lethal kite|lethal cover/))) {
+        if (this.tryAleSpentFwCap(host, w, stance, "lethal-mob-kite")) return true;
+        this.cool = 0;
+        return false;
       }
       if (this.afterLifeEscapeCapped && (this.statusOscPair(/approach engage|mob engage/, /emerg hub|emerg-tools|approach kite|mob kite|lethal kite/) || this.statusOscPair(/emerg hub fund|emerg hub/, /approach engage|mob engage|mob kite|lethal kite/) || this.statusFamilyHits(/approach engage|mob engage/) >= 2 || this.statusFamilyHits(/emerg hub/) >= 2)) {
         if (this.tryAleSpentFwCap(host, w, stance, "approach-emerg-mob")) return true;
