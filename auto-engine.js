@@ -1,4 +1,4 @@
-/* phd auto-engine 3021 — pull via GET /api/auto-engine */
+/* phd auto-engine 3022 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3021";
+  var AUTO_ENGINE_VERSION = "3022";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2650,7 +2650,7 @@
           }
         }
         if (this.tryFundBeginnerToolFarm(host, w, stance, tree, pond)) return true;
-        if (labelPrefix === "emerg" && w.hub && !this.emergToolsBreakActive() && this.foodUrgency(w) && (host.hasTool("hatchet") || host.hasTool("rod") || host.hasTool("pickaxe")) && (this.hasSellableMats(w) || this.hasBagCookables(w) || w.coins >= 30 || w.logCount > 0 || w.oreCount > 0)) {
+        if (labelPrefix === "emerg" && w.hub && !this.emergToolsBreakActive() && !this.aleFwTheaterBanned() && this.foodUrgency(w) && (host.hasTool("hatchet") || host.hasTool("rod") || host.hasTool("pickaxe")) && (this.hasSellableMats(w) || this.hasBagCookables(w) || w.coins >= 30 || w.logCount > 0 || w.oreCount > 0)) {
           this.desireXY = { x: w.hub.x, y: w.hub.y };
           host.walkTo(w.hub.x, w.hub.y);
           this.setStatus1001(host, w, stance, "emerg hub fund");
@@ -2932,6 +2932,12 @@
         this.setStatus1001(host, w, stance, host.fightOutlook ? "mob kite outlook" : "mob kite");
         return true;
       }
+      if (this.aleFwTheaterBanned()) {
+        host.clearEngage();
+        if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        this.cool = 0;
+        return true;
+      }
       this.engageSmart(host, w, stance, melee, "melee");
       this.setStatus1001(host, w, stance, "mob engage");
       return true;
@@ -2966,6 +2972,13 @@
         allowThreat: worn,
         minWinRate: worn ? 0.4 : 0.5
       });
+      if (this.aleFwTheaterBanned()) {
+        host.clearEngage();
+        if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        this.cool = 0;
+        return true;
+      }
       if (!ok) {
         host.clearEngage();
         if (w.hub) host.walkTo(w.hub.x, w.hub.y);
@@ -4652,6 +4665,10 @@
         }
         if (this.afterLifeEscapeCapped && this.afterLifeEscapeFwMonoHits >= 1) {
           if (this.tryAleSpentFwCap(host, w, stance, `round-trip:${next.kind}`)) return true;
+          if (this.aleFwTheaterBanned()) {
+            this.cool = 0;
+            return false;
+          }
         }
         const ok2 = this.visitNode1001(host, w, stance, next.kind, next.x, next.y);
         if (!ok2) return false;
@@ -5383,7 +5400,7 @@
       if (/first_wep hold — wander|first wep hold — wander|quiet hold — wander/.test(k)) return "hold-wander";
       if (/wanderspin hard leave/.test(k)) return "leave-spin";
       if (/^phase cool$|phase cool$/.test(k) || k === "phase cool") return "phase-cool";
-      if (/tools wander thrash|tools-rock-wander prison|trw-prison|trw-wander-aba|trw-reenter-ban|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|first_wep hold — explore|first wep hold — explore/.test(k)) {
+      if (/tools wander thrash|tools-rock-wander prison|trw-prison|trw-wander-aba|trw-reenter-ban|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|first_wep hold — explore|first wep hold — explore/.test(k)) {
         return "divert-product";
       }
       if (/tools wander/.test(k)) return "tools-wander";
@@ -5393,14 +5410,14 @@
       if (/insta osc — cool|pond-cap — cool/.test(k)) return "osc-cool";
       if (/insta osc/.test(k)) return "insta-leave";
       if (/post-release escape|post hierarchy release/.test(k)) return "release-cool";
-      if (/after life escape|after cool exhaust|life-spent divert|post-exhaust divert|wd divert|early osc divert|productive quiet|divert-product scrub|gear farm — after|explore — after|gear farm — wd|explore — wd|gear farm — early|explore — early|phase intent|tools-rock-wander prison|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|first_wep hold — explore|first wep hold — explore/.test(k)) {
+      if (/after life escape|after cool exhaust|life-spent divert|post-exhaust divert|wd divert|early osc divert|productive quiet|divert-product scrub|gear farm — after|explore — after|gear farm — wd|explore — wd|gear farm — early|explore — early|phase intent|tools-rock-wander prison|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|first_wep hold — explore|first wep hold — explore/.test(k)) {
         return "divert-product";
       }
       return k;
     }
     /** Eng 3012: true if fam is a divert-product (ignore in insta-osc ABA). */
     isDivertProductFam(k) {
-      return k === "divert-product" || /divert-product|after life escape|after cool exhaust|wd divert|early osc divert|life-spent divert|post-exhaust divert|productive quiet|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|phase intent hold — hunt|phase intent — hunt|first_wep hold — explore|first wep hold — explore/i.test(k);
+      return k === "divert-product" || /divert-product|after life escape|after cool exhaust|wd divert|early osc divert|life-spent divert|post-exhaust divert|productive quiet|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|phase intent hold — hunt|phase intent — hunt|first_wep hold — explore|first wep hold — explore/i.test(k);
     }
     /**
      * Eng 3016 / R76: note trw-prison-clear; ≥2 clears this life → ban TRW re-enter.
@@ -5423,58 +5440,80 @@
       return this.trwReenterBan || this.trwPrisonClearHits >= 2;
     }
     /**
-     * Eng 3021 / R81: when ALE leave is spent, unify with lifeEscapeSpent + cool
-     * FIRST_WEP camp-chain / emerg-tools / hatchet theater (reuse cool family —
-     * no new named timer, t1800). Idempotent aside from cool re-arm.
+     * Eng 3021–3022: when ALE leave is spent, unify with lifeEscapeSpent + cool
+     * FIRST_WEP camp-chain / emerg-tools / approach / hatchet theater (reuse cool
+     * family — no new named timer, t1800). Idempotent aside from cool re-arm.
      */
     latchAleSpentCool(host, why) {
       this.afterLifeEscapeCapped = true;
       this.afterLifeEscapeMonoHits = Math.max(this.afterLifeEscapeMonoHits, 6);
       if (!this.actions.some((s) => /after-life-escape-spent/i.test(s))) {
         this.noteAction("after-life-escape-spent");
-        host.log(`AUTO: after-life-escape SPENT \u2014 latch cool FW (3021) ${why}`);
+        host.log(`AUTO: after-life-escape SPENT \u2014 latch cool FW (3022) ${why}`);
       }
       this.markLifeEscapeSpent(host, `ale-spent:${why}`);
       this.clearPhaseIntent();
       this.phaseIntentHuntMonoHits = 0;
-      this.campChainBreakUntil = Math.max(this.campChainBreakUntil, this.runTicks + 1024);
-      this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 1024);
-      this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1024);
-      this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 768);
-      this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 768);
-      this.armBreakerExploreCool(768);
+      this.campChainBreakUntil = Math.max(this.campChainBreakUntil, this.runTicks + 1280);
+      this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 1280);
+      this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1280);
+      this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 1280);
+      this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
+      this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 768);
+      this.armPondBreakSticky(768, true);
+      this.armBreakerExploreCool(1024);
       this.cool = 0;
     }
+    /** Eng 3022: after fw-cap / spent — ban approach↔emerg↔mob theater re-entry. */
+    aleFwTheaterBanned() {
+      if (!this.afterLifeEscapeCapped && !this.lifeEscapeSpent) return false;
+      if (this.afterLifeEscapeFwMonoHits >= 1) return true;
+      return this.actions.some((s) => /after-life-escape-fw-cap|after-life-escape-fw-spent/i.test(s));
+    }
     /**
-     * Eng 3021 / R81: post-ALE-spent FIRST_WEP theater cap. Camp-chain / emerg-tools
-     * / approach↔mob / round-trip after spent → ≥2 hits note fw-cap + durable hub
-     * + free brain. Returns true if consumed tick.
+     * Eng 3021–3022: post-ALE-spent FIRST_WEP theater cap. Camp-chain / emerg-tools
+     * / approach↔mob / round-trip after spent → fw-cap + durable hub + free brain.
+     * Eng 3022: emerg/approach path threshold 1; arm lifeSpentDivert; longer cool
+     * approach/mob/emerg/lethal. Returns true if caller should stop the tick.
      */
     tryAleSpentFwCap(host, w, stance, why) {
       if (!this.afterLifeEscapeCapped) return false;
       this.afterLifeEscapeFwMonoHits++;
       this.latchThrash();
-      if (this.afterLifeEscapeFwMonoHits < 2) {
-        this.campChainBreakUntil = Math.max(this.campChainBreakUntil, this.runTicks + 1024);
-        this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 1024);
-        this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1024);
-        this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 768);
-        return false;
-      }
-      this.noteAction("after-life-escape-fw-cap");
-      host.log(`AUTO: after-life-escape FW CAP hits=${this.afterLifeEscapeFwMonoHits} (3021) ${why}`);
-      this.latchStuck();
-      this.latchClash();
+      const early = /emerg|approach|mob engage|mob kite|lethal|fw-theater/i.test(why);
+      const need = early ? 1 : 2;
       this.campChainBreakUntil = Math.max(this.campChainBreakUntil, this.runTicks + 1280);
       this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 1280);
       this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1280);
-      this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 1024);
-      this.armBreakerExploreCool(1024);
+      this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 1280);
+      this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
+      if (this.afterLifeEscapeFwMonoHits < need) {
+        return false;
+      }
+      if (!this.actions.some((s) => /after-life-escape-fw-cap/i.test(s))) {
+        this.noteAction("after-life-escape-fw-cap");
+      }
+      if (!this.actions.some((s) => /after-life-escape-fw-spent/i.test(s))) {
+        this.noteAction("after-life-escape-fw-spent");
+      }
+      host.log(`AUTO: after-life-escape FW CAP hits=${this.afterLifeEscapeFwMonoHits} (3022) ${why}`);
+      this.latchStuck();
+      this.latchClash();
+      this.latchAleSpentCool(host, `fw-cap:${why}`);
+      this.lifeSpentDivertHits = Math.max(this.lifeSpentDivertHits, 2);
+      this.campChainBreakUntil = Math.max(this.campChainBreakUntil, this.runTicks + 1536);
+      this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 1536);
+      this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1536);
+      this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 1536);
+      this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1280);
+      this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 1024);
+      this.armPondBreakSticky(1024, true);
+      this.armBreakerExploreCool(1280);
       this.stuckRecentStatus = this.stuckRecentStatus.filter(
-        (s) => !/camp-chain|camp-chest|camp-rock|camp-shop|round-trip|emerg hub|emerg-tools|approach engage|mob engage|approach kite|mob kite|high-ceiling|open chest|hatchet/i.test(s)
+        (s) => !/camp-chain|camp-chest|camp-rock|camp-shop|round-trip|emerg hub|emerg-tools|approach engage|mob engage|approach kite|mob kite|lethal kite|lethal close|high-ceiling|open chest|hatchet|after life escape|gear farm — after|explore — after/i.test(s)
       );
       this.actions = this.actions.filter(
-        (s) => !/camp-chain|camp-chest|round-trip|emerg hub|approach engage|mob engage/i.test(s)
+        (s) => !/camp-chain|camp-chest|round-trip|emerg hub|approach engage|mob engage|lethal kite/i.test(s)
       );
       this.clearPhaseIntent();
       const shop = this.mem(w, "shop");
@@ -5487,11 +5526,6 @@
       this.cool = 0;
       return true;
     }
-    /**
-     * Eng 3019 / R79: post-life-escape status. Once ALE-capped, never re-emit
-     * explore/gear-farm — after life escape (that re-armed CAP↔ALE prison).
-     * Prefer hunt intent / free brain. Returns true if a status walk was issued.
-     */
     emitPostLifeEscapeOrFree(host, w, stance, preferWalk) {
       if (this.afterLifeEscapeCapped) {
         this.latchAleSpentCool(host, "emit-post");
@@ -6561,6 +6595,12 @@
       }
       if (this.tryInstaOscBreak(host, w, stance)) return true;
       if (this.tryPhaseIntentHold(host, w, stance)) return true;
+      if ((this.isLifeEscapeSpent() || this.afterLifeEscapeCapped) && (this.statusOscPair(/enroute pond|find pond|food fish/, /food mine|tools mine|food sell ore/) || this.statusFamilyHits(/enroute pond|find pond|food fish/) >= 3 || this.statusFamilyHits(/food mine|food-mine osc/) >= 3)) {
+        this.armPondBreakSticky(1024, true);
+        this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 1024);
+        this.latchThrash();
+        return this.postExhaustDurableDivert(host, w, stance, "pond-food-mine-spent");
+      }
       if (this.isLifeEscapeSpent() && (this.statusFamilyHits(/stuck rethink/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/emerg hub|emerg-tools/) >= 3 || this.statusFamilyHits(/tools explore|FIRST_WEP hold/) >= 4 || this.statusFamilyHits(/tools mine|tools find rock/) >= 4 || this.statusFamilyHits(/lethal kite/) >= 5 || this.statusFamilyHits(/enroute pond|food fish|find pond/) >= 4 || this.statusFamilyHits(/food sell ore|food find shop/) >= 4 || this.statusFamilyHits(/tools fund hatchet|tools fund /) >= 4 || this.statusOscPair(/enroute pond|find pond/, /food fish/) || this.statusOscPair(/tools mine|tools find rock/, /tools fund|lethal kite/) || this.statusOscPair(/food sell ore|sell ore/, /food find shop|find shop/) || this.statusFamilyHits(/tools wander thrash|rock find thrash|rock thrash|rock osc/) >= 3 || this.statusFamilyHits(/tools explore|tools find rock|tools wander/) >= 5 || this.statusOscPair(/tools explore|tools wander/, /tools find rock|rock thrash|rock osc/) || this.statusOscPair(/approach kite|mob kite|lethal kite/, /mob engage|mob kite outlook|lethal cover|emerg hub/) || this.statusFamilyHits(/camp-chest|hatchet\/chest|hatchet osc|camp-chain osc/) >= 3 || this.statusOscPair(/camp-chest|hatchet\/chest|open chest/, /hatchet osc|tools hatchet|kit hatchet|camp-chain/))) {
         if (this.trwReenterBanned()) {
           if (this.afterLifeEscapeCapped) return false;
@@ -7159,6 +7199,11 @@
         this.cool = 18;
         return true;
       }
+      if (this.afterLifeEscapeCapped && (this.statusOscPair(/approach engage|mob engage/, /emerg hub|emerg-tools|approach kite|mob kite|lethal kite/) || this.statusOscPair(/emerg hub fund|emerg hub/, /approach engage|mob engage|mob kite|lethal kite/) || this.statusFamilyHits(/approach engage|mob engage/) >= 2 || this.statusFamilyHits(/emerg hub/) >= 2)) {
+        if (this.tryAleSpentFwCap(host, w, stance, "approach-emerg-mob")) return true;
+        this.cool = 0;
+        return false;
+      }
       if ((!this.emergToolsBreakActive() || this.statusOscPair(/sticky leave|sticky progress/, /emerg hub fund|emerg find pond|mob engage/)) && (this.statusOscPair(
         /tools explore|tools find rock|tools mine|tools wander|tools hatchet|tools fund|tools pickaxe|sticky leave|sticky progress/,
         /emerg hub fund|emerg find pond/
@@ -7183,6 +7228,8 @@
         this.noteAction("status osc emerg-tools \u2014 progress");
         if (this.afterLifeEscapeCapped) {
           if (this.tryAleSpentFwCap(host, w, stance, "emerg-tools")) return true;
+          this.cool = 0;
+          return false;
         }
         return this.tryStickyProgressLeave(host, w, stance, "emerg-tools osc");
       }
@@ -9170,6 +9217,9 @@
       return true;
     }
     setStatus(host, w, stance, action) {
+      if ((this.afterLifeEscapeCapped || this.lifeEscapeSpent) && /explore — after life escape|gear farm — after life escape/i.test(action)) {
+        return;
+      }
       const bits = [stance.label];
       if (!w.descendSafe) bits.push(w.farmReason === "CBT behind floor" || !w.farmReason ? "CBT behind" : w.farmReason);
       let line = `AUTO \u2014 ${action} (${bits.join("; ")})`;
