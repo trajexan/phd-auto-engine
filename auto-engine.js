@@ -1,4 +1,4 @@
-/* phd auto-engine 3010 — pull via GET /api/auto-engine */
+/* phd auto-engine 3011 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3010";
+  var AUTO_ENGINE_VERSION = "3011";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1480,6 +1480,27 @@
        * Clears only on death/new life. Sets postReleaseCoolExhausted so 3008/3009 gates apply.
        */
       __publicField(this, "lifeEscapeSpent", false);
+      /**
+       * Eng 3011 / t1808 #1: early A↔B / ABCABC durable divert fires this life
+       * before leave/cool theater. ≥1 → next insta may leave (escape stack second).
+       */
+      __publicField(this, "earlyOscDivertHits", 0);
+      /**
+       * Eng 3011 / t1808 #2: productive phase intent (TOOLS / FIRST_WEP / GEAR_FARM).
+       * While set: ban wander / fund-sell / pond re-entry until goal done or bag/HP exit.
+       */
+      __publicField(this, "phaseIntentGoal", "");
+      __publicField(this, "phaseIntentPhase", "");
+      /**
+       * Eng 3011 / t1808 #3: one productive quiet after RELEASE / life-spent issued.
+       * Not a cool timer — after done, free brain (cool=0).
+       */
+      __publicField(this, "postReleaseQuietDone", false);
+      /**
+       * Eng 3011 / t1808 #4: WD / near-stuck first-class divert already issued this climb.
+       * Clears on real progress so a later stuck climb can divert again.
+       */
+      __publicField(this, "wdFirstClassDiverted", false);
       /** Eng 2049 / R19: rethinks while sticky leave already active → escalate to progress. */
       __publicField(this, "stickyLeaveRethinks", 0);
       /**
@@ -1670,6 +1691,11 @@
         this.postReleaseCoolExhausted = false;
         this.postReleaseCoolWalkHits = 0;
         this.lifeEscapeSpent = false;
+        this.earlyOscDivertHits = 0;
+        this.phaseIntentGoal = "";
+        this.phaseIntentPhase = "";
+        this.postReleaseQuietDone = false;
+        this.wdFirstClassDiverted = false;
         this.stickyLeaveRethinks = 0;
         this.stickyExploreBlockUntil = 0;
         this.stickyPhaseLeaveArmed = false;
@@ -3480,6 +3506,11 @@
      * registered mem tree/pond — cook → sell → gather. Prefer farm over explore loot.
      */
     tryFundBeginnerToolFarm(host, w, stance, tree, pond) {
+      this.refreshPhaseIntent(host, w, stance);
+      if (this.phaseIntentLocked()) {
+        if (this.tryPhaseIntentHold(host, w, stance)) return true;
+        return false;
+      }
       if (this.tryCookBagCookables(host, w, stance, "tools fund cook")) return true;
       if (this.needsRawNoCookSell(host, w, stance)) {
         if (this.trySellUnusedOnce(host, w)) {
@@ -3568,8 +3599,11 @@
     }
     phaseTools1001(host, w, stance) {
       var _a, _b, _c, _d, _e, _f;
+      this.refreshPhaseIntent(host, w, stance);
+      if (this.phaseIntentLocked() && this.tryPhaseIntentHold(host, w, stance)) return true;
       if (!this.beginnerToolsIncomplete(host)) {
         this.clearFundIntent("tool");
+        this.clearPhaseIntent();
         this.h1001.phase = !w.hasMetalWeapon && !w.hasStyleWeapon ? "FIRST_WEP" : "GEAR_FARM";
         return false;
       }
@@ -3801,6 +3835,7 @@
           return this.coolHoldOscDivert(host, w, stance, "tools-mine-cool-hold");
         }
         this.setStatus1001(host, w, stance, "tools mine");
+        this.armPhaseIntent(this.h1001.phase === "FIRST_WEP" || this.h1001.phase === "GEAR_FARM" ? this.h1001.phase : "TOOLS", "mine");
         if (this.walkToTile(host, liveRock.x, liveRock.y)) return true;
         if (this.tryGather(host, w, stance, "tools mine")) return true;
         this.blockGatherTile(liveRock.x, liveRock.y);
@@ -3881,6 +3916,7 @@
         const live = (_f = (_e = w.seen) == null ? void 0 : _e.rock) != null ? _f : null;
         if (live && host.hasTool("pickaxe") && !this.rockFindBreakActive() && !this.isGatherTileBlocked(live.x, live.y)) {
           this.setStatus1001(host, w, stance, "tools mine");
+          this.armPhaseIntent(this.h1001.phase === "FIRST_WEP" || this.h1001.phase === "GEAR_FARM" ? this.h1001.phase : "TOOLS", "mine");
           if (this.walkToTile(host, live.x, live.y)) return true;
           if (this.tryGather(host, w, stance, "tools mine")) return true;
         }
@@ -4010,6 +4046,7 @@
                 this.noteAction("FIRST_WEP hold \u2014 mine");
                 host.log("AUTO: FIRST_WEP hold \u2014 productive mine (2064)");
                 this.setStatus1001(host, w, stance, "first wep mine");
+                this.armPhaseIntent(this.h1001.phase === "GEAR_FARM" ? "GEAR_FARM" : "FIRST_WEP", "mine");
                 if (this.walkToTile(host, rock2.x, rock2.y)) {
                   this.cool = 8;
                   return true;
@@ -4076,6 +4113,7 @@
               host.log("AUTO: FIRST_WEP sticky mine same-tile \u2014 ban mine (2064)");
             } else {
               this.setStatus1001(host, w, stance, "first wep mine");
+              this.armPhaseIntent(this.h1001.phase === "GEAR_FARM" ? "GEAR_FARM" : "FIRST_WEP", "mine");
               if (this.walkToTile(host, rock2.x, rock2.y)) return true;
               if (this.tryGather(host, w, stance, "mine first wep")) return true;
               this.blockGatherTile(rock2.x, rock2.y);
@@ -5323,10 +5361,280 @@
       return false;
     }
     /**
-     * Eng 3010 / t1806: mark one leave→RELEASE / hierarchy RELEASE / post-RELEASE
-     * escape spent for this life. Idempotent. Arms postReleaseCoolExhausted so
-     * existing 3008/3009 coolHold gates divert (no new timer — t1800).
+     * Eng 3011 / t1808 #1: first insta A↔B / ABCABC → thrash(+clash) + durable
+     * divert BEFORE leave/cool theater. Prefer early break over escape stack.
+     * Does NOT spend life escape / arm leave. cool=0 so brain resumes.
      */
+    earlyOscDurableDivert(host, w, stance, kind, pairKey) {
+      var _a, _b;
+      this.earlyOscDivertHits = Math.max(this.earlyOscDivertHits, 1);
+      this.latchThrash();
+      this.latchClash();
+      this.armBreakerExploreCool(768);
+      this.clearFundIntent("tool");
+      this.clearFundIntent("food");
+      this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 640);
+      this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 640);
+      this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 512);
+      this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 512);
+      this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 640);
+      this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 640);
+      this.stickyPhaseLeaveArmed = true;
+      this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+      this.instaOscPairKey = pairKey;
+      const ban = new RegExp(pairKey.split("|").map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "i");
+      this.stuckRecentStatus = this.stuckRecentStatus.filter((s) => !ban.test(this.statusFamKey(s)));
+      this.actions = this.actions.filter((s) => !/insta osc|early osc divert/i.test(s));
+      if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
+        this.h1001.phase = "GEAR_FARM";
+      } else if (host.hasTool("pickaxe")) {
+        this.h1001.phase = "FIRST_WEP";
+      }
+      const shop = this.mem(w, "shop");
+      const chest = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
+      if (shop) host.walkTo(shop.x, shop.y);
+      else if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) host.walkTo(chest.x, chest.y);
+      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+      else if (w.explore) {
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
+        host.walkTo(w.explore.x, w.explore.y);
+      }
+      if (!/early osc divert/i.test(this.actions[this.actions.length - 1] || "")) {
+        this.noteAction(`early osc divert \u2014 ${kind}`);
+        host.log(`AUTO: early osc divert [${pairKey}] ${kind} (3011) \u2014 before leave/cool`);
+      }
+      this.setStatus(
+        host,
+        w,
+        stance,
+        host.hasTool("pickaxe") ? "gear farm \u2014 early osc divert" : "explore \u2014 early osc divert"
+      );
+      this.cool = 0;
+      return true;
+    }
+    /**
+     * Eng 3011 / t1808 #2: arm productive phase intent. Clears only on goal done /
+     * phase leave / bag|HP force / death — not a cool timer.
+     */
+    armPhaseIntent(phase, goal) {
+      if (phase !== "TOOLS" && phase !== "FIRST_WEP" && phase !== "GEAR_FARM") return;
+      this.phaseIntentGoal = goal;
+      this.phaseIntentPhase = phase;
+    }
+    clearPhaseIntent() {
+      this.phaseIntentGoal = "";
+      this.phaseIntentPhase = "";
+    }
+    /** True while phase intent bans wander / fund-sell / pond re-entry. */
+    phaseIntentLocked() {
+      return !!this.phaseIntentGoal;
+    }
+    /**
+     * Eng 3011: refresh / clear phase intent. Bag tight or hungry emerg force exit.
+     * Goal done (metal wep / tools complete / forge done) clears.
+     */
+    refreshPhaseIntent(host, w, stance) {
+      if (!this.phaseIntentGoal) return;
+      const ph = this.h1001.phase;
+      if (ph !== "TOOLS" && ph !== "FIRST_WEP" && ph !== "GEAR_FARM") {
+        this.clearPhaseIntent();
+        return;
+      }
+      if (w.bagFree <= 1 || stance.hungry || w.food <= 0 || w.hp / Math.max(1, w.maxHp) < 0.35) {
+        this.clearPhaseIntent();
+        return;
+      }
+      if (this.phaseIntentGoal === "mine" || this.phaseIntentGoal === "forge") {
+        if (w.hasMetalWeapon || w.hasStyleWeapon) {
+          this.clearPhaseIntent();
+          return;
+        }
+      }
+      if (this.phaseIntentGoal === "gather" && !this.beginnerToolsIncomplete(host) && host.hasTool("pickaxe")) {
+        this.clearPhaseIntent();
+        return;
+      }
+      this.phaseIntentPhase = ph;
+    }
+    /**
+     * Eng 3011 / t1808 #2: while intent locked, divert away from wander/fund-sell/pond
+     * back to the productive goal (mine/forge/hunt/gather). Returns true if consumed.
+     */
+    tryPhaseIntentHold(host, w, stance) {
+      var _a, _b, _c, _d;
+      this.refreshPhaseIntent(host, w, stance);
+      if (!this.phaseIntentLocked()) return false;
+      const goal = this.phaseIntentGoal;
+      this.latchThrash();
+      if (goal === "mine" || goal === "forge") {
+        if (!host.hasTool("pickaxe")) {
+          this.clearPhaseIntent();
+          return false;
+        }
+        const rock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
+        if (rock && !this.isGatherTileBlocked(rock.x, rock.y)) {
+          this.setStatus1001(host, w, stance, goal === "forge" ? "first wep mine" : "tools mine");
+          this.desireXY = { x: rock.x, y: rock.y };
+          if (this.walkToTile(host, rock.x, rock.y) || this.tryGather(host, w, stance, "phase-intent mine")) {
+            this.cool = 2;
+            return true;
+          }
+          const attempt = host.gatherAt(rock.x, rock.y);
+          if (attempt.ok || /^enroute$/i.test(attempt.reason || "")) {
+            this.cool = 2;
+            return true;
+          }
+        }
+        if (goal === "forge" && this.wantSmithKit(w) && w.oreCount > 0) {
+          this.clearPhaseIntent();
+          return false;
+        }
+      }
+      if (goal === "gather") {
+        const tree = (_d = (_c = w.seen) == null ? void 0 : _c.tree) != null ? _d : this.mem(w, "tree");
+        if (tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y)) {
+          this.setStatus1001(host, w, stance, "tools fund chop");
+          const attempt = host.gatherAt(tree.x, tree.y);
+          if (attempt.ok || /^enroute$/i.test(attempt.reason || "")) {
+            this.cool = 2;
+            return true;
+          }
+        }
+      }
+      if (goal === "hunt") {
+        const foe = w.foes.find((f) => f.alive && f.lit);
+        if (foe) {
+          this.setStatus1001(host, w, stance, "gear farm \u2014 hunt");
+          host.walkTo(foe.x, foe.y);
+          this.cool = 2;
+          return true;
+        }
+      }
+      if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+      this.noteAction(`phase intent hold \u2014 ${goal}`);
+      this.setStatus(host, w, stance, `phase intent \u2014 ${goal}`);
+      this.cool = 0;
+      return true;
+    }
+    /**
+     * Eng 3011 / t1808 #3: after RELEASE / life-spent — ONE productive quiet
+     * (hub sell / eat / re-kit), then free brain. Not a coolHold timer stack.
+     * Honor life-spent: no coolHold* re-arm after spent.
+     */
+    oneProductiveQuietAfterRelease(host, w, stance, why) {
+      var _a, _b;
+      this.markLifeEscapeSpent(host, `productive-quiet:${why}`);
+      if (this.postReleaseQuietDone) {
+        if (this.statusFamilyHits(/stuck rethink|tools fund sell|tools wander|insta osc|post-RELEASE/) >= 3) {
+          return this.postExhaustDurableDivert(host, w, stance, `quiet-done:${why}`);
+        }
+        this.cool = 0;
+        return false;
+      }
+      this.postReleaseQuietDone = true;
+      this.latchThrash();
+      this.latchClash();
+      this.armBreakerExploreCool(640);
+      this.clearFundIntent("tool");
+      this.stickyPhaseLeaveArmed = true;
+      this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+      this.stuckRecentStatus = this.stuckRecentStatus.filter(
+        (s) => !/quiet hold — post RELEASE|post-RELEASE|insta osc — cool|post-release cool|osc cool|coolHold/i.test(s)
+      );
+      let did = "";
+      if (w.hp < w.maxHp * 0.7 && w.food > 0) {
+        try {
+          host.eat();
+          did = "eat";
+        } catch {
+        }
+      }
+      if (!did && (this.hasSellableMats(w) || this.oreLiquidateBeforeFish(w) || this.hasBagCookables(w))) {
+        if (this.trySellUnusedOnce(host, w)) did = "sell";
+        else {
+          const shop = this.mem(w, "shop");
+          if (shop) {
+            host.walkTo(shop.x, shop.y);
+            did = "walk-shop";
+          }
+        }
+      }
+      if (!did && this.beginnerToolsIncomplete(host) && w.coins >= 30) {
+        const shop = this.mem(w, "shop");
+        if (shop) {
+          host.walkTo(shop.x, shop.y);
+          did = "re-kit";
+        }
+      }
+      if (!did) {
+        const shop = this.mem(w, "shop");
+        const chest = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
+        if (shop) {
+          host.walkTo(shop.x, shop.y);
+          did = "hub-shop";
+        } else if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) {
+          host.walkTo(chest.x, chest.y);
+          did = "chest";
+        } else if (w.hub) {
+          host.walkTo(w.hub.x, w.hub.y);
+          did = "hub";
+        } else if (w.wander) {
+          host.walkTo(w.wander.x, w.wander.y);
+          did = "wander";
+        }
+      }
+      this.noteAction(`productive quiet \u2014 ${did || "none"} (${why})`);
+      host.log(`AUTO: one productive quiet after RELEASE (3011) ${did || "none"} ${why}`);
+      this.setStatus(
+        host,
+        w,
+        stance,
+        did === "eat" ? "productive quiet \u2014 eat" : did === "sell" || did === "walk-shop" || did === "hub-shop" ? "productive quiet \u2014 sell" : did === "re-kit" ? "productive quiet \u2014 re-kit" : "productive quiet \u2014 hub"
+      );
+      this.cool = 0;
+      return true;
+    }
+    /**
+     * Eng 3011 / t1808 #4: WD / near-stuck first-class — force durable divert + mark
+     * immediately (don't wait for clash/thrash life-stain to paint the whole life).
+     */
+    forceWdFirstClassDivert(host, w, stance, why) {
+      var _a, _b;
+      this.latchStuck();
+      this.latchThrash();
+      this.latchClash();
+      this.armBreakerExploreCool(1024);
+      this.clearFundIntent("tool");
+      this.clearFundIntent("food");
+      this.stickyPhaseLeaveArmed = true;
+      this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+      this.stuckRecentStatus = this.stuckRecentStatus.filter(
+        (s) => !/stuck rethink|stuck watchdog|tools fund|tools wander|insta osc|phase cool|FIRST_WEP hold/i.test(s)
+      );
+      const shop = this.mem(w, "shop");
+      const chest = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
+      if (shop) host.walkTo(shop.x, shop.y);
+      else if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) host.walkTo(chest.x, chest.y);
+      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+      else if (w.explore) {
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
+        host.walkTo(w.explore.x, w.explore.y);
+      }
+      if (!/wd divert/i.test(this.actions[this.actions.length - 1] || "")) {
+        this.noteAction(`wd divert \u2014 ${why}`);
+        host.log(`AUTO: WD first-class divert (3011) ${why}`);
+      }
+      this.setStatus(host, w, stance, host.hasTool("pickaxe") ? "gear farm \u2014 wd divert" : "explore \u2014 wd divert");
+      this.cool = 0;
+    }
+    /**
+    * Eng 3010 / t1806: mark one leave→RELEASE / hierarchy RELEASE / post-RELEASE
+    * escape spent for this life. Idempotent. Arms postReleaseCoolExhausted so
+    * existing 3008/3009 coolHold gates divert (no new timer — t1800).
+    */
     markLifeEscapeSpent(host, why) {
       if (this.lifeEscapeSpent) return;
       this.lifeEscapeSpent = true;
@@ -5403,14 +5711,14 @@
     coolHoldOscDivert(host, w, stance, why) {
       var _a, _b;
       if (this.isLifeEscapeSpent()) {
-        return this.postExhaustDurableDivert(host, w, stance, why);
+        return this.oneProductiveQuietAfterRelease(host, w, stance, why);
       }
       const holdHits = this.statusFamilyHits(
         /osc cool hold|tools-sticky-hold|tools-label-cool-hold|post-cool-theater|pond-sell-latched|sell-latch-hold|tools-sticky-explore/
       );
       if (this.durableLeaveHierarchyReleased || this.postHierarchyReleaseEscapeCount >= 1 || this.statusFamilyHits(/osc cool — leave→release|insta osc — release|pond-cap — release/) >= 1) {
         this.markLifeEscapeSpent(host, `cool-hold-after-release:${why}`);
-        return this.postExhaustDurableDivert(host, w, stance, why);
+        return this.oneProductiveQuietAfterRelease(host, w, stance, why);
       }
       if (holdHits >= 3 || this.durableLeaveSettleDone || this.durableLeaveDoneHits >= 1) {
         return this.coolHoldEscalateLeave(host, w, stance, why);
@@ -5452,11 +5760,11 @@
     coolHoldEscalateLeave(host, w, stance, why) {
       var _a, _b;
       if (this.isLifeEscapeSpent()) {
-        return this.postExhaustDurableDivert(host, w, stance, `leave:${why}`);
+        return this.oneProductiveQuietAfterRelease(host, w, stance, `leave:${why}`);
       }
       if (this.durableLeaveHierarchyReleased || this.postHierarchyReleaseEscapeCount >= 1 || this.statusFamilyHits(/osc cool — leave→release|insta osc — release|pond-cap — release/) >= 1) {
         this.markLifeEscapeSpent(host, `leave-after-release:${why}`);
-        return this.postExhaustDurableDivert(host, w, stance, `leave:${why}`);
+        return this.oneProductiveQuietAfterRelease(host, w, stance, `leave:${why}`);
       }
       this.latchThrash();
       this.latchClash();
@@ -5493,10 +5801,8 @@
         }
         this.markLifeEscapeSpent(host, `cool-hold-leave\u2192release:${why}`);
         this.noteAction("osc cool \u2014 leave\u2192release");
-        host.log(`AUTO: osc cool hold \u2192 leave/release (3010) ${why}`);
-        this.setStatus(host, w, stance, "insta osc \u2014 release");
-        this.cool = 10;
-        return true;
+        host.log(`AUTO: osc cool hold \u2192 leave/release (3011) ${why}`);
+        return this.oneProductiveQuietAfterRelease(host, w, stance, `cool-hold-release:${why}`);
       }
       this.instaOscLeaveArmed = true;
       this.instaOscLeaveHits = Math.max(this.instaOscLeaveHits, 1);
@@ -5526,7 +5832,7 @@
     coolHoldPostReleaseWalk(host, w, stance, why) {
       var _a, _b, _c, _d;
       if (this.isLifeEscapeSpent()) {
-        return this.postExhaustDurableDivert(host, w, stance, `postrel:${why}`);
+        return this.oneProductiveQuietAfterRelease(host, w, stance, `postrel:${why}`);
       }
       this.postReleaseCoolWalkHits += 1;
       const prisonHits = this.postReleaseCoolPrisonHits();
@@ -5660,9 +5966,8 @@
       if (label === "release") {
         this.markLifeEscapeSpent(host, `insta-osc-release:${pairKey}`);
         this.noteAction("insta osc \u2014 release");
-        host.log(`AUTO: insta osc \u2014 release [${pairKey}] (3010)`);
-        this.setStatus(host, w, stance, "insta osc \u2014 release");
-        this.cool = 14;
+        host.log(`AUTO: insta osc \u2014 release [${pairKey}] (3011)`);
+        return this.oneProductiveQuietAfterRelease(host, w, stance, `insta-release:${pairKey}`);
       } else {
         this.noteAction("insta osc \u2014 cool");
         host.log(`AUTO: insta osc \u2014 cool divert [${pairKey}] (3002)`);
@@ -5696,6 +6001,22 @@
       if (this.instaOscLeaveArmed || this.instaOscLeaveHits >= 1) {
         return this.releaseInstaOscPrison(host, w, stance, pairKey);
       }
+      if (this.earlyOscDivertHits < 1) {
+        const joined0 = hit.fams.join(" ");
+        if (/pond|fish|sell|food mine|food sell|enroute pond|find pond|find shop|sell ore|sell trim|pond-cap/i.test(joined0)) {
+          this.armPondBreakSticky(768, true);
+          this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 768);
+          this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 768);
+          if (/sell/.test(joined0) && /pond|fish/.test(joined0)) this.pondSellPrisonLatched = true;
+        }
+        if (/tools|explore|kite|lethal|sticky|pickaxe|emerg|wander|phase|quiet hold|first.?wep|kite cool|leave-spin|hold-wander|phase-cool|tools-wander/i.test(joined0)) {
+          this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 768);
+          this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 640);
+          this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 768);
+          this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 768);
+        }
+        return this.earlyOscDurableDivert(host, w, stance, hit.kind, pairKey);
+      }
       this.latchThrash();
       if (hit.fams.length >= 2) this.latchClash();
       this.instaOscPairKey = pairKey;
@@ -5718,7 +6039,7 @@
       const ban = new RegExp(hit.fams.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "i");
       this.stuckRecentStatus = this.stuckRecentStatus.filter((s) => !ban.test(this.statusFamKey(s)));
       this.noteAction(`insta osc ${hit.kind} \u2014 leave`);
-      host.log(`AUTO: insta osc ${hit.kind} [${pairKey}] \u2014 cool+leave (3002)`);
+      host.log(`AUTO: insta osc ${hit.kind} [${pairKey}] \u2014 cool+leave (3011 after early divert)`);
       this.stickyPhaseLeaveArmed = true;
       this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
       const shop = this.mem(w, "shop");
@@ -5742,6 +6063,7 @@
     tryStatusOscBreak(host, w, stance) {
       var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G;
       if (this.tryInstaOscBreak(host, w, stance)) return true;
+      if (this.tryPhaseIntentHold(host, w, stance)) return true;
       if (this.isLifeEscapeSpent() && (this.statusFamilyHits(/stuck rethink/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/emerg hub|emerg-tools/) >= 3 || this.statusFamilyHits(/tools explore|FIRST_WEP hold/) >= 4 || this.statusFamilyHits(/tools mine|tools find rock/) >= 4 || this.statusFamilyHits(/lethal kite/) >= 5)) {
         return this.postExhaustDurableDivert(host, w, stance, "post-ex-mono");
       }
@@ -7422,7 +7744,7 @@
       if (this.postHierarchyReleaseEscapeActive() || this.postHierarchyReleaseEscapeCount >= 1 || this.isLifeEscapeSpent()) {
         if (this.isLifeEscapeSpent() || this.postHierarchyReleaseEscapeCount >= 1) {
           this.markLifeEscapeSpent(host, `post-RELEASE-quiet:${why}`);
-          return this.postExhaustDurableDivert(host, w, stance, `post-RELEASE-quiet:${why}`);
+          return this.oneProductiveQuietAfterRelease(host, w, stance, `post-RELEASE-quiet:${why}`);
         }
         this.stickyPhaseLeaveArmed = true;
         this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
@@ -7476,17 +7798,9 @@
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/quiet hold — post RELEASE|post-RELEASE mine|TOOLS sticky|emerg-tools|pond-break-cap|stuck-wander|first-wep-hold|durable leave settle|quiet hold — durable settle/i.test(s)
         );
-        this.noteAction(`post-RELEASE escape cool (${why})`);
-        host.log(`AUTO: post hierarchy RELEASE \u2192 cool leave (3000) #${this.postHierarchyReleaseEscapeCount} ${why}`);
-        this.setStatus1001(host, w, stance, "post-RELEASE escape");
-        if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-        else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-        else if (w.explore) {
-          this.desireXY = { x: w.explore.x, y: w.explore.y };
-          host.walkTo(w.explore.x, w.explore.y);
-        }
-        this.cool = 16;
-        return true;
+        this.noteAction(`post-RELEASE escape (${why})`);
+        host.log(`AUTO: post hierarchy RELEASE \u2192 productive quiet (3011) #${this.postHierarchyReleaseEscapeCount} ${why}`);
+        return this.oneProductiveQuietAfterRelease(host, w, stance, `post-RELEASE-escape:${why}`);
       }
       this.noteAction(`quiet hold \u2014 post RELEASE (${why})`);
       host.log(`AUTO: post hierarchy RELEASE quiet (2090) ${why}`);
@@ -9146,6 +9460,12 @@
       if (clashNow) this.latchClash();
       if (metersFlat && this.stuckTicks >= Math.floor(IDLE_STUCK_TICKS / 2) && !combatBusy && !gatherBusy && !striveBusy) {
         this.latchStuck();
+        if (!this.wdFirstClassDiverted) {
+          this.wdFirstClassDiverted = true;
+          this.forceWdFirstClassDivert(host, w, stance, "near-stuck");
+          this.stuckTicks = 0;
+          return;
+        }
       }
       if (metersFlat && !combatBusy && !gatherBusy && !striveBusy) {
         const actTail = this.actions.slice(-10);
@@ -9178,6 +9498,7 @@
         if (realProg) {
           this.stuckFireTicks = [];
           this.stuckWatchdogFired = false;
+          this.wdFirstClassDiverted = false;
         }
         if (usefulApproach || realProg || combatBusy || striveBusy) {
           this.stuckRecentTiles = [];
@@ -9221,6 +9542,7 @@
           host.log(
             `AUTO: stuck watchdog kill \u2014 ${this.stuckFireTicks.length} rethinks without progress`
           );
+          this.forceWdFirstClassDivert(host, w, stance, "watchdog-arm");
           try {
             (_b = host.onStuckWatchdogKill) == null ? void 0 : _b.call(host, {
               status: this.lastStatus || "stuck watchdog",
