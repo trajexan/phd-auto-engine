@@ -1,4 +1,4 @@
-/* phd auto-engine 3105 — pull via GET /api/auto-engine */
+/* phd auto-engine 3106 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3105";
+  var AUTO_ENGINE_VERSION = "3106";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1510,6 +1510,11 @@
       __publicField(this, "postBreakFreeMineHits", 0);
       /** Eng 3104: after free-mine flap/fail this life — never re-enter free-mine (not a timer). */
       __publicField(this, "postBreakFreeMineExhausted", false);
+      /** Eng 3106: free-brain walk desire key after free-mine exhaust (not a timer). */
+      __publicField(this, "postBreakFreeWalkKey", "");
+      __publicField(this, "postBreakFreeWalkHits", 0);
+      /** Eng 3106: A↔B desire flips under post-exhaust free brain (not a timer). */
+      __publicField(this, "postBreakFreeWalkOsc", 0);
       /**
        * Eng 3011 / t1808 #4: WD / near-stuck first-class divert already issued this climb.
        * Clears on real progress so a later stuck climb can divert again.
@@ -1752,6 +1757,9 @@
         this.postBreakFreeMineKey = "";
         this.postBreakFreeMineHits = 0;
         this.postBreakFreeMineExhausted = false;
+        this.postBreakFreeWalkKey = "";
+        this.postBreakFreeWalkHits = 0;
+        this.postBreakFreeWalkOsc = 0;
         this.wdFirstClassDiverted = false;
         this.lifeSpentDivertHits = 0;
         this.trwPrisonClearHits = 0;
@@ -5824,7 +5832,7 @@
       this.quietBreakEscalateHits = 0;
       this.quietEscalateLeaveHits = 0;
       this.clearPhaseIntent();
-      host.log(`AUTO: early-osc \u2192 postBreak (3105) ${kind}`);
+      host.log(`AUTO: early-osc \u2192 postBreak (3106) ${kind}`);
       return this.postBreakFreeBrain(host, w, stance, `early-osc:${kind}`);
     }
     /**
@@ -6128,7 +6136,7 @@
         if (!this.actions.some((s) => /^postBreak —/i.test(s))) {
           this.noteAction(`postBreak \u2014 ${why}`);
         }
-        host.log(`AUTO: postBreak ENTER (3105) ${why}`);
+        host.log(`AUTO: postBreak ENTER (3106) ${why}`);
       }
     }
     /** Compat shim — all spent marks now enter postBreak. */
@@ -6156,7 +6164,7 @@
      * Returns true only while issuing the one productive action.
      */
     postBreakFreeBrain(host, w, stance, why) {
-      var _a, _b;
+      var _a, _b, _c, _d;
       this.enterPostBreak(host, `free:${why}`);
       this.quietBootstrapEmitHits = 0;
       this.quietBootstrapBreakUntil = Math.min(this.quietBootstrapBreakUntil, this.runTicks);
@@ -6188,7 +6196,7 @@
       this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 512);
       if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
         this.noteAction(`postBreak free brain \u2014 ${why}`);
-        host.log(`AUTO: postBreak free brain (3105) ${why}`);
+        host.log(`AUTO: postBreak free brain (3106) ${why}`);
       }
       if (host.hasTool("pickaxe")) {
         this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
@@ -6206,7 +6214,7 @@
           this.postBreakFreeMineKey = "";
           this.postBreakFreeMineHits = 0;
           this.postBreakFreeMineExhausted = true;
-          host.log(`AUTO: postBreak free mine exhaust \u2014 flap (${mk}) (3105)`);
+          host.log(`AUTO: postBreak free mine exhaust \u2014 flap (${mk}) (3106)`);
           this.noteAction("postBreak free mine exhaust");
         } else {
           if (this.walkToTile(host, rockFb.x, rockFb.y)) {
@@ -6221,8 +6229,82 @@
           this.postBreakFreeMineKey = "";
           this.postBreakFreeMineHits = 0;
           this.postBreakFreeMineExhausted = true;
-          host.log(`AUTO: postBreak free mine exhaust \u2014 gather-fail (${mk}) (3105)`);
+          host.log(`AUTO: postBreak free mine exhaust \u2014 gather-fail (${mk}) (3106)`);
           this.noteAction("postBreak free mine exhaust");
+        }
+      }
+      if (this.postBreakFreeMineExhausted) {
+        const foe = w.foes.find((f) => f.alive && f.lit);
+        if (foe) {
+          this.desireXY = { x: foe.x, y: foe.y };
+          host.walkTo(foe.x, foe.y);
+          this.stuckTicks = 0;
+          return true;
+        }
+        if (host.hasTool("pickaxe") && !host.hasTool("hatchet")) {
+          if (host.acquireTool("hatchet")) {
+            if (!this.actions.some((s) => /postBreak kit hatchet/i.test(s))) {
+              this.noteAction("postBreak kit hatchet");
+              host.log("AUTO: postBreak kit hatchet (3106)");
+            }
+            this.stuckTicks = 0;
+            return true;
+          }
+          const anvilH = this.mem(w, "anvil");
+          if (this.canFundToolNow("hatchet", w, anvilH) && this.runTicks >= this.kitAcquireBlockUntil) {
+            const shopH = this.mem(w, "shop");
+            const destH = anvilH || shopH || w.hub;
+            if (destH) {
+              this.desireXY = { x: destH.x, y: destH.y };
+              host.walkTo(destH.x, destH.y);
+              this.stuckTicks = 0;
+              return true;
+            }
+          }
+        }
+        const treeFb = (_d = (_c = w.seen) == null ? void 0 : _c.tree) != null ? _d : this.mem(w, "tree");
+        if (treeFb && host.hasTool("hatchet") && !this.isGatherTileBlocked(treeFb.x, treeFb.y)) {
+          if (this.walkToTile(host, treeFb.x, treeFb.y)) {
+            this.stuckTicks = 0;
+            return true;
+          }
+          if (this.tryGather(host, w, stance, "postBreak free chop")) {
+            this.stuckTicks = 0;
+            return true;
+          }
+        }
+        if (this.stairsUsable(w) && w.descendSafe && w.stairs) {
+          this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+          host.walkTo(w.stairs.x, w.stairs.y);
+          this.stuckTicks = 0;
+          return true;
+        }
+      }
+      const walkTarget = w.explore ? w.explore : w.wander ? w.wander : w.hub ? w.hub : null;
+      if (walkTarget && this.postBreakFreeMineExhausted) {
+        const wk = `${walkTarget.x},${walkTarget.y}`;
+        if (wk === this.postBreakFreeWalkKey) this.postBreakFreeWalkHits++;
+        else {
+          if (this.postBreakFreeWalkKey) this.postBreakFreeWalkOsc++;
+          this.postBreakFreeWalkKey = wk;
+          this.postBreakFreeWalkHits = 1;
+        }
+        if (this.postBreakFreeWalkOsc >= 3) {
+          this.latchThrash();
+          this.postBreakFreeWalkOsc = 0;
+          this.postBreakFreeWalkKey = "";
+          this.postBreakFreeWalkHits = 0;
+          if (!this.actions.some((s) => /postBreak free walk osc/i.test(s))) {
+            this.noteAction("postBreak free walk osc");
+            host.log("AUTO: postBreak free walk osc (3106)");
+          }
+          const rot = w.hub && `${w.hub.x},${w.hub.y}` !== wk ? w.hub : w.wander && `${w.wander.x},${w.wander.y}` !== wk ? w.wander : w.explore && `${w.explore.x},${w.explore.y}` !== wk ? w.explore : null;
+          if (rot) {
+            this.desireXY = { x: rot.x, y: rot.y };
+            host.walkTo(rot.x, rot.y);
+            this.stuckTicks = 0;
+            return true;
+          }
         }
       }
       if (w.explore) {
