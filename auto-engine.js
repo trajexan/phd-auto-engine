@@ -1,4 +1,4 @@
-/* phd auto-engine 3015 — pull via GET /api/auto-engine */
+/* phd auto-engine 3016 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3015";
+  var AUTO_ENGINE_VERSION = "3016";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1506,6 +1506,18 @@
        * ≥2 → no re-status flap; productive phase/explore only. Not a timer (t1800).
        */
       __publicField(this, "lifeSpentDivertHits", 0);
+      /**
+       * Eng 3016 / R76: trw-prison-clear fires this life. ≥2 → ban TRW prison re-enter
+       * (clear↔phase-intent mine flap). Not a timer (t1800).
+       */
+      __publicField(this, "trwPrisonClearHits", 0);
+      /** Eng 3016: after ≥2 clears (or wander↔prison ABA), ban tools-rock-wander prison re-entry. */
+      __publicField(this, "trwReenterBan", false);
+      /**
+       * Eng 3016: consecutive phase-intent — mine hold ticks without productive mine.
+       * ≥6 → clear intent + explore/hub (phase-intent-mine-cap).
+       */
+      __publicField(this, "phaseIntentMineMonoHits", 0);
       /** Eng 2049 / R19: rethinks while sticky leave already active → escalate to progress. */
       __publicField(this, "stickyLeaveRethinks", 0);
       /**
@@ -1702,6 +1714,9 @@
         this.postReleaseQuietDone = false;
         this.wdFirstClassDiverted = false;
         this.lifeSpentDivertHits = 0;
+        this.trwPrisonClearHits = 0;
+        this.trwReenterBan = false;
+        this.phaseIntentMineMonoHits = 0;
         this.stickyLeaveRethinks = 0;
         this.stickyExploreBlockUntil = 0;
         this.stickyPhaseLeaveArmed = false;
@@ -5316,6 +5331,9 @@
       if (/first_wep hold — wander|first wep hold — wander|quiet hold — wander/.test(k)) return "hold-wander";
       if (/wanderspin hard leave/.test(k)) return "leave-spin";
       if (/^phase cool$|phase cool$/.test(k) || k === "phase cool") return "phase-cool";
+      if (/tools wander thrash|tools-rock-wander prison|trw-prison|trw-wander-aba|trw-reenter-ban|phase-intent-mine-cap/.test(k)) {
+        return "divert-product";
+      }
       if (/tools wander/.test(k)) return "tools-wander";
       if (/tools find rock|tools mine|sticky progress — mine|phase cool mine/.test(k)) return "tools-rock-seek";
       if (/rock thrash|rock osc|status osc rock|rock find thrash/.test(k)) return "tools-rock-flee";
@@ -5323,14 +5341,69 @@
       if (/insta osc — cool|pond-cap — cool/.test(k)) return "osc-cool";
       if (/insta osc/.test(k)) return "insta-leave";
       if (/post-release escape|post hierarchy release/.test(k)) return "release-cool";
-      if (/after life escape|after cool exhaust|life-spent divert|post-exhaust divert|wd divert|early osc divert|productive quiet|divert-product scrub|gear farm — after|explore — after|gear farm — wd|explore — wd|gear farm — early|explore — early|phase intent|tools-rock-wander prison|trw-prison/.test(k)) {
+      if (/after life escape|after cool exhaust|life-spent divert|post-exhaust divert|wd divert|early osc divert|productive quiet|divert-product scrub|gear farm — after|explore — after|gear farm — wd|explore — wd|gear farm — early|explore — early|phase intent|tools-rock-wander prison|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap/.test(k)) {
         return "divert-product";
       }
       return k;
     }
     /** Eng 3012: true if fam is a divert-product (ignore in insta-osc ABA). */
     isDivertProductFam(k) {
-      return k === "divert-product" || /divert-product|after life escape|after cool exhaust|wd divert|early osc divert|life-spent divert|post-exhaust divert|productive quiet/i.test(k);
+      return k === "divert-product" || /divert-product|after life escape|after cool exhaust|wd divert|early osc divert|life-spent divert|post-exhaust divert|productive quiet|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap/i.test(k);
+    }
+    /**
+     * Eng 3016 / R76: note trw-prison-clear; ≥2 clears this life → ban TRW re-enter.
+     * Also arm ban immediately when already flapping with wander thrash leave.
+     */
+    markTrwPrisonClear(host, why = "") {
+      this.trwPrisonClearHits++;
+      this.noteAction("trw-prison-clear");
+      const flap = this.actions.slice(-6).some((s) => /tools wander thrash/i.test(s));
+      if (this.trwPrisonClearHits >= 2 || flap) {
+        if (!this.trwReenterBan) {
+          this.trwReenterBan = true;
+          this.noteAction("trw-reenter-ban");
+          host.log(`AUTO: TRW re-enter BAN hits=${this.trwPrisonClearHits} ${why} (3016)`);
+        }
+      }
+    }
+    /** Eng 3016: TRW prison / thrash-leave→prison banned this life. */
+    trwReenterBanned() {
+      return this.trwReenterBan || this.trwPrisonClearHits >= 2;
+    }
+    /**
+     * Eng 3016: durable non-mine walk after TRW ban / wander↔prison ABA.
+     * Prefer shop/hub/explore — do NOT re-arm phase-intent mine or rockFindBreak.
+     */
+    durableTrwBanWalk(host, w, stance, mark) {
+      this.latchThrash();
+      this.latchClash();
+      this.rockFindBreakUntil = 0;
+      this.clearPhaseIntent();
+      this.phaseIntentMineMonoHits = 0;
+      this.stuckRecentStatus = this.stuckRecentStatus.filter(
+        (s) => !/tools wander|tools explore|tools find rock|tools mine|rock thrash|rock osc|tools-rock-wander|phase intent — mine/i.test(s)
+      );
+      this.actions = this.actions.filter(
+        (s) => !/tools wander thrash|tools-rock-wander prison|trw-prison-clear/i.test(s)
+      );
+      if (!new RegExp(mark.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(this.actions[this.actions.length - 1] || "")) {
+        this.noteAction(mark);
+      }
+      const shop = this.mem(w, "shop");
+      if (shop) host.walkTo(shop.x, shop.y);
+      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+      else if (w.explore) {
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
+        host.walkTo(w.explore.x, w.explore.y);
+      } else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+      if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
+        this.armPhaseIntent("GEAR_FARM", "hunt");
+        this.setStatus(host, w, stance, "phase intent \u2014 hunt");
+      } else {
+        this.setStatus(host, w, stance, "explore \u2014 after life escape");
+      }
+      this.cool = 0;
+      return true;
     }
     /**
      * Eng 3000 / t1800–t1801: short-window insta A↔B / ABCABC on recent statuses.
@@ -5441,6 +5514,7 @@
     clearPhaseIntent() {
       this.phaseIntentGoal = "";
       this.phaseIntentPhase = "";
+      this.phaseIntentMineMonoHits = 0;
     }
     /** True while phase intent bans wander / fund-sell / pond re-entry. */
     phaseIntentLocked() {
@@ -5483,6 +5557,10 @@
       if (!this.phaseIntentLocked()) return false;
       const goal = this.phaseIntentGoal;
       this.latchThrash();
+      if (goal === "mine" && this.trwReenterBanned()) {
+        this.noteAction("phase-intent-mine-cap");
+        return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
+      }
       if (goal === "mine" || goal === "forge") {
         if (!host.hasTool("pickaxe")) {
           this.clearPhaseIntent();
@@ -5493,11 +5571,13 @@
           this.setStatus1001(host, w, stance, goal === "forge" ? "first wep mine" : "tools mine");
           this.desireXY = { x: rock.x, y: rock.y };
           if (this.walkToTile(host, rock.x, rock.y) || this.tryGather(host, w, stance, "phase-intent mine")) {
+            this.phaseIntentMineMonoHits = 0;
             this.cool = 2;
             return true;
           }
           const attempt = host.gatherAt(rock.x, rock.y);
           if (attempt.ok || /^enroute$/i.test(attempt.reason || "")) {
+            this.phaseIntentMineMonoHits = 0;
             this.cool = 2;
             return true;
           }
@@ -5505,6 +5585,25 @@
         if (goal === "forge" && this.wantSmithKit(w) && w.oreCount > 0) {
           this.clearPhaseIntent();
           return false;
+        }
+        if (goal === "mine") {
+          this.phaseIntentMineMonoHits++;
+          if (this.phaseIntentMineMonoHits >= 6) {
+            this.noteAction("phase-intent-mine-cap");
+            host.log(`AUTO: phase-intent mine CAP hits=${this.phaseIntentMineMonoHits} (3016)`);
+            this.clearPhaseIntent();
+            this.latchStuck();
+            const shop = this.mem(w, "shop");
+            if (shop) host.walkTo(shop.x, shop.y);
+            else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+            else if (w.explore) {
+              this.desireXY = { x: w.explore.x, y: w.explore.y };
+              host.walkTo(w.explore.x, w.explore.y);
+            } else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+            this.setStatus(host, w, stance, "explore \u2014 after life escape");
+            this.cool = 0;
+            return true;
+          }
         }
       }
       if (goal === "gather") {
@@ -5524,6 +5623,22 @@
           this.setStatus1001(host, w, stance, "gear farm \u2014 hunt");
           host.walkTo(foe.x, foe.y);
           this.cool = 2;
+          return true;
+        }
+      }
+      if (goal === "mine") {
+        this.phaseIntentMineMonoHits++;
+        if (this.phaseIntentMineMonoHits >= 6 || this.trwReenterBanned()) {
+          this.noteAction("phase-intent-mine-cap");
+          host.log(`AUTO: phase-intent mine CAP fallthrough hits=${this.phaseIntentMineMonoHits} (3016)`);
+          this.clearPhaseIntent();
+          if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+          else if (w.explore) {
+            this.desireXY = { x: w.explore.x, y: w.explore.y };
+            host.walkTo(w.explore.x, w.explore.y);
+          } else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+          this.setStatus(host, w, stance, "explore \u2014 after life escape");
+          this.cool = 0;
           return true;
         }
       }
@@ -5677,7 +5792,8 @@
       this.clearFundIntent("food");
       this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 768);
       this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 768);
-      this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 640);
+      if (this.trwReenterBanned()) this.rockFindBreakUntil = 0;
+      else this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 640);
       this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 640);
       this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 640);
       this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 640);
@@ -5698,7 +5814,9 @@
       if (this.lifeSpentDivertHits >= 3) {
         this.noteAction(`divert-product scrub \u2014 ${why}`);
         host.log(`AUTO: life-spent divert armed hits=${this.lifeSpentDivertHits} (3012) free brain ${why}`);
-        if (host.hasTool("pickaxe") && !w.hasMetalWeapon && !w.hasStyleWeapon) {
+        if (this.trwReenterBanned()) {
+          this.clearPhaseIntent();
+        } else if (host.hasTool("pickaxe") && !w.hasMetalWeapon && !w.hasStyleWeapon) {
           this.armPhaseIntent(this.h1001.phase === "TOOLS" ? "TOOLS" : "FIRST_WEP", "mine");
         } else if (host.hasTool("pickaxe")) {
           this.armPhaseIntent("GEAR_FARM", "hunt");
@@ -5716,7 +5834,10 @@
       if (this.lifeSpentDivertHits >= 2) {
         this.noteAction(this.lifeEscapeSpent ? `life-spent divert \u2014 armed (${why})` : `post-exhaust divert \u2014 armed (${why})`);
         host.log(`AUTO: ${this.lifeEscapeSpent ? "life-spent" : "post-exhaust"} divert armed (3012) hits=${this.lifeSpentDivertHits} ${why}`);
-        if (host.hasTool("pickaxe") && !w.hasMetalWeapon && !w.hasStyleWeapon) {
+        if (this.trwReenterBanned()) {
+          this.clearPhaseIntent();
+          this.setStatus(host, w, stance, "explore \u2014 after life escape");
+        } else if (host.hasTool("pickaxe") && !w.hasMetalWeapon && !w.hasStyleWeapon) {
           this.armPhaseIntent(this.h1001.phase === "TOOLS" ? "TOOLS" : "FIRST_WEP", "mine");
           this.setStatus(host, w, stance, "phase intent \u2014 mine");
         } else if (host.hasTool("pickaxe")) {
@@ -6083,29 +6204,45 @@
           }
           this.noteAction(trwCombat ? `divert-product scrub \u2014 seals:${pairKey}` : `divert-product scrub \u2014 insta:${pairKey}`);
           if (this.lifeSpentDivertHits >= 5 || trwCombat) {
+            if (trwCombat && this.trwReenterBanned()) {
+              return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
+            }
             if (trwCombat) this.noteAction("tools-rock-wander prison");
             if (trwCombat) {
               this.rockFindBreakUntil = 0;
-              this.noteAction("trw-prison-clear");
+              this.markTrwPrisonClear(host, pairKey);
+              if (this.trwReenterBanned()) {
+                return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
+              }
             }
-            host.log(`AUTO: scrub TRW clear-seal divert hits=${this.lifeSpentDivertHits} [${pairKey}] (3015)`);
+            host.log(`AUTO: scrub TRW clear-seal divert hits=${this.lifeSpentDivertHits} [${pairKey}] (3016)`);
             if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
               this.armPhaseIntent("GEAR_FARM", "hunt");
-            } else if (host.hasTool("pickaxe")) {
+            } else if (host.hasTool("pickaxe") && !this.trwReenterBanned()) {
               this.armPhaseIntent(this.h1001.phase === "TOOLS" ? "TOOLS" : "FIRST_WEP", "mine");
             }
             const shop2 = this.mem(w, "shop");
             const rock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
-            if (trwCombat && rock && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rock.x, rock.y) && this.lifeSpentDivertHits < 4) {
+            if (trwCombat && rock && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rock.x, rock.y) && this.lifeSpentDivertHits < 4 && this.trwPrisonClearHits < 1) {
               this.desireXY = { x: rock.x, y: rock.y };
               host.walkTo(rock.x, rock.y);
               this.setStatus(host, w, stance, "phase intent \u2014 mine");
             } else if (shop2) {
               host.walkTo(shop2.x, shop2.y);
-              this.setStatus(host, w, stance, host.hasTool("pickaxe") ? "phase intent \u2014 mine" : "explore \u2014 after life escape");
+              this.setStatus(
+                host,
+                w,
+                stance,
+                host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon) ? "phase intent \u2014 hunt" : host.hasTool("pickaxe") && this.trwPrisonClearHits < 1 ? "phase intent \u2014 mine" : "explore \u2014 after life escape"
+              );
             } else if (w.hub) {
               host.walkTo(w.hub.x, w.hub.y);
-              this.setStatus(host, w, stance, host.hasTool("pickaxe") ? "phase intent \u2014 mine" : "explore \u2014 after life escape");
+              this.setStatus(
+                host,
+                w,
+                stance,
+                host.hasTool("pickaxe") && this.trwPrisonClearHits < 1 ? "phase intent \u2014 mine" : "explore \u2014 after life escape"
+              );
             } else if (w.explore) {
               this.desireXY = { x: w.explore.x, y: w.explore.y };
               host.walkTo(w.explore.x, w.explore.y);
@@ -6187,13 +6324,35 @@
      */
     tryStatusOscBreak(host, w, stance) {
       var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G;
+      {
+        const ring = this.actions.slice(-8);
+        const leaveN = ring.filter((s) => /tools wander thrash/i.test(s)).length;
+        const prisonN = ring.filter((s) => /tools-rock-wander prison/i.test(s)).length;
+        if (leaveN >= 2 && prisonN >= 1 || leaveN >= 1 && prisonN >= 2 || this.trwReenterBanned()) {
+          if (leaveN + prisonN >= 2 || this.trwReenterBanned()) {
+            this.trwReenterBan = true;
+            if (leaveN >= 1 && prisonN >= 1) {
+              return this.durableTrwBanWalk(host, w, stance, "trw-wander-aba");
+            }
+            if (this.trwReenterBanned() && (leaveN + prisonN >= 1 || /tools-rock-wander|tools wander thrash|phase intent — mine/i.test(this.lastStatus || ""))) {
+              return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
+            }
+          }
+        }
+      }
       if (this.tryInstaOscBreak(host, w, stance)) return true;
       if (this.tryPhaseIntentHold(host, w, stance)) return true;
       if (this.isLifeEscapeSpent() && (this.statusFamilyHits(/stuck rethink/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/emerg hub|emerg-tools/) >= 3 || this.statusFamilyHits(/tools explore|FIRST_WEP hold/) >= 4 || this.statusFamilyHits(/tools mine|tools find rock/) >= 4 || this.statusFamilyHits(/lethal kite/) >= 5 || this.statusFamilyHits(/enroute pond|food fish|find pond/) >= 4 || this.statusFamilyHits(/food sell ore|food find shop/) >= 4 || this.statusFamilyHits(/tools fund hatchet|tools fund /) >= 4 || this.statusOscPair(/enroute pond|find pond/, /food fish/) || this.statusOscPair(/tools mine|tools find rock/, /tools fund|lethal kite/) || this.statusOscPair(/food sell ore|sell ore/, /food find shop|find shop/) || this.statusFamilyHits(/tools wander thrash|rock find thrash|rock thrash|rock osc/) >= 3 || this.statusFamilyHits(/tools explore|tools find rock|tools wander/) >= 5 || this.statusOscPair(/tools explore|tools wander/, /tools find rock|rock thrash|rock osc/) || this.statusOscPair(/approach kite|mob kite|lethal kite/, /mob engage|mob kite outlook|lethal cover|emerg hub/) || this.statusFamilyHits(/camp-chest|hatchet\/chest|hatchet osc|camp-chain osc/) >= 3 || this.statusOscPair(/camp-chest|hatchet\/chest|open chest/, /hatchet osc|tools hatchet|kit hatchet|camp-chain/))) {
+        if (this.trwReenterBanned()) {
+          return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
+        }
         this.noteAction("tools-rock-wander prison");
         if (this.lifeSpentDivertHits >= 2) {
           this.rockFindBreakUntil = 0;
-          this.noteAction("trw-prison-clear");
+          this.markTrwPrisonClear(host, "post-ex-mono");
+          if (this.trwReenterBanned()) {
+            return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
+          }
         }
         return this.postExhaustDurableDivert(host, w, stance, "post-ex-mono");
       }
@@ -8497,16 +8656,32 @@
       }
       const stickyLeave = this.stuckWanderBreakActive() || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.hatchetChestBreakActive();
       if (this.isLifeEscapeSpent() && this.rockFindBreakActive() && this.lifeSpentDivertHits >= 2) {
-        this.noteAction("tools-rock-wander prison");
-        if (this.lifeSpentDivertHits >= 4) {
-          this.rockFindBreakUntil = 0;
-          this.noteAction("trw-prison-clear");
+        if (this.trwReenterBanned()) {
+          return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
         }
-        if (this.phaseIntentLocked()) return false;
-        if (host.hasTool("pickaxe") && !w.hasMetalWeapon && !w.hasStyleWeapon) {
-          this.armPhaseIntent(this.h1001.phase === "TOOLS" ? "TOOLS" : "FIRST_WEP", "mine");
-        } else if (host.hasTool("pickaxe")) {
+        this.noteAction("tools-rock-wander prison");
+        if (this.lifeSpentDivertHits >= 4 || this.trwPrisonClearHits >= 1) {
+          this.rockFindBreakUntil = 0;
+          this.markTrwPrisonClear(host, "find-rock-yield");
+          if (this.trwReenterBanned()) {
+            return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
+          }
+        }
+        if (this.phaseIntentLocked() && this.phaseIntentGoal !== "mine") return false;
+        if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
           this.armPhaseIntent("GEAR_FARM", "hunt");
+        } else if (host.hasTool("pickaxe") && this.trwPrisonClearHits < 1) {
+          this.armPhaseIntent(this.h1001.phase === "TOOLS" ? "TOOLS" : "FIRST_WEP", "mine");
+        } else {
+          this.clearPhaseIntent();
+          if (w.explore) {
+            this.desireXY = { x: w.explore.x, y: w.explore.y };
+            host.walkTo(w.explore.x, w.explore.y);
+          } else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+          else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+          this.setStatus(host, w, stance, "explore \u2014 after life escape");
+          this.cool = 0;
+          return true;
         }
         return false;
       }
@@ -9923,6 +10098,12 @@
             this.stickyPhaseLeaveArmed = true;
           }
           this.tryStickyProgressLeave(host, w, stance, `wanderSpin re-sticky#${this.stickyLeaveRethinks}`);
+          return;
+        }
+        const recentPrison = this.actions.slice(-8).some((s) => /tools-rock-wander prison|trw-prison-clear/i.test(s));
+        if (recentPrison || this.trwReenterBanned()) {
+          this.trwReenterBan = true;
+          this.durableTrwBanWalk(host, w, stance, "trw-wander-aba");
           return;
         }
         this.noteAction("tools wander thrash \u2014 leave");
