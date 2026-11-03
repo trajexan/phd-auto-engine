@@ -1,4 +1,4 @@
-/* phd auto-engine 3003 — pull via GET /api/auto-engine */
+/* phd auto-engine 3004 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3003";
+  var AUTO_ENGINE_VERSION = "3004";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2612,7 +2612,7 @@
           this.lastFoodFarm = null;
         }
         if (this.pondSellPrisonLatched) {
-          if (this.pondBreakCapHits >= 3 || this.instaOscLeaveHits >= 3) {
+          if (this.pondBreakCapHits >= 2 || this.instaOscLeaveHits >= 2 || this.oscCoolDivertActive()) {
             return this.coolHoldOscDivert(host, w, stance, `${labelPrefix}-sell-latch-hold`);
           }
           return this.escalatePondBreakPrison(host, w, stance, `${labelPrefix}-sell-latch`);
@@ -3600,13 +3600,13 @@
           this.stuckRecentStatus = this.stuckRecentStatus.filter(
             (s) => !/sticky progress|sticky leave|wanderSpin|lethal|stuck watchdog|TOOLS sticky|explore-kite|phase cool/i.test(s)
           );
+          if (this.oscCoolDivertActive()) {
+            return this.coolHoldOscDivert(host, w, stance, "tools-sticky-explore");
+          }
           if (wasArmed) {
             host.log("AUTO: TOOLS sticky explore mono \u2014 quiet yield (2054)");
             this.cool = 8;
             return false;
-          }
-          if (this.oscCoolDivertActive()) {
-            return this.coolHoldOscDivert(host, w, stance, "tools-sticky-explore");
           }
           this.noteAction("TOOLS sticky explore mono \u2014 phase leave");
           host.log("AUTO: TOOLS sticky explore mono \u2014 phase leave (2071)");
@@ -3645,13 +3645,13 @@
           this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 768);
           const holdWasArmed = this.stickyPhaseLeaveArmed || this.stickyLeaveRethinks >= 1;
           this.stickyPhaseLeaveArmed = true;
+          if (this.oscCoolDivertActive()) {
+            return this.coolHoldOscDivert(host, w, stance, "tools-sticky-hold");
+          }
           if (holdWasArmed) {
             host.log("AUTO: TOOLS sticky \u2014 quiet hold phase yield (2054)");
             this.cool = 8;
             return false;
-          }
-          if (this.oscCoolDivertActive()) {
-            return this.coolHoldOscDivert(host, w, stance, "tools-sticky-hold");
           }
           this.noteAction("TOOLS sticky \u2014 break hold phase");
           host.log("AUTO: TOOLS sticky \u2014 exploreKite/emerg hold phase leave (2071)");
@@ -5294,23 +5294,27 @@
     detectInstaOsc() {
       return this.detectInstaOscFrom(this.stuckRecentStatus) || this.detectInstaOscFrom(this.actions.slice(-8));
     }
-    /** Eng 3003: already past leave/release → cool divert latched (insta or pond-cap). */
+    /** Eng 3003/3004: cool divert latched (insta/pond-cap hits OR last cool status). */
     oscCoolDivertActive() {
-      return this.instaOscLeaveHits >= 2 || this.pondBreakCapHits >= 3;
+      if (this.instaOscLeaveHits >= 2 || this.pondBreakCapHits >= 3) return true;
+      if (/pond-cap — cool|insta osc — cool/i.test(this.lastStatus || "")) return true;
+      if (this.pondSellPrisonLatched && this.pondBreakCapHits >= 2) return true;
+      return false;
     }
     /**
-     * Eng 3003 / R63: durable cool-hold walk after osc cool divert — no new timer,
-     * no re-escalate / no oscillating status spam (pond-sell prison / phase ABCD).
+     * Eng 3003 / R63 + eng 3004 / R64: durable cool-hold walk after osc cool divert —
+     * no new timer, no re-escalate / no oscillating status spam (pond-sell prison /
+     * phase ABCD / tools wander / tools fund sell after cool).
      */
     coolHoldOscDivert(host, w, stance, why) {
       var _a, _b;
       this.latchThrash();
       this.armBreakerExploreCool(640);
       this.stuckRecentStatus = this.stuckRecentStatus.filter(
-        (s) => !/food sell|pond break|food pond|emerg pond|pond-sell|food mine break|phase cool|FIRST_WEP hold|wanderSpin|tools wander|insta osc|pond-cap|pond-break-cap/i.test(s)
+        (s) => !/food sell|pond break|food pond|emerg pond|pond-sell|food mine break|phase cool|FIRST_WEP hold|wanderSpin|tools wander|tools fund sell|tools mine|insta osc|pond-cap|pond-break-cap/i.test(s)
       );
       this.actions = this.actions.filter(
-        (s) => !/food-sell\/pond-break — prison|pond-cap —|insta osc|wanderSpin hard leave|phase cool|FIRST_WEP hold — wander/i.test(s)
+        (s) => !/food-sell\/pond-break — prison|pond-cap —|insta osc|wanderSpin hard leave|phase cool|FIRST_WEP hold — wander|tools wander|tools fund sell/i.test(s)
       );
       this.stickyPhaseLeaveArmed = true;
       this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
@@ -5326,7 +5330,7 @@
       }
       if (!/pond-cap — cool|insta osc — cool/i.test(this.lastStatus || "")) {
         this.noteAction(`osc cool hold \u2014 ${why}`);
-        host.log(`AUTO: osc cool hold divert (3003) ${why}`);
+        host.log(`AUTO: osc cool hold divert (3004) ${why}`);
         this.setStatus(host, w, stance, "insta osc \u2014 cool");
       }
       this.cool = 12;
@@ -5453,6 +5457,9 @@
     tryStatusOscBreak(host, w, stance) {
       var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G;
       if (this.tryInstaOscBreak(host, w, stance)) return true;
+      if (this.oscCoolDivertActive() && (this.statusFamilyHits(/tools wander|tools explore/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/phase cool|FIRST_WEP hold|wanderSpin hard leave/) >= 3 || this.statusFamilyHits(/food-sell\/pond-break — prison|pond-cap — cool/) >= 1)) {
+        return this.coolHoldOscDivert(host, w, stance, "post-cool-theater");
+      }
       const st = (this.lastStatus || "").toLowerCase();
       const pondOsc = this.statusOscPair(/enroute pond|food last farm|round-trip pond/, /food fish|util fish|(^|\s)fish(\s|$)/) || this.statusOscPair(/find pond/, /enroute pond|food fish|remembered door|door through|door open/) || this.statusOscPair(/find shop|sell ore|sell trim/, /door through|door open|remembered door/) || /find pond|find shop/i.test(st) && this.stuckRecentTiles.length >= 6 || /find pond|find shop|door through|door open|sell trim/i.test(st) && this.doorOscStreak >= 2 || this.findPondMonoStreak >= 8;
       if (pondOsc && !this.pondBreakActive()) {
@@ -5576,7 +5583,7 @@
         this.latchThrash();
         this.latchClash();
         this.pondSellPrisonLatched = true;
-        if (this.pondBreakCapHits >= 3 || this.instaOscLeaveHits >= 3) {
+        if (this.pondBreakCapHits >= 2 || this.instaOscLeaveHits >= 2 || this.oscCoolDivertActive()) {
           return this.coolHoldOscDivert(host, w, stance, "pond-sell-latched");
         }
         this.armPondBreakSticky(2048, true);
@@ -6089,13 +6096,13 @@
           );
           if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
           else this.h1001.phase = "FIRST_WEP";
+          if (this.oscCoolDivertActive()) {
+            return this.coolHoldOscDivert(host, w, stance, "sticky-phase-divert");
+          }
           if (oscWasArmed) {
             host.log("AUTO: status osc sticky \u2014 quiet phase divert (2054)");
             this.cool = 8;
             return true;
-          }
-          if (this.oscCoolDivertActive()) {
-            return this.coolHoldOscDivert(host, w, stance, "sticky-phase-divert");
           }
           this.noteAction("status osc sticky \u2014 phase divert");
           host.log("AUTO: status osc sticky \u2014 phase divert no re-arm (2071)");
@@ -6399,7 +6406,7 @@
      */
     escalatePondBreakPrison(host, w, stance, why) {
       this.latchThrash();
-      if (this.pondBreakCapHits >= 3) {
+      if (this.pondBreakCapHits >= 3 || this.pondSellPrisonLatched && this.pondBreakCapHits >= 2) {
         return this.coolHoldOscDivert(host, w, stance, `pond-cap-hold:${why}`);
       }
       this.pondBreakCapHits++;
@@ -7747,6 +7754,9 @@
       }
       const stickyLeave = this.stuckWanderBreakActive() || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.hatchetChestBreakActive();
       const label = this.stickyExploreBlockActive() ? "phase cool" : stickyLeave ? "sticky progress \u2014 explore" : breaking ? "tools wander" : "tools find rock";
+      if (this.oscCoolDivertActive() && /tools wander|phase cool|sticky progress/i.test(label)) {
+        return this.coolHoldOscDivert(host, w, stance, "tools-label-cool-hold");
+      }
       if (stickyLeave && !this.stickyExploreBlockActive()) {
         const mineMono = this.statusFamilyHits(/sticky progress — mine|sticky progress mine/) >= 3 || this.rockFindBreakActive();
         const rock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
