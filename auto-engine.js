@@ -1,4 +1,4 @@
-/* phd auto-engine 3104 — pull via GET /api/auto-engine */
+/* phd auto-engine 3105 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3104";
+  var AUTO_ENGINE_VERSION = "3105";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2121,6 +2121,9 @@
           return this.durableEscalateLeaveExit(host, w, stance, "post-exit-quiet");
         }
         return this.finishQuietHoldProgress(host, w, stance, "post-exit-quiet");
+      }
+      if (this.postBreakAllowNormal()) {
+        return this.postBreakFreeBrain(host, w, stance, "explore-fallback");
       }
       if (this.h1001.phase === "TOOLS" && this.beginnerToolsIncomplete(host)) {
         this.setStatus1001(
@@ -4328,6 +4331,9 @@
           this.cool = 10;
           return true;
         }
+        if (this.postBreakAllowNormal()) {
+          return this.postBreakFreeBrain(host, w, stance, "fw-incomplete:allowNormal");
+        }
         this.h1001.phase = "TOOLS";
         return false;
       }
@@ -5818,7 +5824,7 @@
       this.quietBreakEscalateHits = 0;
       this.quietEscalateLeaveHits = 0;
       this.clearPhaseIntent();
-      host.log(`AUTO: early-osc \u2192 postBreak (3104) ${kind}`);
+      host.log(`AUTO: early-osc \u2192 postBreak (3105) ${kind}`);
       return this.postBreakFreeBrain(host, w, stance, `early-osc:${kind}`);
     }
     /**
@@ -6122,7 +6128,7 @@
         if (!this.actions.some((s) => /^postBreak —/i.test(s))) {
           this.noteAction(`postBreak \u2014 ${why}`);
         }
-        host.log(`AUTO: postBreak ENTER (3104) ${why}`);
+        host.log(`AUTO: postBreak ENTER (3105) ${why}`);
       }
     }
     /** Compat shim — all spent marks now enter postBreak. */
@@ -6182,7 +6188,7 @@
       this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 512);
       if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
         this.noteAction(`postBreak free brain \u2014 ${why}`);
-        host.log(`AUTO: postBreak free brain (3104) ${why}`);
+        host.log(`AUTO: postBreak free brain (3105) ${why}`);
       }
       if (host.hasTool("pickaxe")) {
         this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
@@ -6200,7 +6206,7 @@
           this.postBreakFreeMineKey = "";
           this.postBreakFreeMineHits = 0;
           this.postBreakFreeMineExhausted = true;
-          host.log(`AUTO: postBreak free mine exhaust \u2014 flap (${mk}) (3104)`);
+          host.log(`AUTO: postBreak free mine exhaust \u2014 flap (${mk}) (3105)`);
           this.noteAction("postBreak free mine exhaust");
         } else {
           if (this.walkToTile(host, rockFb.x, rockFb.y)) {
@@ -6215,7 +6221,7 @@
           this.postBreakFreeMineKey = "";
           this.postBreakFreeMineHits = 0;
           this.postBreakFreeMineExhausted = true;
-          host.log(`AUTO: postBreak free mine exhaust \u2014 gather-fail (${mk}) (3104)`);
+          host.log(`AUTO: postBreak free mine exhaust \u2014 gather-fail (${mk}) (3105)`);
           this.noteAction("postBreak free mine exhaust");
         }
       }
@@ -6223,12 +6229,17 @@
         this.desireXY = { x: w.explore.x, y: w.explore.y };
         host.walkTo(w.explore.x, w.explore.y);
         this.stuckTicks = 0;
-      } else if (w.wander) {
+        return true;
+      }
+      if (w.wander) {
         host.walkTo(w.wander.x, w.wander.y);
         this.stuckTicks = 0;
-      } else if (w.hub) {
+        return true;
+      }
+      if (w.hub) {
         host.walkTo(w.hub.x, w.hub.y);
         this.stuckTicks = 0;
+        return true;
       }
       return false;
     }
