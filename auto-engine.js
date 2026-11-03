@@ -1,4 +1,4 @@
-/* phd auto-engine 3025 — pull via GET /api/auto-engine */
+/* phd auto-engine 3026 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3025";
+  var AUTO_ENGINE_VERSION = "3026";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -5827,6 +5827,22 @@
         this.noteAction(`early osc divert \u2014 ${kind}`);
         host.log(`AUTO: early osc divert [${pairKey}] ${kind} (3012) \u2014 before leave/cool`);
       }
+      const toolsTheater = /tools-mine|tools mine|find-rock|hold-wander|bootstrap|FIRST_WEP hold|phase cool|quiet hold|tools-rock|fund-sell|tools fund/i.test(pairKey) || this.statusFamilyHits(/tools mine|tools find rock|FIRST_WEP hold|quiet hold — tools|quiet hold — bootstrap/) >= 2;
+      if (host.hasTool("pickaxe") && toolsTheater) {
+        this.markLifeEscapeSpent(host, `early-osc:${kind}`);
+        this.noteAleFwHoldBan(host, `early-osc:${kind}`);
+        this.quietBootstrapEmitHits = 0;
+        this.quietBootstrapBreakUntil = Math.min(this.quietBootstrapBreakUntil, this.runTicks);
+        this.quietBreakEmitHits = 0;
+        this.quietBreakEscalateUntil = Math.min(this.quietBreakEscalateUntil, this.runTicks);
+        this.quietBreakEscalateHits = 0;
+        this.quietEscalateLeaveHits = 0;
+        this.clearPhaseIntent();
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1280);
+        this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1024);
+        this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
+        host.log(`AUTO: early-osc tools theater SPENT+BAN (3026) ${kind}`);
+      }
       this.setStatus(
         host,
         w,
@@ -8292,6 +8308,9 @@
       } else {
         this.h1001.phase = "TOOLS";
       }
+      if (this.aleFwTheaterBanned()) {
+        return this.aleSpentFwHoldDivert(host, w, stance, `durable-done:${why}`);
+      }
       this.setStatus1001(host, w, stance, "FIRST_WEP hold \u2014 wander");
       if (this.beginnerToolsIncomplete(host) && this.runTicks >= this.kitAcquireBlockUntil) {
         const anvil = this.mem(w, "anvil");
@@ -9004,6 +9023,9 @@
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/stuck rethink|sticky leave|sticky progress|tools wander|tools explore|lethal|explore-kite|gear-explore-kite|kite cool exit|first wep|FIRST_WEP hold/i.test(s)
         );
+        if (this.aleFwTheaterBanned()) {
+          return this.aleSpentFwHoldDivert(host, w, stance, `quiet-sticky:${why}`);
+        }
         this.noteAction(`quiet sticky wander (${why})`);
         host.log(`AUTO: quiet sticky \u2014 wander not explore (2072) ${why}`);
         this.setStatus(host, w, stance, "FIRST_WEP hold \u2014 wander");
@@ -10489,6 +10511,10 @@
           if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
           else this.h1001.phase = "FIRST_WEP";
           if (this.kiteCoolExitQuietActive()) {
+            if (this.aleFwTheaterBanned()) {
+              this.aleSpentFwHoldDivert(host, w, stance, "wanderspin-quiet");
+              return;
+            }
             this.noteAction("wanderSpin \u2014 cool-exit ban wander");
             host.log("AUTO: wanderSpin \u2014 plain wander cool-exit ban (2070)");
             if (w.wander) host.walkTo(w.wander.x, w.wander.y);
@@ -10652,6 +10678,10 @@
             (s) => !/sticky|phase cool|FIRST_WEP hold|first wep|flat thrash|flat rethink|kite cool exit grace/i.test(s)
           );
           if (this.kiteCoolExitQuietActive()) {
+            if (this.aleFwTheaterBanned()) {
+              this.aleSpentFwHoldDivert(host, w, stance, "flat-thrash-quiet");
+              return;
+            }
             this.noteAction("FIRST_WEP hold \u2014 wander");
             host.log("AUTO: flat thrash under quiet \u2014 hold no cool re-arm (2073)");
             this.setStatus(host, w, stance, "FIRST_WEP hold \u2014 wander");
