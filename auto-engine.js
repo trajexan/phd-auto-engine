@@ -1,4 +1,4 @@
-/* phd auto-engine 3007 — pull via GET /api/auto-engine */
+/* phd auto-engine 3008 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3007";
+  var AUTO_ENGINE_VERSION = "3008";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1465,6 +1465,14 @@
       __publicField(this, "instaOscLeaveHits", 0);
       /** Eng 3001 / R61: pond-break-cap escalate emits this cool — ≥2 → release pondBreak. */
       __publicField(this, "pondBreakCapHits", 0);
+      /**
+       * Eng 3008 / R68: after post-release cool exhaust yield, never re-enter
+       * coolHoldPostReleaseWalk theater this life (exhaust note was matching
+       * /post-release cool/ → forever exhaust). Still cool|leave|release (t1800).
+       */
+      __publicField(this, "postReleaseCoolExhausted", false);
+      /** Eng 3008: coolHoldPostReleaseWalk entries this life — ≥3 → exhaust even if notes gated. */
+      __publicField(this, "postReleaseCoolWalkHits", 0);
       /** Eng 2049 / R19: rethinks while sticky leave already active → escalate to progress. */
       __publicField(this, "stickyLeaveRethinks", 0);
       /**
@@ -1652,6 +1660,8 @@
         this.instaOscPairKey = "";
         this.instaOscLeaveHits = 0;
         this.pondBreakCapHits = 0;
+        this.postReleaseCoolExhausted = false;
+        this.postReleaseCoolWalkHits = 0;
         this.stickyLeaveRethinks = 0;
         this.stickyExploreBlockUntil = 0;
         this.stickyPhaseLeaveArmed = false;
@@ -5312,6 +5322,11 @@
      */
     coolHoldOscDivert(host, w, stance, why) {
       var _a, _b;
+      if (this.postReleaseCoolExhausted) {
+        this.armBreakerExploreCool(768);
+        this.cool = 0;
+        return false;
+      }
       const holdHits = this.statusFamilyHits(
         /osc cool hold|tools-sticky-hold|tools-label-cool-hold|post-cool-theater|pond-sell-latched|sell-latch-hold|tools-sticky-explore/
       );
@@ -5343,7 +5358,7 @@
       }
       if (!/pond-cap — cool|insta osc — cool/i.test(this.lastStatus || "")) {
         this.noteAction(`osc cool hold \u2014 ${why}`);
-        host.log(`AUTO: osc cool hold divert (3007) ${why}`);
+        host.log(`AUTO: osc cool hold divert (3008) ${why}`);
         this.setStatus(host, w, stance, "insta osc \u2014 cool");
       }
       this.cool = 12;
@@ -5357,6 +5372,11 @@
      */
     coolHoldEscalateLeave(host, w, stance, why) {
       var _a, _b;
+      if (this.postReleaseCoolExhausted) {
+        this.armBreakerExploreCool(768);
+        this.cool = 0;
+        return false;
+      }
       if (this.durableLeaveHierarchyReleased || this.postHierarchyReleaseEscapeCount >= 1 || this.statusFamilyHits(/osc cool — leave→release|insta osc — release/) >= 1) {
         return this.coolHoldPostReleaseWalk(host, w, stance, why);
       }
@@ -5394,7 +5414,7 @@
           this.markDurableLeaveHierarchyReleased(host, `cool-hold-leave ${why}`);
         }
         this.noteAction("osc cool \u2014 leave\u2192release");
-        host.log(`AUTO: osc cool hold \u2192 leave/release (3007) ${why}`);
+        host.log(`AUTO: osc cool hold \u2192 leave/release (3008) ${why}`);
         this.setStatus(host, w, stance, "insta osc \u2014 release");
         this.cool = 10;
         return true;
@@ -5402,30 +5422,39 @@
       this.instaOscLeaveArmed = true;
       this.instaOscLeaveHits = Math.max(this.instaOscLeaveHits, 1);
       this.noteAction("osc cool \u2014 leave");
-      host.log(`AUTO: osc cool hold \u2192 leave (3007) ${why}`);
+      host.log(`AUTO: osc cool hold \u2192 leave (3008) ${why}`);
       this.setStatus(host, w, stance, "insta osc \u2014 leave");
       this.cool = 12;
       return true;
     }
     /**
-     * Eng 3006 / R66 + eng 3007 / R67: after release spent — productive cool walk.
-     * 3007: prison hits≥3 → exhaust yield (cool=0, return false) so brain resumes.
+     * Eng 3006 / R66 + eng 3007 / R67 + eng 3008 / R68: after release spent —
+     * productive cool walk, then exhaust yield once. 3008: life latch so exhaust
+     * cannot re-enter; walkHits count every entry (notes were gated by lastStatus).
      * No leave / leave→release / post-RELEASE quiet re-note. Still cool|leave|release (t1800).
      */
     postReleaseCoolPrisonHits() {
       const statusHits = this.statusFamilyHits(
-        /post-release cool|tools-label-cool-hold|tools-sticky-hold|insta osc — cool/
+        /tools-label-cool-hold|tools-sticky-hold|insta osc — cool/
       );
       let actionHits = 0;
       for (const s of this.actions) {
+        if (/exhaust/i.test(s)) continue;
         if (/post-release cool|tools-label-cool-hold|tools-sticky-hold/i.test(s)) actionHits++;
       }
       return Math.max(statusHits, actionHits);
     }
     coolHoldPostReleaseWalk(host, w, stance, why) {
       var _a, _b, _c, _d;
+      if (this.postReleaseCoolExhausted) {
+        this.armBreakerExploreCool(768);
+        this.cool = 0;
+        return false;
+      }
+      this.postReleaseCoolWalkHits += 1;
       const prisonHits = this.postReleaseCoolPrisonHits();
-      if (prisonHits >= 3) {
+      if (this.postReleaseCoolWalkHits >= 3 || prisonHits >= 3) {
+        this.postReleaseCoolExhausted = true;
         this.latchThrash();
         this.latchClash();
         this.clearFundIntent("tool");
@@ -5437,13 +5466,17 @@
         this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 640);
         this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 640);
         this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 640);
+        this.armBreakerExploreCool(1024);
         if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
           this.h1001.phase = "GEAR_FARM";
         } else if (host.hasTool("pickaxe")) {
           this.h1001.phase = "FIRST_WEP";
         }
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
-          (s) => !/osc cool — leave|osc cool hold|leave→release|quiet hold — post RELEASE|post-RELEASE escape|pond-cap — release|tools-sticky|tools mine|tools find rock|tools wander|insta osc — release|insta osc — cool|post-release cool/i.test(s)
+          (s) => !/osc cool — leave|osc cool hold|leave→release|quiet hold — post RELEASE|post-RELEASE escape|pond-cap — release|tools-sticky|tools mine|tools find rock|tools wander|insta osc — release|insta osc — cool|post-release cool|FIRST_WEP hold|phase cool|post-cool-theater/i.test(s)
+        );
+        this.actions = this.actions.filter(
+          (s) => !/post-release cool|osc cool — leave|osc cool hold|insta osc —|tools-sticky|tools-label-cool|post-cool-theater|FIRST_WEP hold — wander|phase cool/i.test(s)
         );
         const shop2 = this.mem(w, "shop");
         const chest2 = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
@@ -5457,9 +5490,9 @@
         }
         if (!/post-release cool — exhaust/i.test(this.actions[this.actions.length - 1] || "")) {
           this.noteAction("post-release cool \u2014 exhaust yield");
-          host.log(`AUTO: post-release cool exhaust \u2192 yield (3007) ${why}`);
+          host.log(`AUTO: post-release cool exhaust \u2192 yield (3008) ${why}`);
         }
-        this.setStatus(host, w, stance, host.hasTool("pickaxe") ? "FIRST_WEP hold \u2014 wander" : "phase cool");
+        this.setStatus(host, w, stance, host.hasTool("pickaxe") ? "gear farm \u2014 after cool exhaust" : "explore \u2014 after cool exhaust");
         this.cool = 0;
         return false;
       }
@@ -5497,7 +5530,7 @@
       }
       if (!/insta osc — cool|post-release cool/i.test(this.lastStatus || "")) {
         this.noteAction(`post-release cool \u2014 ${why}`);
-        host.log(`AUTO: post-release cool walk (3007) ${why}`);
+        host.log(`AUTO: post-release cool walk (3008) ${why}`);
         this.setStatus(host, w, stance, "insta osc \u2014 cool");
       }
       this.cool = 14;
@@ -6612,12 +6645,12 @@
         }
         if (this.pondBreakCapHits >= 3) {
           this.noteAction(`pond-cap \u2014 cool (${why})`);
-          host.log(`AUTO: pond-cap \u2014 cool divert (3007) ${why}`);
+          host.log(`AUTO: pond-cap \u2014 cool divert (3008) ${why}`);
           this.setStatus(host, w, stance, "pond-cap \u2014 cool");
           this.cool = 16;
         } else {
           this.noteAction(`pond-cap \u2014 release (${why})`);
-          host.log(`AUTO: pond-cap \u2014 release (3007) ${why}`);
+          host.log(`AUTO: pond-cap \u2014 release (3008) ${why}`);
           this.setStatus(host, w, stance, "pond-cap \u2014 release");
           this.cool = 14;
         }
