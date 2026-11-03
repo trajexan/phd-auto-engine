@@ -1,4 +1,4 @@
-/* phd auto-engine 3101 — pull via GET /api/auto-engine */
+/* phd auto-engine 3102 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3101";
+  var AUTO_ENGINE_VERSION = "3102";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -3688,6 +3688,12 @@
       this.refreshPhaseIntent(host, w, stance);
       if (this.phaseIntentLocked() && this.tryPhaseIntentHold(host, w, stance)) return true;
       if (this.aleFwTheaterBanned() && host.hasTool("pickaxe")) {
+        if (this.postBreakAllowNormal()) {
+          this.clearFundIntent("tool");
+          this.clearPhaseIntent();
+          this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
+          return false;
+        }
         this.clearFundIntent("tool");
         this.clearPhaseIntent();
         this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1280);
@@ -3953,7 +3959,7 @@
         if (this.trwReenterBanned()) {
           return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
         }
-        if (this.aleFwTheaterBanned()) {
+        if (this.aleFwTheaterBanned() && !this.postBreakAllowNormal()) {
           return this.aleSpentToolsMineDivert(host, w, stance, "tools-mine-live");
         }
         if (this.oscCoolDivertActive() && this.statusFamilyHits(/tools mine|tools find rock/) >= 3) {
@@ -4040,7 +4046,7 @@
         if (this.tryFundBeginnerToolFarm(host, w, stance, tree, pond)) return true;
         const live = (_f = (_e = w.seen) == null ? void 0 : _e.rock) != null ? _f : null;
         if (live && host.hasTool("pickaxe") && !this.rockFindBreakActive() && !this.isGatherTileBlocked(live.x, live.y)) {
-          if (this.aleFwTheaterBanned()) {
+          if (this.aleFwTheaterBanned() && !this.postBreakAllowNormal()) {
             return this.aleSpentToolsMineDivert(host, w, stance, "tools-mine-fund");
           }
           this.setStatus1001(host, w, stance, "tools mine");
@@ -4145,7 +4151,7 @@
       return false;
     }
     phaseFirstWep1001(host, w, stance) {
-      var _a, _b, _c, _d;
+      var _a, _b, _c, _d, _e, _f;
       if (w.hasMetalWeapon || w.hasStyleWeapon) {
         this.h1001.phase = "GEAR_FARM";
         return false;
@@ -4153,15 +4159,32 @@
       if (this.beginnerToolsIncomplete(host)) {
         if (host.hasTool("pickaxe") && (this.stuckWanderBreakActive() || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.hatchetChestBreakActive() || this.stickyExploreBlockActive())) {
           if (this.stickyExploreBlockActive() || this.stickyPhaseLeaveArmed) {
-            if (this.aleFwTheaterBanned()) {
+            if (this.aleFwTheaterBanned() && !this.postBreakAllowNormal()) {
               return this.aleSpentFwHoldDivert(host, w, stance, "first-wep-hold-sticky");
+            }
+            if (this.postBreakAllowNormal()) {
+              const rockPb = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
+              if (rockPb && host.hasTool("pickaxe") && host.hasTool("hatchet") && !this.isGatherTileBlocked(rockPb.x, rockPb.y)) {
+                if (this.walkToTile(host, rockPb.x, rockPb.y)) {
+                  this.stuckTicks = 0;
+                  this.cool = 8;
+                  return true;
+                }
+                if (this.tryGather(host, w, stance, "postBreak first wep mine")) {
+                  this.stuckTicks = 0;
+                  this.cool = 6;
+                  return true;
+                }
+                this.blockGatherTile(rockPb.x, rockPb.y);
+              }
+              return this.postBreakFreeBrain(host, w, stance, "fw-hold:post-productive");
             }
             if (!this.kiteCoolExitQuietActive()) {
               this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 640);
               this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 640);
             }
             this.stickyPhaseLeaveArmed = true;
-            const rock2 = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
+            const rock2 = (_d = (_c = w.seen) == null ? void 0 : _c.rock) != null ? _d : this.mem(w, "rock");
             const canHoldMine = !!rock2 && host.hasTool("pickaxe") && host.hasTool("hatchet") && !this.isGatherTileBlocked(rock2.x, rock2.y) && !this.kiteCoolMineBanActive();
             if (canHoldMine && rock2) {
               const mk = `${rock2.x},${rock2.y}`;
@@ -4231,7 +4254,7 @@
         }
         if (this.stickyExploreBlockActive() && host.hasTool("pickaxe")) {
           this.stickyPhaseLeaveArmed = true;
-          const rock2 = (_d = (_c = w.seen) == null ? void 0 : _c.rock) != null ? _d : this.mem(w, "rock");
+          const rock2 = (_f = (_e = w.seen) == null ? void 0 : _e.rock) != null ? _f : this.mem(w, "rock");
           if (rock2 && host.hasTool("hatchet") && !this.isGatherTileBlocked(rock2.x, rock2.y) && !this.kiteCoolMineBanActive()) {
             const mk = `${rock2.x},${rock2.y}`;
             if (mk === this.kiteCoolMineKey) this.kiteCoolMineHits++;
@@ -5772,7 +5795,7 @@
       this.quietBreakEscalateHits = 0;
       this.quietEscalateLeaveHits = 0;
       this.clearPhaseIntent();
-      host.log(`AUTO: early-osc \u2192 postBreak (3101) ${kind}`);
+      host.log(`AUTO: early-osc \u2192 postBreak (3102) ${kind}`);
       return this.postBreakFreeBrain(host, w, stance, `early-osc:${kind}`);
     }
     /**
@@ -5835,7 +5858,7 @@
         this.noteAction("phase-intent-mine-cap");
         return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
       }
-      if (goal === "mine" && this.aleFwTheaterBanned()) {
+      if (goal === "mine" && this.aleFwTheaterBanned() && !this.postBreakAllowNormal()) {
         this.noteAleToolsBan(host, "phase-intent-mine");
         this.clearPhaseIntent();
         this.phaseIntentMineMonoHits = 0;
@@ -6076,7 +6099,7 @@
         if (!this.actions.some((s) => /^postBreak —/i.test(s))) {
           this.noteAction(`postBreak \u2014 ${why}`);
         }
-        host.log(`AUTO: postBreak ENTER (3101) ${why}`);
+        host.log(`AUTO: postBreak ENTER (3102) ${why}`);
       }
     }
     /** Compat shim — all spent marks now enter postBreak. */
@@ -6086,6 +6109,13 @@
     /** Eng 3100: postBreak (or legacy spent/exhaust) latched this life. */
     isPostBreak() {
       return this.postBreak || this.lifeEscapeSpent || this.postReleaseCoolExhausted;
+    }
+    /**
+     * Eng 3102: postBreak + one productive done → free brain may take normal
+     * TOOLS/FIRST_WEP/GEAR actions. Theater bans must YIELD (not re-divert).
+     */
+    postBreakAllowNormal() {
+      return this.isPostBreak() && this.postReleaseQuietDone;
     }
     /** Eng 3010 compat. */
     isLifeEscapeSpent() {
@@ -6097,6 +6127,7 @@
      * Returns true only while issuing the one productive action.
      */
     postBreakFreeBrain(host, w, stance, why) {
+      var _a, _b;
       this.enterPostBreak(host, `free:${why}`);
       this.quietBootstrapEmitHits = 0;
       this.quietBootstrapBreakUntil = Math.min(this.quietBootstrapBreakUntil, this.runTicks);
@@ -6118,18 +6149,34 @@
       this.cool = 0;
       if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
         this.noteAction(`postBreak free brain \u2014 ${why}`);
-        host.log(`AUTO: postBreak free brain (3101) ${why}`);
+        host.log(`AUTO: postBreak free brain (3102) ${why}`);
       }
       if (host.hasTool("pickaxe")) {
         this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
       }
-      const shop = this.mem(w, "shop");
+      const rockFb = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
+      if (rockFb && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rockFb.x, rockFb.y)) {
+        if (this.walkToTile(host, rockFb.x, rockFb.y)) {
+          this.stuckTicks = 0;
+          return true;
+        }
+        if (this.tryGather(host, w, stance, "postBreak free mine")) {
+          this.stuckTicks = 0;
+          return true;
+        }
+        this.blockGatherTile(rockFb.x, rockFb.y);
+      }
       if (w.explore) {
         this.desireXY = { x: w.explore.x, y: w.explore.y };
         host.walkTo(w.explore.x, w.explore.y);
-      } else if (shop) host.walkTo(shop.x, shop.y);
-      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        this.stuckTicks = 0;
+      } else if (w.wander) {
+        host.walkTo(w.wander.x, w.wander.y);
+        this.stuckTicks = 0;
+      } else if (w.hub) {
+        host.walkTo(w.hub.x, w.hub.y);
+        this.stuckTicks = 0;
+      }
       return false;
     }
     /**
@@ -8968,6 +9015,9 @@
      */
     tryStickyProgressLeave(host, w, stance, why) {
       var _a, _b, _c, _d;
+      if (this.isPostBreak()) {
+        return this.postBreakFreeBrain(host, w, stance, `sticky:${why}`);
+      }
       if (this.durableLeaveSettleActive()) {
         return this.routeDurableLeaveSettleOrEscape(host, w, stance, `sticky ${why}`);
       }
@@ -10468,6 +10518,10 @@
       }
       const wanderSpin = /tools wander|tools explore|tools pickaxe|tools fund|mono divert|stuck-wander osc|stuck-wander thrash|tools wander thrash|sticky leave|sticky progress/i.test(stRethink);
       if (wanderSpin && host.hasTool("pickaxe")) {
+        if (this.isPostBreak()) {
+          this.postBreakFreeBrain(host, w, stance, "wanderspin:postBreak");
+          return;
+        }
         if (this.stickyExploreBlockActive() && this.stickyPhaseLeaveArmed) {
           if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
           else this.h1001.phase = "FIRST_WEP";
