@@ -1,4 +1,4 @@
-/* phd auto-engine 3012 — pull via GET /api/auto-engine */
+/* phd auto-engine 3013 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3012";
+  var AUTO_ENGINE_VERSION = "3013";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -3932,6 +3932,9 @@
         if (this.emergToolsBreakActive() || this.exploreKiteBreakActive() || this.stuckWanderBreakActive()) {
           return this.tryStickyProgressLeave(host, w, stance, "fund hold sticky");
         }
+        if (this.isLifeEscapeSpent() && this.lifeSpentDivertHits >= 2 && this.rockFindBreakActive()) {
+          return this.tryStickyProgressLeave(host, w, stance, "fund hold life-spent");
+        }
         this.setStatus1001(host, w, stance, `tools fund ${tool}`);
         return true;
       }
@@ -5675,6 +5678,7 @@
       this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 640);
       this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 640);
       this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 640);
+      this.armPondBreakSticky(1024, true);
       this.stickyPhaseLeaveArmed = true;
       this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
       if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
@@ -6012,12 +6016,37 @@
       return this.hardenInstaOscCool(host, w, stance, pairKey, "release");
     }
     /**
+     * Eng 3013 / R73: cool the oscillating productive pair via existing cool family
+     * (pond/sell/rock/emerg/explore). No new named timer (t1800).
+     */
+    applyInstaOscPairCool(fams) {
+      const joined = fams.join(" ");
+      this.latchThrash();
+      if (fams.length >= 2) this.latchClash();
+      this.armBreakerExploreCool(1024);
+      if (/pond|fish|sell|food mine|food sell|enroute pond|find pond|find shop|sell ore|sell trim|pond-cap|food find shop/i.test(joined)) {
+        this.armPondBreakSticky(1024, true);
+        this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 1024);
+        this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 1024);
+        if (/sell/.test(joined) && /pond|fish|shop|find shop/.test(joined)) this.pondSellPrisonLatched = true;
+        if (/sell|shop|find shop|sell ore/.test(joined)) this.pondBreakCapHits = Math.max(this.pondBreakCapHits, 2);
+      }
+      if (/tools|explore|kite|lethal|sticky|pickaxe|emerg|wander|phase|quiet hold|first.?wep|kite cool|leave-spin|hold-wander|phase-cool|tools-wander|fund hatchet|fund |mine|find rock|rock osc/i.test(joined)) {
+        this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 1024);
+        this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 1024);
+        this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
+        this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 1024);
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1024);
+      }
+    }
+    /**
      * Eng 3000 / t1800 cool|leave|release: insta osc → latch thrash (+clash),
      * cool the pair (forbid re-arm via existing cool family), leave once.
      * Eng 3001 / R61: second fire while cool → release (not re-leave theater).
      * Eng 3002 / R62: once leave fired, next insta → RELEASE even if cool expired
      * (y8mq9b/5msae7 leave↔release after cool window); after one RELEASE → cool
      * divert only (no re-leave / re-release spam). No new timer stack.
+     * Eng 3013 / R73: life-spent scrub cools pair + leave (not free-brain ABA).
      */
     tryInstaOscBreak(host, w, stance) {
       var _a, _b;
@@ -6026,11 +6055,22 @@
       const pairKey = hit.fams.slice(0, 4).join("|");
       if (this.isLifeEscapeSpent()) {
         if (this.lifeSpentDivertHits >= 2) {
+          this.applyInstaOscPairCool(hit.fams);
           const ban2 = new RegExp(hit.fams.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "i");
           this.stuckRecentStatus = this.stuckRecentStatus.filter((s) => !ban2.test(this.statusFamKey(s)) && !this.isDivertProductFam(this.statusFamKey(s)));
+          this.actions = this.actions.filter((s) => !ban2.test(this.statusFamKey(s)) && !/divert-product scrub/i.test(s));
           this.noteAction(`divert-product scrub \u2014 insta:${pairKey}`);
-          this.cool = 0;
-          return false;
+          if (this.lifeSpentDivertHits >= 5) {
+            host.log(`AUTO: scrub cool seals only hits=${this.lifeSpentDivertHits} [${pairKey}] (3013)`);
+            if (host.hasTool("pickaxe") && !w.hasMetalWeapon && !w.hasStyleWeapon) {
+              this.armPhaseIntent(this.h1001.phase === "TOOLS" ? "TOOLS" : "FIRST_WEP", "mine");
+            } else if (host.hasTool("pickaxe")) {
+              this.armPhaseIntent("GEAR_FARM", "hunt");
+            }
+            this.cool = 0;
+            return false;
+          }
+          return this.postExhaustDurableDivert(host, w, stance, `scrub-leave:${pairKey}`);
         }
         return this.postExhaustDurableDivert(host, w, stance, `insta-osc:${pairKey}`);
       }
@@ -6103,7 +6143,7 @@
       var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G;
       if (this.tryInstaOscBreak(host, w, stance)) return true;
       if (this.tryPhaseIntentHold(host, w, stance)) return true;
-      if (this.isLifeEscapeSpent() && (this.statusFamilyHits(/stuck rethink/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/emerg hub|emerg-tools/) >= 3 || this.statusFamilyHits(/tools explore|FIRST_WEP hold/) >= 4 || this.statusFamilyHits(/tools mine|tools find rock/) >= 4 || this.statusFamilyHits(/lethal kite/) >= 5)) {
+      if (this.isLifeEscapeSpent() && (this.statusFamilyHits(/stuck rethink/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/emerg hub|emerg-tools/) >= 3 || this.statusFamilyHits(/tools explore|FIRST_WEP hold/) >= 4 || this.statusFamilyHits(/tools mine|tools find rock/) >= 4 || this.statusFamilyHits(/lethal kite/) >= 5 || this.statusFamilyHits(/enroute pond|food fish|find pond/) >= 4 || this.statusFamilyHits(/food sell ore|food find shop/) >= 4 || this.statusFamilyHits(/tools fund hatchet|tools fund /) >= 4 || this.statusOscPair(/enroute pond|find pond/, /food fish/) || this.statusOscPair(/tools mine|tools find rock/, /tools fund|lethal kite/) || this.statusOscPair(/food sell ore|sell ore/, /food find shop|find shop/))) {
         return this.postExhaustDurableDivert(host, w, stance, "post-ex-mono");
       }
       if (this.oscCoolDivertActive() && (this.statusFamilyHits(/tools wander|tools explore/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/tools mine|tools find rock/) >= 4 || this.statusFamilyHits(/phase cool|FIRST_WEP hold|wanderSpin hard leave/) >= 3 || this.statusFamilyHits(/food-sell\/pond-break — prison|pond-cap — cool/) >= 1 || this.statusFamilyHits(/osc cool hold/) >= 2)) {
