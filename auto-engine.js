@@ -1,4 +1,4 @@
-/* phd auto-engine 3109 — pull via GET /api/auto-engine */
+/* phd auto-engine 3110 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3109";
+  var AUTO_ENGINE_VERSION = "3110";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -5854,7 +5854,7 @@
       this.quietBreakEscalateHits = 0;
       this.quietEscalateLeaveHits = 0;
       this.clearPhaseIntent();
-      host.log(`AUTO: early-osc \u2192 postBreak (3109) ${kind}`);
+      host.log(`AUTO: early-osc \u2192 postBreak (3110) ${kind}`);
       return this.postBreakFreeBrain(host, w, stance, `early-osc:${kind}`);
     }
     /**
@@ -6199,7 +6199,7 @@
         if (!this.actions.some((s) => /^postBreak —/i.test(s))) {
           this.noteAction(`postBreak \u2014 ${why}`);
         }
-        host.log(`AUTO: postBreak ENTER (3109) ${why}`);
+        host.log(`AUTO: postBreak ENTER (3110) ${why}`);
       }
     }
     /** Compat shim — all spent marks now enter postBreak. */
@@ -6233,11 +6233,13 @@
       this.campChainBreakUntil = Math.max(this.campChainBreakUntil, this.runTicks + 768);
       this.sellTrimStickyUntil = 0;
       this.sellTrimEmptyUntil = Math.max(this.sellTrimEmptyUntil, this.runTicks + 256);
+      this.pondBreakUntil = Math.max(this.pondBreakUntil, this.runTicks + 1280);
+      this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 1280);
       const ch = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
       if (ch) this.softBlockChest(host, w, ch.x, ch.y, "postBreak exhaust chest");
       if (!this.actions.some((s) => /postBreak exhaust seal/i.test(s))) {
         this.noteAction("postBreak exhaust seal");
-        host.log("AUTO: postBreak exhaust seal (3107)");
+        host.log("AUTO: postBreak exhaust seal (3110)");
       }
     }
     /**
@@ -6246,7 +6248,7 @@
      * Returns true only while issuing the one productive action.
      */
     postBreakFreeBrain(host, w, stance, why) {
-      var _a, _b, _c, _d;
+      var _a, _b, _c, _d, _e, _f;
       this.enterPostBreak(host, `free:${why}`);
       this.quietBootstrapEmitHits = 0;
       this.quietBootstrapBreakUntil = Math.min(this.quietBootstrapBreakUntil, this.runTicks);
@@ -6267,8 +6269,10 @@
       }
       this.cool = 0;
       this.campChainBreakUntil = Math.min(this.campChainBreakUntil, this.runTicks);
-      this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
-      this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
+      if (!this.postBreakFreeMineExhausted) {
+        this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
+        this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
+      }
       this.kiteCoolExitUntil = Math.min(this.kiteCoolExitUntil, this.runTicks);
       this.kiteCoolWanderBanUntil = Math.min(this.kiteCoolWanderBanUntil, this.runTicks);
       this.kiteCoolMineBanUntil = Math.min(this.kiteCoolMineBanUntil, this.runTicks);
@@ -6278,32 +6282,26 @@
       this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 512);
       if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
         this.noteAction(`postBreak free brain \u2014 ${why}`);
-        host.log(`AUTO: postBreak free brain (3109) ${why}`);
+        host.log(`AUTO: postBreak free brain (3110) ${why}`);
       }
       if (host.hasTool("pickaxe")) {
         this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
       }
       if (!host.hasTool("pickaxe")) {
-        if (host.acquireTool("pickaxe")) {
-          if (!this.actions.some((s) => /postBreak kit pickaxe/i.test(s))) {
-            this.noteAction("postBreak kit pickaxe");
-            host.log("AUTO: postBreak kit pickaxe (3109)");
-          }
-          this.stuckTicks = 0;
-          return true;
-        }
         const anvilP = this.mem(w, "anvil");
         if (this.canFundToolNow("pickaxe", w, anvilP) && this.runTicks >= this.kitAcquireBlockUntil) {
-          const shopP = this.mem(w, "shop");
-          const destP = anvilP || shopP || w.hub;
-          if (destP) {
-            this.desireXY = { x: destP.x, y: destP.y };
-            host.walkTo(destP.x, destP.y);
-            this.stuckTicks = 0;
-            if (!this.actions.some((s) => /postBreak kit pickaxe/i.test(s))) {
-              this.noteAction("postBreak kit pickaxe walk");
-              host.log("AUTO: postBreak kit pickaxe walk (3109)");
+          if (!this.actions.some((s) => /postBreak kit pickaxe/i.test(s))) {
+            this.noteAction("postBreak kit pickaxe walk");
+            host.log("AUTO: postBreak kit pickaxe walk (3110)");
+          }
+          if (this.tryKitAcquireWalk(host, w, stance, "pickaxe", anvilP)) {
+            if (host.hasTool("pickaxe")) {
+              if (!this.actions.some((s) => /postBreak kit pickaxe$/i.test(s))) {
+                this.noteAction("postBreak kit pickaxe");
+                host.log("AUTO: postBreak kit pickaxe (3110)");
+              }
             }
+            this.stuckTicks = 0;
             return true;
           }
         }
@@ -6312,11 +6310,23 @@
           this.sealPostExhaustChestSell(host, w);
           if (!this.actions.some((s) => /postBreak free mine exhaust/i.test(s))) {
             this.noteAction("postBreak free mine exhaust");
-            host.log("AUTO: postBreak free mine exhaust \u2014 no-pick (3109)");
+            host.log("AUTO: postBreak free mine exhaust \u2014 no-pick (3110)");
           }
         }
       }
-      const rockFb = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
+      {
+        const rockGate = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
+        const rockUsable = !!rockGate && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rockGate.x, rockGate.y);
+        if (host.hasTool("pickaxe") && !rockUsable && !this.postBreakFreeMineExhausted) {
+          this.postBreakFreeMineExhausted = true;
+          this.sealPostExhaustChestSell(host, w);
+          if (!this.actions.some((s) => /postBreak free mine exhaust/i.test(s))) {
+            this.noteAction("postBreak free mine exhaust");
+            host.log("AUTO: postBreak free mine exhaust \u2014 no-rock (3110)");
+          }
+        }
+      }
+      const rockFb = (_d = (_c = w.seen) == null ? void 0 : _c.rock) != null ? _d : this.mem(w, "rock");
       if (!this.postBreakFreeMineExhausted && rockFb && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rockFb.x, rockFb.y)) {
         const mk = `${rockFb.x},${rockFb.y}`;
         if (mk === this.postBreakFreeMineKey) this.postBreakFreeMineHits++;
@@ -6329,7 +6339,7 @@
           this.postBreakFreeMineKey = "";
           this.postBreakFreeMineHits = 0;
           this.postBreakFreeMineExhausted = true;
-          host.log(`AUTO: postBreak free mine exhaust \u2014 flap (${mk}) (3109)`);
+          host.log(`AUTO: postBreak free mine exhaust \u2014 flap (${mk}) (3110)`);
           this.noteAction("postBreak free mine exhaust");
           this.sealPostExhaustChestSell(host, w);
         } else {
@@ -6345,7 +6355,7 @@
           this.postBreakFreeMineKey = "";
           this.postBreakFreeMineHits = 0;
           this.postBreakFreeMineExhausted = true;
-          host.log(`AUTO: postBreak free mine exhaust \u2014 gather-fail (${mk}) (3109)`);
+          host.log(`AUTO: postBreak free mine exhaust \u2014 gather-fail (${mk}) (3110)`);
           this.noteAction("postBreak free mine exhaust");
           this.sealPostExhaustChestSell(host, w);
         }
@@ -6363,7 +6373,7 @@
           if (host.acquireTool("hatchet")) {
             if (!this.actions.some((s) => /postBreak kit hatchet/i.test(s))) {
               this.noteAction("postBreak kit hatchet");
-              host.log("AUTO: postBreak kit hatchet (3109)");
+              host.log("AUTO: postBreak kit hatchet (3110)");
             }
             this.stuckTicks = 0;
             return true;
@@ -6380,7 +6390,7 @@
             }
           }
         }
-        const treeFb = (_d = (_c = w.seen) == null ? void 0 : _c.tree) != null ? _d : this.mem(w, "tree");
+        const treeFb = (_f = (_e = w.seen) == null ? void 0 : _e.tree) != null ? _f : this.mem(w, "tree");
         if (treeFb && host.hasTool("hatchet") && !this.isGatherTileBlocked(treeFb.x, treeFb.y)) {
           if (this.walkToTile(host, treeFb.x, treeFb.y)) {
             this.stuckTicks = 0;
@@ -6414,7 +6424,7 @@
           this.postBreakFreeWalkHits = 0;
           if (!this.actions.some((s) => /postBreak free walk osc/i.test(s))) {
             this.noteAction("postBreak free walk osc");
-            host.log("AUTO: postBreak free walk osc (3109)");
+            host.log("AUTO: postBreak free walk osc (3110)");
           }
           if (this.stairsUsable(w) && w.stairs) {
             this.desireXY = { x: w.stairs.x, y: w.stairs.y };
@@ -6422,7 +6432,7 @@
             this.stuckTicks = 0;
             if (!this.actions.some((s) => /postBreak free stairs osc/i.test(s))) {
               this.noteAction("postBreak free stairs osc");
-              host.log("AUTO: postBreak free stairs osc (3109)");
+              host.log("AUTO: postBreak free stairs osc (3110)");
             }
             return true;
           }
