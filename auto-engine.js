@@ -1,4 +1,4 @@
-/* phd auto-engine 3103 — pull via GET /api/auto-engine */
+/* phd auto-engine 3104 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3103";
+  var AUTO_ENGINE_VERSION = "3104";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1508,6 +1508,8 @@
       /** Eng 3103: postBreak free-mine same-tile flap counter (not a timer). */
       __publicField(this, "postBreakFreeMineKey", "");
       __publicField(this, "postBreakFreeMineHits", 0);
+      /** Eng 3104: after free-mine flap/fail this life — never re-enter free-mine (not a timer). */
+      __publicField(this, "postBreakFreeMineExhausted", false);
       /**
        * Eng 3011 / t1808 #4: WD / near-stuck first-class divert already issued this climb.
        * Clears on real progress so a later stuck climb can divert again.
@@ -1749,6 +1751,7 @@
         this.postReleaseQuietDone = false;
         this.postBreakFreeMineKey = "";
         this.postBreakFreeMineHits = 0;
+        this.postBreakFreeMineExhausted = false;
         this.wdFirstClassDiverted = false;
         this.lifeSpentDivertHits = 0;
         this.trwPrisonClearHits = 0;
@@ -3690,9 +3693,21 @@
       return false;
     }
     phaseTools1001(host, w, stance) {
-      var _a, _b, _c, _d, _e, _f;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
       this.refreshPhaseIntent(host, w, stance);
       if (this.phaseIntentLocked() && this.tryPhaseIntentHold(host, w, stance)) return true;
+      if (this.postBreakAllowNormal()) {
+        this.clearFundIntent("tool");
+        this.clearPhaseIntent();
+        if (host.hasTool("pickaxe")) {
+          this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
+          return false;
+        }
+        const treePb = (_b = (_a = w.seen) == null ? void 0 : _a.tree) != null ? _b : this.mem(w, "tree");
+        const pondPb = (_d = (_c = w.seen) == null ? void 0 : _c.pond) != null ? _d : this.mem(w, "pond");
+        if (this.tryFundBeginnerToolFarm(host, w, stance, treePb, pondPb)) return true;
+        return this.postBreakFreeBrain(host, w, stance, "tools-kit:no-pick");
+      }
       if (this.aleFwTheaterBanned() && host.hasTool("pickaxe")) {
         if (this.postBreakAllowNormal()) {
           this.clearFundIntent("tool");
@@ -3849,7 +3864,7 @@
         }
         return this.tryStickyProgressLeave(host, w, stance, "TOOLS sticky");
       }
-      if (((_a = this.fundIntent) == null ? void 0 : _a.kind) === "food") this.clearFundIntent("food");
+      if (((_e = this.fundIntent) == null ? void 0 : _e.kind) === "food") this.clearFundIntent("food");
       if (!this.claimFundIntent("tool")) {
         if (host.hasTool("pickaxe") && this.tryToolsFindRockOrBreak(host, w, stance)) return true;
         this.setStatus1001(
@@ -3948,7 +3963,7 @@
             return true;
           }
           if (tool !== "rod" && w.oreCount >= 2 && (anvil || w.anvilNearby)) {
-            const a = anvil || ((_b = w.seen) == null ? void 0 : _b.anvil) || null;
+            const a = anvil || ((_f = w.seen) == null ? void 0 : _f.anvil) || null;
             if (a) {
               this.desireXY = { x: a.x, y: a.y };
               host.walkTo(a.x, a.y);
@@ -3960,7 +3975,7 @@
           if (this.tryFundBeginnerToolFarm(host, w, stance, tree, pond)) return true;
         }
       }
-      const liveRock = (_d = (_c = w.seen) == null ? void 0 : _c.rock) != null ? _d : null;
+      const liveRock = (_h = (_g = w.seen) == null ? void 0 : _g.rock) != null ? _h : null;
       if (liveRock && host.hasTool("pickaxe") && !this.rockFindBreakActive() && !this.isGatherTileBlocked(liveRock.x, liveRock.y)) {
         if (this.trwReenterBanned()) {
           return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
@@ -4050,7 +4065,7 @@
       }
       if (fundingTool && canFarmFund && !(tool === "hatchet" && this.hatchetChestBreakActive())) {
         if (this.tryFundBeginnerToolFarm(host, w, stance, tree, pond)) return true;
-        const live = (_f = (_e = w.seen) == null ? void 0 : _e.rock) != null ? _f : null;
+        const live = (_j = (_i = w.seen) == null ? void 0 : _i.rock) != null ? _j : null;
         if (live && host.hasTool("pickaxe") && !this.rockFindBreakActive() && !this.isGatherTileBlocked(live.x, live.y)) {
           if (this.aleFwTheaterBanned() && !this.postBreakAllowNormal()) {
             return this.aleSpentToolsMineDivert(host, w, stance, "tools-mine-fund");
@@ -4170,7 +4185,7 @@
             }
             if (this.postBreakAllowNormal()) {
               const rockPb = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
-              if (rockPb && host.hasTool("pickaxe") && host.hasTool("hatchet") && !this.isGatherTileBlocked(rockPb.x, rockPb.y)) {
+              if (!this.postBreakFreeMineExhausted && rockPb && host.hasTool("pickaxe") && host.hasTool("hatchet") && !this.isGatherTileBlocked(rockPb.x, rockPb.y)) {
                 if (this.walkToTile(host, rockPb.x, rockPb.y)) {
                   this.stuckTicks = 0;
                   this.cool = 8;
@@ -4182,6 +4197,7 @@
                   return true;
                 }
                 this.blockGatherTile(rockPb.x, rockPb.y);
+                this.postBreakFreeMineExhausted = true;
               }
               return this.postBreakFreeBrain(host, w, stance, "fw-hold:post-productive");
             }
@@ -5802,7 +5818,7 @@
       this.quietBreakEscalateHits = 0;
       this.quietEscalateLeaveHits = 0;
       this.clearPhaseIntent();
-      host.log(`AUTO: early-osc \u2192 postBreak (3103) ${kind}`);
+      host.log(`AUTO: early-osc \u2192 postBreak (3104) ${kind}`);
       return this.postBreakFreeBrain(host, w, stance, `early-osc:${kind}`);
     }
     /**
@@ -6106,7 +6122,7 @@
         if (!this.actions.some((s) => /^postBreak —/i.test(s))) {
           this.noteAction(`postBreak \u2014 ${why}`);
         }
-        host.log(`AUTO: postBreak ENTER (3103) ${why}`);
+        host.log(`AUTO: postBreak ENTER (3104) ${why}`);
       }
     }
     /** Compat shim — all spent marks now enter postBreak. */
@@ -6166,13 +6182,13 @@
       this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 512);
       if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
         this.noteAction(`postBreak free brain \u2014 ${why}`);
-        host.log(`AUTO: postBreak free brain (3103) ${why}`);
+        host.log(`AUTO: postBreak free brain (3104) ${why}`);
       }
       if (host.hasTool("pickaxe")) {
         this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
       }
       const rockFb = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
-      if (rockFb && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rockFb.x, rockFb.y)) {
+      if (!this.postBreakFreeMineExhausted && rockFb && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rockFb.x, rockFb.y)) {
         const mk = `${rockFb.x},${rockFb.y}`;
         if (mk === this.postBreakFreeMineKey) this.postBreakFreeMineHits++;
         else {
@@ -6183,8 +6199,9 @@
           this.blockGatherTile(rockFb.x, rockFb.y);
           this.postBreakFreeMineKey = "";
           this.postBreakFreeMineHits = 0;
-          host.log(`AUTO: postBreak free mine flap \u2014 block (${mk}) (3103)`);
-          this.noteAction("postBreak free mine flap");
+          this.postBreakFreeMineExhausted = true;
+          host.log(`AUTO: postBreak free mine exhaust \u2014 flap (${mk}) (3104)`);
+          this.noteAction("postBreak free mine exhaust");
         } else {
           if (this.walkToTile(host, rockFb.x, rockFb.y)) {
             this.stuckTicks = 0;
@@ -6197,6 +6214,9 @@
           this.blockGatherTile(rockFb.x, rockFb.y);
           this.postBreakFreeMineKey = "";
           this.postBreakFreeMineHits = 0;
+          this.postBreakFreeMineExhausted = true;
+          host.log(`AUTO: postBreak free mine exhaust \u2014 gather-fail (${mk}) (3104)`);
+          this.noteAction("postBreak free mine exhaust");
         }
       }
       if (w.explore) {
