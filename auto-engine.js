@@ -1,4 +1,4 @@
-/* phd auto-engine 3008 — pull via GET /api/auto-engine */
+/* phd auto-engine 3009 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3008";
+  var AUTO_ENGINE_VERSION = "3009";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -5315,6 +5315,61 @@
       return false;
     }
     /**
+     * Eng 3009 / R69: after post-release cool exhaust, cool|leave|release are spent.
+     * Do NOT re-arm insta osc — cool / coolHold theater. Early thrash mark + one
+     * durable hub/shop divert under existing cool-family bans (t1800 — no new timer).
+     * Returns true to consume the tick (walk issued); cool=0 so brain resumes next.
+     */
+    postExhaustDurableDivert(host, w, stance, why) {
+      var _a, _b;
+      this.latchThrash();
+      this.latchClash();
+      this.armBreakerExploreCool(1024);
+      this.clearFundIntent("tool");
+      this.clearFundIntent("food");
+      this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 768);
+      this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 768);
+      this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 640);
+      this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 640);
+      this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 640);
+      this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 640);
+      this.stickyPhaseLeaveArmed = true;
+      this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+      if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
+        this.h1001.phase = "GEAR_FARM";
+      } else if (host.hasTool("pickaxe")) {
+        this.h1001.phase = "FIRST_WEP";
+      }
+      this.stuckRecentStatus = this.stuckRecentStatus.filter(
+        (s) => !/stuck rethink|insta osc|tools fund sell|tools fund|tools explore|tools wander|tools mine|tools find rock|emerg hub|emerg-tools|FIRST_WEP hold|phase cool|lethal kite|osc cool|post-release cool|post-cool-theater|mono divert|camp-chain/i.test(s)
+      );
+      this.actions = this.actions.filter(
+        (s) => !/stuck rethink|insta osc|tools fund|tools explore|tools wander|emerg hub|FIRST_WEP hold|post-release cool|osc cool/i.test(s)
+      );
+      const shop = this.mem(w, "shop");
+      const chest = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
+      if (shop) host.walkTo(shop.x, shop.y);
+      else if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) host.walkTo(chest.x, chest.y);
+      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+      else if (w.explore) {
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
+        host.walkTo(w.explore.x, w.explore.y);
+      }
+      if (!/post-exhaust divert|after cool exhaust/i.test(this.actions[this.actions.length - 1] || "")) {
+        this.noteAction(`post-exhaust divert \u2014 ${why}`);
+        host.log(`AUTO: post-exhaust durable divert (3009) ${why}`);
+      }
+      this.setStatus(
+        host,
+        w,
+        stance,
+        host.hasTool("pickaxe") ? "gear farm \u2014 after cool exhaust" : "explore \u2014 after cool exhaust"
+      );
+      this.cool = 0;
+      return true;
+    }
+    /**
      * Eng 3003 / R63 + eng 3004 / R64 + eng 3005 / R65: durable cool-hold walk after
      * osc cool divert — no new timer, no re-escalate / no oscillating status spam.
      * Eng 3005: repeated cool-hold OR durable leave already done → one leave/release
@@ -5323,9 +5378,7 @@
     coolHoldOscDivert(host, w, stance, why) {
       var _a, _b;
       if (this.postReleaseCoolExhausted) {
-        this.armBreakerExploreCool(768);
-        this.cool = 0;
-        return false;
+        return this.postExhaustDurableDivert(host, w, stance, why);
       }
       const holdHits = this.statusFamilyHits(
         /osc cool hold|tools-sticky-hold|tools-label-cool-hold|post-cool-theater|pond-sell-latched|sell-latch-hold|tools-sticky-explore/
@@ -5373,9 +5426,7 @@
     coolHoldEscalateLeave(host, w, stance, why) {
       var _a, _b;
       if (this.postReleaseCoolExhausted) {
-        this.armBreakerExploreCool(768);
-        this.cool = 0;
-        return false;
+        return this.postExhaustDurableDivert(host, w, stance, `leave:${why}`);
       }
       if (this.durableLeaveHierarchyReleased || this.postHierarchyReleaseEscapeCount >= 1 || this.statusFamilyHits(/osc cool — leave→release|insta osc — release/) >= 1) {
         return this.coolHoldPostReleaseWalk(host, w, stance, why);
@@ -5447,9 +5498,7 @@
     coolHoldPostReleaseWalk(host, w, stance, why) {
       var _a, _b, _c, _d;
       if (this.postReleaseCoolExhausted) {
-        this.armBreakerExploreCool(768);
-        this.cool = 0;
-        return false;
+        return this.postExhaustDurableDivert(host, w, stance, `postrel:${why}`);
       }
       this.postReleaseCoolWalkHits += 1;
       const prisonHits = this.postReleaseCoolPrisonHits();
@@ -5543,6 +5592,9 @@
      */
     hardenInstaOscCool(host, w, stance, pairKey, label) {
       var _a, _b;
+      if (this.postReleaseCoolExhausted) {
+        return this.postExhaustDurableDivert(host, w, stance, `insta-${label}:${pairKey}`);
+      }
       this.latchThrash();
       this.latchClash();
       this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
@@ -5605,6 +5657,9 @@
       const hit = this.detectInstaOsc();
       if (!hit) return false;
       const pairKey = hit.fams.slice(0, 4).join("|");
+      if (this.postReleaseCoolExhausted) {
+        return this.postExhaustDurableDivert(host, w, stance, `insta-osc:${pairKey}`);
+      }
       if (this.instaOscLeaveHits >= 2) {
         return this.hardenInstaOscCool(host, w, stance, pairKey, "cool");
       }
@@ -5657,6 +5712,9 @@
     tryStatusOscBreak(host, w, stance) {
       var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G;
       if (this.tryInstaOscBreak(host, w, stance)) return true;
+      if (this.postReleaseCoolExhausted && (this.statusFamilyHits(/stuck rethink/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/emerg hub|emerg-tools/) >= 3 || this.statusFamilyHits(/tools explore|FIRST_WEP hold/) >= 4 || this.statusFamilyHits(/tools mine|tools find rock/) >= 4 || this.statusFamilyHits(/lethal kite/) >= 5)) {
+        return this.postExhaustDurableDivert(host, w, stance, "post-ex-mono");
+      }
       if (this.oscCoolDivertActive() && (this.statusFamilyHits(/tools wander|tools explore/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/tools mine|tools find rock/) >= 4 || this.statusFamilyHits(/phase cool|FIRST_WEP hold|wanderSpin hard leave/) >= 3 || this.statusFamilyHits(/food-sell\/pond-break — prison|pond-cap — cool/) >= 1 || this.statusFamilyHits(/osc cool hold/) >= 2)) {
         return this.coolHoldOscDivert(host, w, stance, "post-cool-theater");
       }
