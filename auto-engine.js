@@ -1,4 +1,4 @@
-/* phd auto-engine 3100 — pull via GET /api/auto-engine */
+/* phd auto-engine 3101 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3100";
+  var AUTO_ENGINE_VERSION = "3101";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -3780,6 +3780,9 @@
             this.desireXY = { x: w.explore.x, y: w.explore.y };
             host.walkTo(w.explore.x, w.explore.y);
           } else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+          if (this.isPostBreak()) {
+            return this.postBreakFreeBrain(host, w, stance, "phase-cool:tools-sticky-explore");
+          }
           this.armPhaseCoolNoKiteEmit();
           this.setStatus(host, w, stance, "phase cool");
           this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 1);
@@ -3823,6 +3826,9 @@
           if (w.wander) host.walkTo(w.wander.x, w.wander.y);
           else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
           else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+          if (this.isPostBreak()) {
+            return this.postBreakFreeBrain(host, w, stance, "phase-cool:tools-sticky-hold");
+          }
           this.armPhaseCoolNoKiteEmit();
           this.setStatus(host, w, stance, "phase cool");
           this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 1);
@@ -5729,17 +5735,16 @@
       this.earlyOscDivertHits = Math.max(this.earlyOscDivertHits, 1);
       this.latchThrash();
       this.latchClash();
-      this.armBreakerExploreCool(768);
+      this.enterPostBreak(host, `early-osc:${kind}`);
       this.clearFundIntent("tool");
       this.clearFundIntent("food");
       this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 640);
       this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 640);
       this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 512);
       this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 512);
-      this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 640);
-      this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 640);
-      this.stickyPhaseLeaveArmed = true;
-      this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+      this.exploreKiteBreakUntil = Math.min(this.exploreKiteBreakUntil, this.runTicks);
+      this.stickyExploreBlockUntil = Math.min(this.stickyExploreBlockUntil, this.runTicks);
+      this.stickyPhaseLeaveArmed = false;
       this.instaOscPairKey = pairKey;
       const ban = new RegExp(pairKey.split("|").map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "i");
       this.stuckRecentStatus = this.stuckRecentStatus.filter((s) => !ban.test(this.statusFamKey(s)));
@@ -5760,7 +5765,6 @@
         this.noteAction(`early osc divert \u2014 ${kind}`);
         host.log(`AUTO: early osc divert [${pairKey}] ${kind} (3012) \u2014 before leave/cool`);
       }
-      this.enterPostBreak(host, `early-osc:${kind}`);
       this.quietBootstrapEmitHits = 0;
       this.quietBootstrapBreakUntil = Math.min(this.quietBootstrapBreakUntil, this.runTicks);
       this.quietBreakEmitHits = 0;
@@ -5768,7 +5772,7 @@
       this.quietBreakEscalateHits = 0;
       this.quietEscalateLeaveHits = 0;
       this.clearPhaseIntent();
-      host.log(`AUTO: early-osc \u2192 postBreak (3100) ${kind}`);
+      host.log(`AUTO: early-osc \u2192 postBreak (3101) ${kind}`);
       return this.postBreakFreeBrain(host, w, stance, `early-osc:${kind}`);
     }
     /**
@@ -5958,10 +5962,10 @@
       this.postReleaseQuietDone = true;
       this.latchThrash();
       this.latchClash();
-      this.armBreakerExploreCool(640);
       this.clearFundIntent("tool");
-      this.stickyPhaseLeaveArmed = true;
-      this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+      this.stickyPhaseLeaveArmed = false;
+      this.stickyExploreBlockUntil = Math.min(this.stickyExploreBlockUntil, this.runTicks);
+      this.exploreKiteBreakUntil = Math.min(this.exploreKiteBreakUntil, this.runTicks);
       this.stuckRecentStatus = this.stuckRecentStatus.filter(
         (s) => !/quiet hold — post RELEASE|post-RELEASE|insta osc — cool|post-release cool|osc cool|coolHold/i.test(s)
       );
@@ -6008,7 +6012,7 @@
         }
       }
       this.noteAction(`productive quiet \u2014 ${did || "none"} (${why})`);
-      host.log(`AUTO: one productive quiet after RELEASE (3100) ${did || "none"} ${why}`);
+      host.log(`AUTO: one productive quiet after RELEASE (3101) ${did || "none"} ${why}`);
       this.setStatus(
         host,
         w,
@@ -6035,32 +6039,24 @@
         this.postBreakFreeBrain(host, w, stance, `wd:${why}`);
         return;
       }
-      this.armBreakerExploreCool(1024);
+      this.enterPostBreak(host, `wd:${why}`);
       this.clearFundIntent("tool");
       this.clearFundIntent("food");
-      this.stickyPhaseLeaveArmed = true;
-      this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+      this.stickyPhaseLeaveArmed = false;
+      this.stickyExploreBlockUntil = Math.min(this.stickyExploreBlockUntil, this.runTicks);
+      this.exploreKiteBreakUntil = Math.min(this.exploreKiteBreakUntil, this.runTicks);
       this.stuckRecentStatus = this.stuckRecentStatus.filter(
         (s) => !/stuck rethink|stuck watchdog|tools fund|tools wander|insta osc|phase cool|FIRST_WEP hold|mob engage|mob kite|lethal|open chest|hatchet|camp-chest|after life escape|wd divert|early osc divert|life-spent divert/i.test(s)
       );
       this.actions = this.actions.filter((s) => !/wd divert|life-spent divert|after life escape/i.test(s));
-      const shop = this.mem(w, "shop");
-      if (shop) host.walkTo(shop.x, shop.y);
-      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-      else if (w.explore) {
-        this.desireXY = { x: w.explore.x, y: w.explore.y };
-        host.walkTo(w.explore.x, w.explore.y);
-      } else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
       if (!this.wdFirstClassDiverted) {
         this.noteAction(`wd divert \u2014 ${why}`);
-        host.log(`AUTO: WD first-class divert (3100) ${why}`);
-        this.setStatus(host, w, stance, host.hasTool("pickaxe") ? "gear farm \u2014 wd divert" : "explore \u2014 wd divert");
+        host.log(`AUTO: WD first-class divert (3101) ${why}`);
       } else if (!/wd divert/i.test(this.actions[this.actions.length - 1] || "")) {
         this.noteAction(`wd divert \u2014 ${why}`);
       }
       this.wdFirstClassDiverted = true;
-      this.enterPostBreak(host, `wd:${why}`);
-      this.cool = 0;
+      this.postBreakFreeBrain(host, w, stance, `wd:${why}`);
     }
     /**
     * Eng 3100 / t1815: enter postBreak life mode (idempotent). Also marks
@@ -6080,7 +6076,7 @@
         if (!this.actions.some((s) => /^postBreak —/i.test(s))) {
           this.noteAction(`postBreak \u2014 ${why}`);
         }
-        host.log(`AUTO: postBreak ENTER (3100) ${why}`);
+        host.log(`AUTO: postBreak ENTER (3101) ${why}`);
       }
     }
     /** Compat shim — all spent marks now enter postBreak. */
@@ -6113,17 +6109,27 @@
       this.phaseIntentMineMonoHits = 0;
       this.phaseIntentHuntMonoHits = 0;
       this.instaOscLeaveArmed = false;
+      this.stickyExploreBlockUntil = Math.min(this.stickyExploreBlockUntil, this.runTicks);
+      this.exploreKiteBreakUntil = Math.min(this.exploreKiteBreakUntil, this.runTicks);
+      this.stuckWanderBreakUntil = Math.min(this.stuckWanderBreakUntil, this.runTicks);
       if (!this.postReleaseQuietDone) {
         return this.oneProductiveQuietAfterRelease(host, w, stance, `postBreak:${why}`);
       }
       this.cool = 0;
       if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
         this.noteAction(`postBreak free brain \u2014 ${why}`);
-        host.log(`AUTO: postBreak free brain (3100) ${why}`);
+        host.log(`AUTO: postBreak free brain (3101) ${why}`);
       }
       if (host.hasTool("pickaxe")) {
         this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
       }
+      const shop = this.mem(w, "shop");
+      if (w.explore) {
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
+        host.walkTo(w.explore.x, w.explore.y);
+      } else if (shop) host.walkTo(shop.x, shop.y);
+      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
       return false;
     }
     /**
@@ -8939,6 +8945,7 @@
      * next hierarchy fall-through cannot rearm bare `explore |` into lethal flaps.
      */
     armBreakerExploreCool(ticks = 768) {
+      if (this.isPostBreak()) return;
       this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + ticks);
       this.exploreKiteBreakUntil = Math.max(
         this.exploreKiteBreakUntil,
@@ -10627,6 +10634,10 @@
       if (host.hasTool("pickaxe") && (this.stuckWanderBreakActive() || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.stickyExploreBlockActive() || /sticky leave|sticky progress|phase cool|FIRST_WEP hold/i.test(this.lastStatus || ""))) {
         this.stickyLeaveRethinks++;
         if (this.stickyLeaveRethinks >= 2 && (this.stickyExploreBlockActive() || this.stickyPhaseLeaveArmed)) {
+          if (this.isPostBreak()) {
+            this.postBreakFreeBrain(host, w, stance, "flat-thrash");
+            return;
+          }
           this.stickyPhaseLeaveArmed = true;
           this.stuckRecentStatus = this.stuckRecentStatus.filter(
             (s) => !/sticky|phase cool|FIRST_WEP hold|first wep|flat thrash|flat rethink|kite cool exit grace/i.test(s)
