@@ -1,4 +1,4 @@
-/* phd auto-engine 3026 — pull via GET /api/auto-engine */
+/* phd auto-engine 3100 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3026";
+  var AUTO_ENGINE_VERSION = "3100";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1481,6 +1481,15 @@
        */
       __publicField(this, "lifeEscapeSpent", false);
       /**
+       * Eng 3100 / t1815: unifying life mode after first sticky break (early-osc
+       * OR leave→RELEASE / hierarchy RELEASE / post-RELEASE escape). While set:
+       * one productive once, then free brain — no coolHold* / leave→release /
+       * ALE-cap / hunt-hold / fw-cap / TRW prison / status re-emit loops.
+       * Marks stay for diagnosis; they do not gate more suppressors. Clears on death.
+       * Collapsed cool|leave|release stack only applies *before* postBreak.
+       */
+      __publicField(this, "postBreak", false);
+      /**
        * Eng 3011 / t1808 #1: early A↔B / ABCABC durable divert fires this life
        * before leave/cool theater. ≥1 → next insta may leave (escape stack second).
        */
@@ -1730,6 +1739,7 @@
         this.postReleaseCoolExhausted = false;
         this.postReleaseCoolWalkHits = 0;
         this.lifeEscapeSpent = false;
+        this.postBreak = false;
         this.earlyOscDivertHits = 0;
         this.phaseIntentGoal = "";
         this.phaseIntentPhase = "";
@@ -5489,29 +5499,18 @@
      * family — no new named timer, t1800). Idempotent aside from cool re-arm.
      */
     latchAleSpentCool(host, why) {
-      this.afterLifeEscapeCapped = true;
-      this.afterLifeEscapeMonoHits = Math.max(this.afterLifeEscapeMonoHits, 6);
+      this.enterPostBreak(host, `ale-spent:${why}`);
       if (!this.actions.some((s) => /after-life-escape-spent/i.test(s))) {
         this.noteAction("after-life-escape-spent");
-        host.log(`AUTO: after-life-escape SPENT \u2014 latch cool FW (3023) ${why}`);
+        host.log(`AUTO: after-life-escape SPENT \u2192 postBreak (3100) ${why}`);
       }
-      this.markLifeEscapeSpent(host, `ale-spent:${why}`);
       this.clearPhaseIntent();
       this.phaseIntentHuntMonoHits = 0;
-      this.campChainBreakUntil = Math.max(this.campChainBreakUntil, this.runTicks + 1280);
-      this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 1280);
-      this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1280);
-      this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 1280);
-      this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
-      this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 768);
-      this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1280);
-      this.armPondBreakSticky(768, true);
-      this.armBreakerExploreCool(1024);
       this.cool = 0;
     }
     /** Eng 3023: after ALE spent/capped — ban combat theater (lethal/mob/approach/emerg). */
     aleFwTheaterBanned() {
-      return this.afterLifeEscapeCapped || this.lifeEscapeSpent;
+      return this.isPostBreak() || this.afterLifeEscapeCapped || this.lifeEscapeSpent;
     }
     /** Eng 3023: one mark when post-spent combat path is sealed (diagnosis). */
     noteAleCombatBan(host, why) {
@@ -5538,27 +5537,10 @@
     aleSpentToolsMineDivert(host, w, stance, why) {
       this.noteAleToolsBan(host, why);
       this.latchThrash();
-      this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1280);
-      this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1024);
-      this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
-      this.clearPhaseIntent();
-      this.phaseIntentMineMonoHits = 0;
       this.stuckRecentStatus = this.stuckRecentStatus.filter(
         (s) => !/tools mine|tools find rock|phase intent — mine|first wep mine|tools-rock|tools fund/i.test(s)
       );
-      const shop = this.mem(w, "shop");
-      if (shop) host.walkTo(shop.x, shop.y);
-      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-      else if (w.explore) {
-        this.desireXY = { x: w.explore.x, y: w.explore.y };
-        host.walkTo(w.explore.x, w.explore.y);
-      }
-      if (host.hasTool("pickaxe")) {
-        this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
-      }
-      this.cool = 0;
-      return true;
+      return this.postBreakFreeBrain(host, w, stance, `tools-mine:${why}`);
     }
     /** Eng 3025: after ALE spent/capped — ban FIRST_WEP hold-wander / quiet bootstrap theater. */
     noteAleFwHoldBan(host, why) {
@@ -5576,40 +5558,13 @@
     aleSpentFwHoldDivert(host, w, stance, why) {
       this.noteAleFwHoldBan(host, why);
       this.latchThrash();
-      this.quietBootstrapEmitHits = 0;
-      this.quietBootstrapBreakUntil = Math.min(this.quietBootstrapBreakUntil, this.runTicks);
-      this.quietBreakEmitHits = 0;
-      this.quietBreakEscalateUntil = Math.min(this.quietBreakEscalateUntil, this.runTicks);
-      this.quietBreakEscalateHits = 0;
-      this.quietEscalateLeaveHits = 0;
-      this.stickyPhaseLeaveArmed = false;
-      this.clearPhaseIntent();
-      this.phaseIntentMineMonoHits = 0;
-      this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1280);
-      this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1024);
-      this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
       this.stuckRecentStatus = this.stuckRecentStatus.filter(
         (s) => !/FIRST_WEP hold|quiet hold — tools|quiet hold — bootstrap|quiet hold — break escalate|quiet hold — escalate leave|kite cool wander|hold-wander/i.test(s)
       );
       this.actions = this.actions.filter(
         (s) => !/FIRST_WEP hold — wander|quiet hold — tools bootstrap|quiet hold — bootstrap break|quiet hold — break escalate|quiet hold — escalate leave/i.test(s)
       );
-      if (host.hasTool("pickaxe")) {
-        this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
-      }
-      const shop = this.mem(w, "shop");
-      if (shop) host.walkTo(shop.x, shop.y);
-      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-      else if (w.explore) {
-        this.desireXY = { x: w.explore.x, y: w.explore.y };
-        host.walkTo(w.explore.x, w.explore.y);
-      }
-      if (this.afterLifeEscapeCapped) {
-        if (this.tryAleSpentFwCap(host, w, stance, `fw-hold:${why}`)) return true;
-      }
-      this.cool = 0;
-      return true;
+      return this.postBreakFreeBrain(host, w, stance, `fw-hold:${why}`);
     }
     /**
      * Eng 3021–3022: post-ALE-spent FIRST_WEP theater cap. Camp-chain / emerg-tools
@@ -5618,16 +5573,11 @@
      * approach/mob/emerg/lethal. Returns true if caller should stop the tick.
      */
     tryAleSpentFwCap(host, w, stance, why) {
-      if (!this.afterLifeEscapeCapped) return false;
+      if (!this.afterLifeEscapeCapped && !this.isPostBreak()) return false;
       this.afterLifeEscapeFwMonoHits++;
       this.latchThrash();
       const early = /emerg|approach|mob engage|mob kite|lethal|fw-theater|tools-mine|find-rock|phase-intent-mine|tools-rock|fw-hold|hold-wander|bootstrap|escalate leave|first-wep-hold/i.test(why);
       const need = early ? 1 : 2;
-      this.campChainBreakUntil = Math.max(this.campChainBreakUntil, this.runTicks + 1280);
-      this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 1280);
-      this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1280);
-      this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 1280);
-      this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
       if (this.afterLifeEscapeFwMonoHits < need) {
         return false;
       }
@@ -5637,35 +5587,18 @@
       if (!this.actions.some((s) => /after-life-escape-fw-spent/i.test(s))) {
         this.noteAction("after-life-escape-fw-spent");
       }
-      host.log(`AUTO: after-life-escape FW CAP hits=${this.afterLifeEscapeFwMonoHits} (3023) ${why}`);
+      host.log(`AUTO: after-life-escape FW CAP \u2192 postBreak (3100) hits=${this.afterLifeEscapeFwMonoHits} ${why}`);
       this.latchStuck();
       this.latchClash();
       this.latchAleSpentCool(host, `fw-cap:${why}`);
       this.lifeSpentDivertHits = Math.max(this.lifeSpentDivertHits, 2);
-      this.campChainBreakUntil = Math.max(this.campChainBreakUntil, this.runTicks + 1536);
-      this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 1536);
-      this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1536);
-      this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 1536);
-      this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1280);
-      this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 1024);
-      this.armPondBreakSticky(1024, true);
-      this.armBreakerExploreCool(1280);
       this.stuckRecentStatus = this.stuckRecentStatus.filter(
         (s) => !/camp-chain|camp-chest|camp-rock|camp-shop|round-trip|emerg hub|emerg-tools|approach engage|mob engage|approach kite|mob kite|lethal kite|lethal close|high-ceiling|open chest|hatchet|after life escape|gear farm — after|explore — after/i.test(s)
       );
       this.actions = this.actions.filter(
         (s) => !/camp-chain|camp-chest|round-trip|emerg hub|approach engage|mob engage|lethal kite|mob kite|approach kite|lethal cover/i.test(s)
       );
-      this.clearPhaseIntent();
-      const shop = this.mem(w, "shop");
-      if (shop) host.walkTo(shop.x, shop.y);
-      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-      else if (w.explore) {
-        this.desireXY = { x: w.explore.x, y: w.explore.y };
-        host.walkTo(w.explore.x, w.explore.y);
-      } else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-      this.cool = 0;
-      return true;
+      return this.postBreakFreeBrain(host, w, stance, `fw-cap:${why}`);
     }
     emitPostLifeEscapeOrFree(host, w, stance, preferWalk) {
       if (this.afterLifeEscapeCapped) {
@@ -5827,30 +5760,16 @@
         this.noteAction(`early osc divert \u2014 ${kind}`);
         host.log(`AUTO: early osc divert [${pairKey}] ${kind} (3012) \u2014 before leave/cool`);
       }
-      const toolsTheater = /tools-mine|tools mine|find-rock|hold-wander|bootstrap|FIRST_WEP hold|phase cool|quiet hold|tools-rock|fund-sell|tools fund/i.test(pairKey) || this.statusFamilyHits(/tools mine|tools find rock|FIRST_WEP hold|quiet hold — tools|quiet hold — bootstrap/) >= 2;
-      if (host.hasTool("pickaxe") && toolsTheater) {
-        this.markLifeEscapeSpent(host, `early-osc:${kind}`);
-        this.noteAleFwHoldBan(host, `early-osc:${kind}`);
-        this.quietBootstrapEmitHits = 0;
-        this.quietBootstrapBreakUntil = Math.min(this.quietBootstrapBreakUntil, this.runTicks);
-        this.quietBreakEmitHits = 0;
-        this.quietBreakEscalateUntil = Math.min(this.quietBreakEscalateUntil, this.runTicks);
-        this.quietBreakEscalateHits = 0;
-        this.quietEscalateLeaveHits = 0;
-        this.clearPhaseIntent();
-        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1280);
-        this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1024);
-        this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
-        host.log(`AUTO: early-osc tools theater SPENT+BAN (3026) ${kind}`);
-      }
-      this.setStatus(
-        host,
-        w,
-        stance,
-        host.hasTool("pickaxe") ? "gear farm \u2014 early osc divert" : "explore \u2014 early osc divert"
-      );
-      this.cool = 0;
-      return true;
+      this.enterPostBreak(host, `early-osc:${kind}`);
+      this.quietBootstrapEmitHits = 0;
+      this.quietBootstrapBreakUntil = Math.min(this.quietBootstrapBreakUntil, this.runTicks);
+      this.quietBreakEmitHits = 0;
+      this.quietBreakEscalateUntil = Math.min(this.quietBreakEscalateUntil, this.runTicks);
+      this.quietBreakEscalateHits = 0;
+      this.quietEscalateLeaveHits = 0;
+      this.clearPhaseIntent();
+      host.log(`AUTO: early-osc \u2192 postBreak (3100) ${kind}`);
+      return this.postBreakFreeBrain(host, w, stance, `early-osc:${kind}`);
     }
     /**
      * Eng 3011 / t1808 #2: arm productive phase intent. Clears only on goal done /
@@ -6028,12 +5947,12 @@
      * Honor life-spent: no coolHold* re-arm after spent.
      */
     oneProductiveQuietAfterRelease(host, w, stance, why) {
-      this.markLifeEscapeSpent(host, `productive-quiet:${why}`);
+      this.enterPostBreak(host, `productive-quiet:${why}`);
       if (this.postReleaseQuietDone) {
-        if (this.statusFamilyHits(/stuck rethink|tools fund sell|tools wander|insta osc|post-RELEASE/) >= 3) {
-          return this.postExhaustDurableDivert(host, w, stance, `quiet-done:${why}`);
-        }
         this.cool = 0;
+        if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
+          this.noteAction(`postBreak free brain \u2014 quiet-done:${why}`);
+        }
         return false;
       }
       this.postReleaseQuietDone = true;
@@ -6089,7 +6008,7 @@
         }
       }
       this.noteAction(`productive quiet \u2014 ${did || "none"} (${why})`);
-      host.log(`AUTO: one productive quiet after RELEASE (3012) ${did || "none"} ${why}`);
+      host.log(`AUTO: one productive quiet after RELEASE (3100) ${did || "none"} ${why}`);
       this.setStatus(
         host,
         w,
@@ -6107,6 +6026,15 @@
       this.latchStuck();
       this.latchThrash();
       this.latchClash();
+      if (this.isPostBreak() || this.wdFirstClassDiverted) {
+        if (!this.wdFirstClassDiverted) {
+          this.noteAction(`wd divert \u2014 ${why}`);
+          host.log(`AUTO: WD first-class \u2192 postBreak free (3100) ${why}`);
+        }
+        this.wdFirstClassDiverted = true;
+        this.postBreakFreeBrain(host, w, stance, `wd:${why}`);
+        return;
+      }
       this.armBreakerExploreCool(1024);
       this.clearFundIntent("tool");
       this.clearFundIntent("food");
@@ -6125,31 +6053,78 @@
       } else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
       if (!this.wdFirstClassDiverted) {
         this.noteAction(`wd divert \u2014 ${why}`);
-        host.log(`AUTO: WD first-class divert (3012) ${why}`);
+        host.log(`AUTO: WD first-class divert (3100) ${why}`);
         this.setStatus(host, w, stance, host.hasTool("pickaxe") ? "gear farm \u2014 wd divert" : "explore \u2014 wd divert");
       } else if (!/wd divert/i.test(this.actions[this.actions.length - 1] || "")) {
         this.noteAction(`wd divert \u2014 ${why}`);
       }
       this.wdFirstClassDiverted = true;
+      this.enterPostBreak(host, `wd:${why}`);
       this.cool = 0;
     }
     /**
-    * Eng 3010 / t1806: mark one leave→RELEASE / hierarchy RELEASE / post-RELEASE
-    * escape spent for this life. Idempotent. Arms postReleaseCoolExhausted so
-    * existing 3008/3009 coolHold gates divert (no new timer — t1800).
+    * Eng 3100 / t1815: enter postBreak life mode (idempotent). Also marks
+    * lifeEscapeSpent / postReleaseCoolExhausted for 3010–3026 gate compat.
+    * Does NOT stack new cool seals (that was the ban-chase). Death clears.
     */
-    markLifeEscapeSpent(host, why) {
-      if (this.lifeEscapeSpent) return;
+    enterPostBreak(host, why) {
+      if (this.postBreak && this.lifeEscapeSpent) return;
+      const first = !this.postBreak;
+      this.postBreak = true;
       this.lifeEscapeSpent = true;
       this.postReleaseCoolExhausted = true;
       this.postReleaseCoolWalkHits = Math.max(this.postReleaseCoolWalkHits, 3);
-      this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1024);
-      this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 768);
-      host.log(`AUTO: life escape SPENT (3010) ${why}`);
+      this.afterLifeEscapeCapped = true;
+      this.afterLifeEscapeMonoHits = Math.max(this.afterLifeEscapeMonoHits, 6);
+      if (first) {
+        if (!this.actions.some((s) => /^postBreak —/i.test(s))) {
+          this.noteAction(`postBreak \u2014 ${why}`);
+        }
+        host.log(`AUTO: postBreak ENTER (3100) ${why}`);
+      }
     }
-    /** Eng 3010: escape already spent this life (RELEASE/escape or exhaust latch). */
+    /** Compat shim — all spent marks now enter postBreak. */
+    markLifeEscapeSpent(host, why) {
+      this.enterPostBreak(host, why);
+    }
+    /** Eng 3100: postBreak (or legacy spent/exhaust) latched this life. */
+    isPostBreak() {
+      return this.postBreak || this.lifeEscapeSpent || this.postReleaseCoolExhausted;
+    }
+    /** Eng 3010 compat. */
     isLifeEscapeSpent() {
-      return this.lifeEscapeSpent || this.postReleaseCoolExhausted;
+      return this.isPostBreak();
+    }
+    /**
+     * Eng 3100: while postBreak — one productive once, then free brain forever
+     * this life. No coolHold* re-arm, no divert-status flap, no ban-family growth.
+     * Returns true only while issuing the one productive action.
+     */
+    postBreakFreeBrain(host, w, stance, why) {
+      this.enterPostBreak(host, `free:${why}`);
+      this.quietBootstrapEmitHits = 0;
+      this.quietBootstrapBreakUntil = Math.min(this.quietBootstrapBreakUntil, this.runTicks);
+      this.quietBreakEmitHits = 0;
+      this.quietBreakEscalateUntil = Math.min(this.quietBreakEscalateUntil, this.runTicks);
+      this.quietBreakEscalateHits = 0;
+      this.quietEscalateLeaveHits = 0;
+      this.stickyPhaseLeaveArmed = false;
+      this.clearPhaseIntent();
+      this.phaseIntentMineMonoHits = 0;
+      this.phaseIntentHuntMonoHits = 0;
+      this.instaOscLeaveArmed = false;
+      if (!this.postReleaseQuietDone) {
+        return this.oneProductiveQuietAfterRelease(host, w, stance, `postBreak:${why}`);
+      }
+      this.cool = 0;
+      if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
+        this.noteAction(`postBreak free brain \u2014 ${why}`);
+        host.log(`AUTO: postBreak free brain (3100) ${why}`);
+      }
+      if (host.hasTool("pickaxe")) {
+        this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
+      }
+      return false;
     }
     /**
      * Eng 3009 / R69 + eng 3010 / t1806: after life escape spent (first RELEASE /
@@ -6159,6 +6134,13 @@
      * Returns true to consume the tick (walk issued); cool=0 so brain resumes next.
      */
     postExhaustDurableDivert(host, w, stance, why) {
+      if (this.isPostBreak() && this.postReleaseQuietDone) {
+        this.lifeSpentDivertHits = Math.max(this.lifeSpentDivertHits, 3);
+        return this.postBreakFreeBrain(host, w, stance, `post-ex:${why}`);
+      }
+      if (this.isPostBreak() && !this.postReleaseQuietDone) {
+        return this.postBreakFreeBrain(host, w, stance, `post-ex:${why}`);
+      }
       this.lifeSpentDivertHits++;
       this.latchThrash();
       this.latchClash();
@@ -6272,15 +6254,15 @@
      */
     coolHoldOscDivert(host, w, stance, why) {
       var _a, _b;
-      if (this.isLifeEscapeSpent()) {
-        return this.oneProductiveQuietAfterRelease(host, w, stance, why);
+      if (this.isPostBreak()) {
+        return this.postBreakFreeBrain(host, w, stance, why);
       }
       const holdHits = this.statusFamilyHits(
         /osc cool hold|tools-sticky-hold|tools-label-cool-hold|post-cool-theater|pond-sell-latched|sell-latch-hold|tools-sticky-explore/
       );
       if (this.durableLeaveHierarchyReleased || this.postHierarchyReleaseEscapeCount >= 1 || this.statusFamilyHits(/osc cool — leave→release|insta osc — release|pond-cap — release/) >= 1) {
-        this.markLifeEscapeSpent(host, `cool-hold-after-release:${why}`);
-        return this.oneProductiveQuietAfterRelease(host, w, stance, why);
+        this.enterPostBreak(host, `cool-hold-after-release:${why}`);
+        return this.postBreakFreeBrain(host, w, stance, why);
       }
       if (holdHits >= 3 || this.durableLeaveSettleDone || this.durableLeaveDoneHits >= 1) {
         return this.coolHoldEscalateLeave(host, w, stance, why);
@@ -6321,12 +6303,12 @@
      */
     coolHoldEscalateLeave(host, w, stance, why) {
       var _a, _b;
-      if (this.isLifeEscapeSpent()) {
-        return this.oneProductiveQuietAfterRelease(host, w, stance, `leave:${why}`);
+      if (this.isPostBreak()) {
+        return this.postBreakFreeBrain(host, w, stance, `leave:${why}`);
       }
       if (this.durableLeaveHierarchyReleased || this.postHierarchyReleaseEscapeCount >= 1 || this.statusFamilyHits(/osc cool — leave→release|insta osc — release|pond-cap — release/) >= 1) {
-        this.markLifeEscapeSpent(host, `leave-after-release:${why}`);
-        return this.oneProductiveQuietAfterRelease(host, w, stance, `leave:${why}`);
+        this.enterPostBreak(host, `leave-after-release:${why}`);
+        return this.postBreakFreeBrain(host, w, stance, `leave:${why}`);
       }
       this.latchThrash();
       this.latchClash();
@@ -6361,10 +6343,10 @@
         if (!this.durableLeaveHierarchyReleased) {
           this.markDurableLeaveHierarchyReleased(host, `cool-hold-leave ${why}`);
         }
-        this.markLifeEscapeSpent(host, `cool-hold-leave\u2192release:${why}`);
+        this.enterPostBreak(host, `cool-hold-leave\u2192release:${why}`);
         this.noteAction("osc cool \u2014 leave\u2192release");
-        host.log(`AUTO: osc cool hold \u2192 leave/release (3011) ${why}`);
-        return this.oneProductiveQuietAfterRelease(host, w, stance, `cool-hold-release:${why}`);
+        host.log(`AUTO: osc cool hold \u2192 leave/release (3100) ${why}`);
+        return this.postBreakFreeBrain(host, w, stance, `cool-hold-release:${why}`);
       }
       this.instaOscLeaveArmed = true;
       this.instaOscLeaveHits = Math.max(this.instaOscLeaveHits, 1);
@@ -6392,55 +6374,27 @@
       return Math.max(statusHits, actionHits);
     }
     coolHoldPostReleaseWalk(host, w, stance, why) {
-      var _a, _b, _c, _d;
-      if (this.isLifeEscapeSpent()) {
-        return this.oneProductiveQuietAfterRelease(host, w, stance, `postrel:${why}`);
+      var _a, _b;
+      if (this.isPostBreak()) {
+        return this.postBreakFreeBrain(host, w, stance, `postrel:${why}`);
       }
       this.postReleaseCoolWalkHits += 1;
       const prisonHits = this.postReleaseCoolPrisonHits();
       if (this.postReleaseCoolWalkHits >= 3 || prisonHits >= 3) {
-        this.postReleaseCoolExhausted = true;
-        this.lifeEscapeSpent = true;
+        this.enterPostBreak(host, `post-release-cool-exhaust:${why}`);
         this.latchThrash();
         this.latchClash();
-        this.clearFundIntent("tool");
-        this.clearFundIntent("food");
-        this.stickyPhaseLeaveArmed = true;
-        this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
-        this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 768);
-        this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 640);
-        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 640);
-        this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 640);
-        this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 640);
-        this.armBreakerExploreCool(1024);
-        if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
-          this.h1001.phase = "GEAR_FARM";
-        } else if (host.hasTool("pickaxe")) {
-          this.h1001.phase = "FIRST_WEP";
-        }
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/osc cool — leave|osc cool hold|leave→release|quiet hold — post RELEASE|post-RELEASE escape|pond-cap — release|tools-sticky|tools mine|tools find rock|tools wander|insta osc — release|insta osc — cool|post-release cool|FIRST_WEP hold|phase cool|post-cool-theater/i.test(s)
         );
         this.actions = this.actions.filter(
           (s) => !/post-release cool|osc cool — leave|osc cool hold|insta osc —|tools-sticky|tools-label-cool|post-cool-theater|FIRST_WEP hold — wander|phase cool/i.test(s)
         );
-        const shop2 = this.mem(w, "shop");
-        const chest2 = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
-        if (shop2) host.walkTo(shop2.x, shop2.y);
-        else if (chest2 && !this.isGatherTileBlocked(chest2.x, chest2.y)) host.walkTo(chest2.x, chest2.y);
-        else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-        else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-        else if (w.explore) {
-          this.desireXY = { x: w.explore.x, y: w.explore.y };
-          host.walkTo(w.explore.x, w.explore.y);
-        }
         if (!/post-release cool — exhaust/i.test(this.actions[this.actions.length - 1] || "")) {
           this.noteAction("post-release cool \u2014 exhaust yield");
-          host.log(`AUTO: post-release cool exhaust \u2192 yield (3008) ${why}`);
+          host.log(`AUTO: post-release cool exhaust \u2192 postBreak (3100) ${why}`);
         }
-        this.setStatus(host, w, stance, host.hasTool("pickaxe") ? "gear farm \u2014 after cool exhaust" : "explore \u2014 after cool exhaust");
-        this.cool = 0;
-        return false;
+        return this.postBreakFreeBrain(host, w, stance, `exhaust:${why}`);
       }
       this.latchThrash();
       this.armBreakerExploreCool(1024);
@@ -6465,7 +6419,7 @@
         (s) => !/osc cool — leave→release|osc cool — leave|quiet hold — post RELEASE|post-RELEASE escape|pond-cap — release|insta osc — release/i.test(s)
       );
       const shop = this.mem(w, "shop");
-      const chest = (_d = (_c = w.seen) == null ? void 0 : _c.chest) != null ? _d : this.mem(w, "chest");
+      const chest = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
       if (shop) host.walkTo(shop.x, shop.y);
       else if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) host.walkTo(chest.x, chest.y);
       else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
@@ -6489,8 +6443,8 @@
      */
     hardenInstaOscCool(host, w, stance, pairKey, label) {
       var _a, _b;
-      if (this.isLifeEscapeSpent()) {
-        return this.postExhaustDurableDivert(host, w, stance, `insta-${label}:${pairKey}`);
+      if (this.isPostBreak()) {
+        return this.postBreakFreeBrain(host, w, stance, `insta-${label}:${pairKey}`);
       }
       this.latchThrash();
       this.latchClash();
