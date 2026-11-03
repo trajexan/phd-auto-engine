@@ -1,4 +1,4 @@
-/* phd auto-engine 3013 — pull via GET /api/auto-engine */
+/* phd auto-engine 3014 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3013";
+  var AUTO_ENGINE_VERSION = "3014";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -5317,6 +5317,9 @@
       if (/wanderspin hard leave/.test(k)) return "leave-spin";
       if (/^phase cool$|phase cool$/.test(k) || k === "phase cool") return "phase-cool";
       if (/tools wander/.test(k)) return "tools-wander";
+      if (/tools find rock|tools mine|sticky progress — mine|phase cool mine/.test(k)) return "tools-rock-seek";
+      if (/rock thrash|rock osc|status osc rock|rock find thrash/.test(k)) return "tools-rock-flee";
+      if (/^tools explore$|tools explore/.test(k) && !/explore-kite|kite/.test(k)) return "tools-rock-flee";
       if (/insta osc — cool|pond-cap — cool/.test(k)) return "osc-cool";
       if (/insta osc/.test(k)) return "insta-leave";
       if (/post-release escape|post hierarchy release/.test(k)) return "release-cool";
@@ -6031,12 +6034,17 @@
         if (/sell/.test(joined) && /pond|fish|shop|find shop/.test(joined)) this.pondSellPrisonLatched = true;
         if (/sell|shop|find shop|sell ore/.test(joined)) this.pondBreakCapHits = Math.max(this.pondBreakCapHits, 2);
       }
-      if (/tools|explore|kite|lethal|sticky|pickaxe|emerg|wander|phase|quiet hold|first.?wep|kite cool|leave-spin|hold-wander|phase-cool|tools-wander|fund hatchet|fund |mine|find rock|rock osc/i.test(joined)) {
+      if (/tools|explore|kite|lethal|sticky|pickaxe|emerg|wander|phase|quiet hold|first.?wep|kite cool|leave-spin|hold-wander|phase-cool|tools-wander|tools-rock|fund hatchet|fund |mine|find rock|rock osc|rock thrash|rock-flee|rock-seek/i.test(joined)) {
         this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 1024);
         this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 1024);
         this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
         this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 1024);
-        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1024);
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1280);
+      }
+      if (/chest|hatchet|camp-chest|camp-chain|camp-tree|kit hatchet|kit cool/i.test(joined)) {
+        this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1024);
+        this.campChainBreakUntil = Math.max(this.campChainBreakUntil, this.runTicks + 1024);
+        this.chopBreakUntil = Math.max(this.chopBreakUntil, this.runTicks + 768);
       }
     }
     /**
@@ -6059,9 +6067,11 @@
           const ban2 = new RegExp(hit.fams.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "i");
           this.stuckRecentStatus = this.stuckRecentStatus.filter((s) => !ban2.test(this.statusFamKey(s)) && !this.isDivertProductFam(this.statusFamKey(s)));
           this.actions = this.actions.filter((s) => !ban2.test(this.statusFamKey(s)) && !/divert-product scrub/i.test(s));
-          this.noteAction(`divert-product scrub \u2014 insta:${pairKey}`);
-          if (this.lifeSpentDivertHits >= 5) {
-            host.log(`AUTO: scrub cool seals only hits=${this.lifeSpentDivertHits} [${pairKey}] (3013)`);
+          const trwCombat = /tools-rock|tools-wander|tools explore|find rock|rock thrash|rock osc|approach kite|mob kite|mob engage|lethal|emerg hub|camp-chest|hatchet|chest soft/i.test(pairKey);
+          this.noteAction(trwCombat ? `divert-product scrub \u2014 seals:${pairKey}` : `divert-product scrub \u2014 insta:${pairKey}`);
+          if (this.lifeSpentDivertHits >= 5 || trwCombat) {
+            if (trwCombat) this.noteAction("tools-rock-wander prison");
+            host.log(`AUTO: scrub cool seals only hits=${this.lifeSpentDivertHits} [${pairKey}] (3014)`);
             if (host.hasTool("pickaxe") && !w.hasMetalWeapon && !w.hasStyleWeapon) {
               this.armPhaseIntent(this.h1001.phase === "TOOLS" ? "TOOLS" : "FIRST_WEP", "mine");
             } else if (host.hasTool("pickaxe")) {
@@ -6143,7 +6153,8 @@
       var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G;
       if (this.tryInstaOscBreak(host, w, stance)) return true;
       if (this.tryPhaseIntentHold(host, w, stance)) return true;
-      if (this.isLifeEscapeSpent() && (this.statusFamilyHits(/stuck rethink/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/emerg hub|emerg-tools/) >= 3 || this.statusFamilyHits(/tools explore|FIRST_WEP hold/) >= 4 || this.statusFamilyHits(/tools mine|tools find rock/) >= 4 || this.statusFamilyHits(/lethal kite/) >= 5 || this.statusFamilyHits(/enroute pond|food fish|find pond/) >= 4 || this.statusFamilyHits(/food sell ore|food find shop/) >= 4 || this.statusFamilyHits(/tools fund hatchet|tools fund /) >= 4 || this.statusOscPair(/enroute pond|find pond/, /food fish/) || this.statusOscPair(/tools mine|tools find rock/, /tools fund|lethal kite/) || this.statusOscPair(/food sell ore|sell ore/, /food find shop|find shop/))) {
+      if (this.isLifeEscapeSpent() && (this.statusFamilyHits(/stuck rethink/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/emerg hub|emerg-tools/) >= 3 || this.statusFamilyHits(/tools explore|FIRST_WEP hold/) >= 4 || this.statusFamilyHits(/tools mine|tools find rock/) >= 4 || this.statusFamilyHits(/lethal kite/) >= 5 || this.statusFamilyHits(/enroute pond|food fish|find pond/) >= 4 || this.statusFamilyHits(/food sell ore|food find shop/) >= 4 || this.statusFamilyHits(/tools fund hatchet|tools fund /) >= 4 || this.statusOscPair(/enroute pond|find pond/, /food fish/) || this.statusOscPair(/tools mine|tools find rock/, /tools fund|lethal kite/) || this.statusOscPair(/food sell ore|sell ore/, /food find shop|find shop/) || this.statusFamilyHits(/tools wander thrash|rock find thrash|rock thrash|rock osc/) >= 3 || this.statusFamilyHits(/tools explore|tools find rock|tools wander/) >= 5 || this.statusOscPair(/tools explore|tools wander/, /tools find rock|rock thrash|rock osc/) || this.statusOscPair(/approach kite|mob kite|lethal kite/, /mob engage|mob kite outlook|lethal cover|emerg hub/) || this.statusFamilyHits(/camp-chest|hatchet\/chest|hatchet osc|camp-chain osc/) >= 3 || this.statusOscPair(/camp-chest|hatchet\/chest|open chest/, /hatchet osc|tools hatchet|kit hatchet|camp-chain/))) {
+        this.noteAction("tools-rock-wander prison");
         return this.postExhaustDurableDivert(host, w, stance, "post-ex-mono");
       }
       if (this.oscCoolDivertActive() && (this.statusFamilyHits(/tools wander|tools explore/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/tools mine|tools find rock/) >= 4 || this.statusFamilyHits(/phase cool|FIRST_WEP hold|wanderSpin hard leave/) >= 3 || this.statusFamilyHits(/food-sell\/pond-break — prison|pond-cap — cool/) >= 1 || this.statusFamilyHits(/osc cool hold/) >= 2)) {
@@ -6192,7 +6203,7 @@
       }
       if (!this.rockFindBreakActive() && (this.statusOscPair(/tools find rock/, /tools mine/) || this.statusOscPair(/tools find rock|tools mine/, /tools explore|tools wander/) || this.statusOscPair(/rock osc/, /tools explore|tools find rock|tools mine|tools wander/))) {
         this.rockFindRethinks = 0;
-        this.rockFindBreakUntil = this.runTicks + 480;
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 480);
         const rk = (_e = (_d = w.seen) == null ? void 0 : _d.rock) != null ? _e : this.mem(w, "rock");
         if (rk) this.blockGatherTile(rk.x, rk.y);
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
@@ -8445,6 +8456,16 @@
         return false;
       }
       const stickyLeave = this.stuckWanderBreakActive() || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.hatchetChestBreakActive();
+      if (this.isLifeEscapeSpent() && this.rockFindBreakActive() && this.lifeSpentDivertHits >= 2) {
+        this.noteAction("tools-rock-wander prison");
+        if (this.phaseIntentLocked()) return false;
+        if (host.hasTool("pickaxe") && !w.hasMetalWeapon && !w.hasStyleWeapon) {
+          this.armPhaseIntent(this.h1001.phase === "TOOLS" ? "TOOLS" : "FIRST_WEP", "mine");
+        } else if (host.hasTool("pickaxe")) {
+          this.armPhaseIntent("GEAR_FARM", "hunt");
+        }
+        return false;
+      }
       const label = this.stickyExploreBlockActive() ? "phase cool" : stickyLeave ? "sticky progress \u2014 explore" : breaking ? "tools wander" : "tools find rock";
       if (this.oscCoolDivertActive() && /tools wander|phase cool|sticky progress|tools find rock/i.test(label)) {
         return this.coolHoldOscDivert(host, w, stance, "tools-label-cool-hold");
@@ -9754,7 +9775,7 @@
       else if (!/tools explore|tools mine|tools wait|rock thrash/i.test(stRethink)) this.rockFindRethinks = 0;
       if (this.rockFindRethinks >= 1) {
         this.rockFindRethinks = 0;
-        this.rockFindBreakUntil = this.runTicks + 192;
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 768);
         this.noteAction("rock find thrash \u2014 explore");
         host.log("AUTO: tools find rock/mine thrash \u2014 break to explore (2037)");
         if (!host.hasTool("hatchet") && w.coins >= 30) {
