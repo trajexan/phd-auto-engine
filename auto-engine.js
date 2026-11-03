@@ -1,4 +1,4 @@
-/* phd auto-engine 3009 — pull via GET /api/auto-engine */
+/* phd auto-engine 3010 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3009";
+  var AUTO_ENGINE_VERSION = "3010";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1473,6 +1473,13 @@
       __publicField(this, "postReleaseCoolExhausted", false);
       /** Eng 3008: coolHoldPostReleaseWalk entries this life — ≥3 → exhaust even if notes gated. */
       __publicField(this, "postReleaseCoolWalkHits", 0);
+      /**
+       * Eng 3010 / t1806: one leave→RELEASE / hierarchy RELEASE / post-RELEASE escape
+       * spent for the whole life (not a cool timer). While set: durable divert only —
+       * ban coolHold* re-arm, leave→release re-fire, post-release walk theater.
+       * Clears only on death/new life. Sets postReleaseCoolExhausted so 3008/3009 gates apply.
+       */
+      __publicField(this, "lifeEscapeSpent", false);
       /** Eng 2049 / R19: rethinks while sticky leave already active → escalate to progress. */
       __publicField(this, "stickyLeaveRethinks", 0);
       /**
@@ -1662,6 +1669,7 @@
         this.pondBreakCapHits = 0;
         this.postReleaseCoolExhausted = false;
         this.postReleaseCoolWalkHits = 0;
+        this.lifeEscapeSpent = false;
         this.stickyLeaveRethinks = 0;
         this.stickyExploreBlockUntil = 0;
         this.stickyPhaseLeaveArmed = false;
@@ -5315,7 +5323,24 @@
       return false;
     }
     /**
-     * Eng 3009 / R69: after post-release cool exhaust, cool|leave|release are spent.
+     * Eng 3010 / t1806: mark one leave→RELEASE / hierarchy RELEASE / post-RELEASE
+     * escape spent for this life. Idempotent. Arms postReleaseCoolExhausted so
+     * existing 3008/3009 coolHold gates divert (no new timer — t1800).
+     */
+    markLifeEscapeSpent(host, why) {
+      if (this.lifeEscapeSpent) return;
+      this.lifeEscapeSpent = true;
+      this.postReleaseCoolExhausted = true;
+      this.postReleaseCoolWalkHits = Math.max(this.postReleaseCoolWalkHits, 3);
+      host.log(`AUTO: life escape SPENT (3010) ${why}`);
+    }
+    /** Eng 3010: escape already spent this life (RELEASE/escape or exhaust latch). */
+    isLifeEscapeSpent() {
+      return this.lifeEscapeSpent || this.postReleaseCoolExhausted;
+    }
+    /**
+     * Eng 3009 / R69 + eng 3010 / t1806: after life escape spent (first RELEASE /
+     * post-RELEASE escape) or post-release cool exhaust, cool|leave|release are spent.
      * Do NOT re-arm insta osc — cool / coolHold theater. Early thrash mark + one
      * durable hub/shop divert under existing cool-family bans (t1800 — no new timer).
      * Returns true to consume the tick (walk issued); cool=0 so brain resumes next.
@@ -5356,15 +5381,15 @@
         this.desireXY = { x: w.explore.x, y: w.explore.y };
         host.walkTo(w.explore.x, w.explore.y);
       }
-      if (!/post-exhaust divert|after cool exhaust/i.test(this.actions[this.actions.length - 1] || "")) {
-        this.noteAction(`post-exhaust divert \u2014 ${why}`);
-        host.log(`AUTO: post-exhaust durable divert (3009) ${why}`);
+      if (!/post-exhaust divert|life-spent divert|after cool exhaust|after life escape/i.test(this.actions[this.actions.length - 1] || "")) {
+        this.noteAction(this.lifeEscapeSpent ? `life-spent divert \u2014 ${why}` : `post-exhaust divert \u2014 ${why}`);
+        host.log(`AUTO: ${this.lifeEscapeSpent ? "life-spent" : "post-exhaust"} durable divert (3010) ${why}`);
       }
       this.setStatus(
         host,
         w,
         stance,
-        host.hasTool("pickaxe") ? "gear farm \u2014 after cool exhaust" : "explore \u2014 after cool exhaust"
+        host.hasTool("pickaxe") ? this.lifeEscapeSpent ? "gear farm \u2014 after life escape" : "gear farm \u2014 after cool exhaust" : this.lifeEscapeSpent ? "explore \u2014 after life escape" : "explore \u2014 after cool exhaust"
       );
       this.cool = 0;
       return true;
@@ -5377,14 +5402,15 @@
      */
     coolHoldOscDivert(host, w, stance, why) {
       var _a, _b;
-      if (this.postReleaseCoolExhausted) {
+      if (this.isLifeEscapeSpent()) {
         return this.postExhaustDurableDivert(host, w, stance, why);
       }
       const holdHits = this.statusFamilyHits(
         /osc cool hold|tools-sticky-hold|tools-label-cool-hold|post-cool-theater|pond-sell-latched|sell-latch-hold|tools-sticky-explore/
       );
-      if (this.durableLeaveHierarchyReleased || this.postHierarchyReleaseEscapeCount >= 1 || this.statusFamilyHits(/osc cool — leave→release|insta osc — release/) >= 1) {
-        return this.coolHoldPostReleaseWalk(host, w, stance, why);
+      if (this.durableLeaveHierarchyReleased || this.postHierarchyReleaseEscapeCount >= 1 || this.statusFamilyHits(/osc cool — leave→release|insta osc — release|pond-cap — release/) >= 1) {
+        this.markLifeEscapeSpent(host, `cool-hold-after-release:${why}`);
+        return this.postExhaustDurableDivert(host, w, stance, why);
       }
       if (holdHits >= 3 || this.durableLeaveSettleDone || this.durableLeaveDoneHits >= 1) {
         return this.coolHoldEscalateLeave(host, w, stance, why);
@@ -5411,7 +5437,7 @@
       }
       if (!/pond-cap — cool|insta osc — cool/i.test(this.lastStatus || "")) {
         this.noteAction(`osc cool hold \u2014 ${why}`);
-        host.log(`AUTO: osc cool hold divert (3008) ${why}`);
+        host.log(`AUTO: osc cool hold divert (3010) ${why}`);
         this.setStatus(host, w, stance, "insta osc \u2014 cool");
       }
       this.cool = 12;
@@ -5425,11 +5451,12 @@
      */
     coolHoldEscalateLeave(host, w, stance, why) {
       var _a, _b;
-      if (this.postReleaseCoolExhausted) {
+      if (this.isLifeEscapeSpent()) {
         return this.postExhaustDurableDivert(host, w, stance, `leave:${why}`);
       }
-      if (this.durableLeaveHierarchyReleased || this.postHierarchyReleaseEscapeCount >= 1 || this.statusFamilyHits(/osc cool — leave→release|insta osc — release/) >= 1) {
-        return this.coolHoldPostReleaseWalk(host, w, stance, why);
+      if (this.durableLeaveHierarchyReleased || this.postHierarchyReleaseEscapeCount >= 1 || this.statusFamilyHits(/osc cool — leave→release|insta osc — release|pond-cap — release/) >= 1) {
+        this.markLifeEscapeSpent(host, `leave-after-release:${why}`);
+        return this.postExhaustDurableDivert(host, w, stance, `leave:${why}`);
       }
       this.latchThrash();
       this.latchClash();
@@ -5464,8 +5491,9 @@
         if (!this.durableLeaveHierarchyReleased) {
           this.markDurableLeaveHierarchyReleased(host, `cool-hold-leave ${why}`);
         }
+        this.markLifeEscapeSpent(host, `cool-hold-leave\u2192release:${why}`);
         this.noteAction("osc cool \u2014 leave\u2192release");
-        host.log(`AUTO: osc cool hold \u2192 leave/release (3008) ${why}`);
+        host.log(`AUTO: osc cool hold \u2192 leave/release (3010) ${why}`);
         this.setStatus(host, w, stance, "insta osc \u2014 release");
         this.cool = 10;
         return true;
@@ -5473,7 +5501,7 @@
       this.instaOscLeaveArmed = true;
       this.instaOscLeaveHits = Math.max(this.instaOscLeaveHits, 1);
       this.noteAction("osc cool \u2014 leave");
-      host.log(`AUTO: osc cool hold \u2192 leave (3008) ${why}`);
+      host.log(`AUTO: osc cool hold \u2192 leave (3010) ${why}`);
       this.setStatus(host, w, stance, "insta osc \u2014 leave");
       this.cool = 12;
       return true;
@@ -5497,13 +5525,14 @@
     }
     coolHoldPostReleaseWalk(host, w, stance, why) {
       var _a, _b, _c, _d;
-      if (this.postReleaseCoolExhausted) {
+      if (this.isLifeEscapeSpent()) {
         return this.postExhaustDurableDivert(host, w, stance, `postrel:${why}`);
       }
       this.postReleaseCoolWalkHits += 1;
       const prisonHits = this.postReleaseCoolPrisonHits();
       if (this.postReleaseCoolWalkHits >= 3 || prisonHits >= 3) {
         this.postReleaseCoolExhausted = true;
+        this.lifeEscapeSpent = true;
         this.latchThrash();
         this.latchClash();
         this.clearFundIntent("tool");
@@ -5592,7 +5621,7 @@
      */
     hardenInstaOscCool(host, w, stance, pairKey, label) {
       var _a, _b;
-      if (this.postReleaseCoolExhausted) {
+      if (this.isLifeEscapeSpent()) {
         return this.postExhaustDurableDivert(host, w, stance, `insta-${label}:${pairKey}`);
       }
       this.latchThrash();
@@ -5629,8 +5658,9 @@
         host.walkTo(w.explore.x, w.explore.y);
       }
       if (label === "release") {
+        this.markLifeEscapeSpent(host, `insta-osc-release:${pairKey}`);
         this.noteAction("insta osc \u2014 release");
-        host.log(`AUTO: insta osc \u2014 release [${pairKey}] (3002)`);
+        host.log(`AUTO: insta osc \u2014 release [${pairKey}] (3010)`);
         this.setStatus(host, w, stance, "insta osc \u2014 release");
         this.cool = 14;
       } else {
@@ -5657,7 +5687,7 @@
       const hit = this.detectInstaOsc();
       if (!hit) return false;
       const pairKey = hit.fams.slice(0, 4).join("|");
-      if (this.postReleaseCoolExhausted) {
+      if (this.isLifeEscapeSpent()) {
         return this.postExhaustDurableDivert(host, w, stance, `insta-osc:${pairKey}`);
       }
       if (this.instaOscLeaveHits >= 2) {
@@ -5712,7 +5742,7 @@
     tryStatusOscBreak(host, w, stance) {
       var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G;
       if (this.tryInstaOscBreak(host, w, stance)) return true;
-      if (this.postReleaseCoolExhausted && (this.statusFamilyHits(/stuck rethink/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/emerg hub|emerg-tools/) >= 3 || this.statusFamilyHits(/tools explore|FIRST_WEP hold/) >= 4 || this.statusFamilyHits(/tools mine|tools find rock/) >= 4 || this.statusFamilyHits(/lethal kite/) >= 5)) {
+      if (this.isLifeEscapeSpent() && (this.statusFamilyHits(/stuck rethink/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/emerg hub|emerg-tools/) >= 3 || this.statusFamilyHits(/tools explore|FIRST_WEP hold/) >= 4 || this.statusFamilyHits(/tools mine|tools find rock/) >= 4 || this.statusFamilyHits(/lethal kite/) >= 5)) {
         return this.postExhaustDurableDivert(host, w, stance, "post-ex-mono");
       }
       if (this.oscCoolDivertActive() && (this.statusFamilyHits(/tools wander|tools explore/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/tools mine|tools find rock/) >= 4 || this.statusFamilyHits(/phase cool|FIRST_WEP hold|wanderSpin hard leave/) >= 3 || this.statusFamilyHits(/food-sell\/pond-break — prison|pond-cap — cool/) >= 1 || this.statusFamilyHits(/osc cool hold/) >= 2)) {
@@ -6698,17 +6728,19 @@
           this.desireXY = { x: w.explore.x, y: w.explore.y };
           host.walkTo(w.explore.x, w.explore.y);
         }
-        if (this.durableLeaveHierarchyReleased || this.postHierarchyReleaseEscapeCount >= 1 || this.statusFamilyHits(/osc cool — leave→release|insta osc — release/) >= 1) {
-          return this.coolHoldPostReleaseWalk(host, w, stance, `pond-cap-postrel:${why}`);
+        if (this.isLifeEscapeSpent() || this.durableLeaveHierarchyReleased || this.postHierarchyReleaseEscapeCount >= 1 || this.statusFamilyHits(/osc cool — leave→release|insta osc — release|pond-cap — release/) >= 1) {
+          this.markLifeEscapeSpent(host, `pond-cap-postrel:${why}`);
+          return this.postExhaustDurableDivert(host, w, stance, `pond-cap-postrel:${why}`);
         }
         if (this.pondBreakCapHits >= 3) {
           this.noteAction(`pond-cap \u2014 cool (${why})`);
-          host.log(`AUTO: pond-cap \u2014 cool divert (3008) ${why}`);
+          host.log(`AUTO: pond-cap \u2014 cool divert (3010) ${why}`);
           this.setStatus(host, w, stance, "pond-cap \u2014 cool");
           this.cool = 16;
         } else {
+          this.markLifeEscapeSpent(host, `pond-cap-release:${why}`);
           this.noteAction(`pond-cap \u2014 release (${why})`);
-          host.log(`AUTO: pond-cap \u2014 release (3008) ${why}`);
+          host.log(`AUTO: pond-cap \u2014 release (3010) ${why}`);
           this.setStatus(host, w, stance, "pond-cap \u2014 release");
           this.cool = 14;
         }
@@ -6970,12 +7002,13 @@
       this.quietEscalateLeaveHits = 0;
       this.quietBreakEscalateHits = 0;
     }
-    /** Eng 2084: mark hierarchy released (idempotent). */
+    /** Eng 2084 + eng 3010: mark hierarchy released (idempotent); spends life escape. */
     markDurableLeaveHierarchyReleased(host, why) {
       if (!this.durableLeaveHierarchyReleased) {
         this.durableLeaveHierarchyReleased = true;
         if (!this.durableLeaveSettleDone) this.markDurableLeaveSettleDone(host, why);
         host.log(`AUTO: durable leave hierarchy RELEASED (2084) ${why}`);
+        this.markLifeEscapeSpent(host, `hierarchy-RELEASE:${why}`);
       }
     }
     /** Eng 2081 / R50: durable leave settle window (~1920t). */
@@ -7386,7 +7419,11 @@
     }
     finishPostHierarchyReleaseQuiet(host, w, stance, why) {
       var _a, _b, _c, _d, _e, _f;
-      if (this.postHierarchyReleaseEscapeActive() || this.postHierarchyReleaseEscapeCount >= 1) {
+      if (this.postHierarchyReleaseEscapeActive() || this.postHierarchyReleaseEscapeCount >= 1 || this.isLifeEscapeSpent()) {
+        if (this.isLifeEscapeSpent() || this.postHierarchyReleaseEscapeCount >= 1) {
+          this.markLifeEscapeSpent(host, `post-RELEASE-quiet:${why}`);
+          return this.postExhaustDurableDivert(host, w, stance, `post-RELEASE-quiet:${why}`);
+        }
         this.stickyPhaseLeaveArmed = true;
         this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
         this.durableLeaveSettleDone = true;
@@ -7426,6 +7463,7 @@
         this.postHierarchyReleaseMineHits = 0;
         this.postHierarchyReleaseEscapeCount++;
         this.postHierarchyReleaseEscapeUntil = this.runTicks + 2048;
+        this.markLifeEscapeSpent(host, `post-RELEASE-escape:${why}`);
         this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 1024);
         this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 1024);
         this.armPondBreakSticky(1024, true);
