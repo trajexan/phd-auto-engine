@@ -1,4 +1,4 @@
-/* phd auto-engine 2090 — pull via GET /api/auto-engine */
+/* phd auto-engine 3000 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "2090";
+  var AUTO_ENGINE_VERSION = "3000";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1454,6 +1454,13 @@
        * Once set: escalate prison only; never soft sell/wander under break.
        */
       __publicField(this, "pondSellPrisonLatched", false);
+      /**
+       * Eng 3000 / t1800 cool|leave|release: after insta A↔B / ABCABC fire, one leave armed
+       * this cool window — do not invent settle2; reuse wander/hub leave once.
+       */
+      __publicField(this, "instaOscLeaveArmed", false);
+      /** Eng 3000: last insta-osc pair key (famA|famB) while cool live — forbid re-arm. */
+      __publicField(this, "instaOscPairKey", "");
       /** Eng 2049 / R19: rethinks while sticky leave already active → escalate to progress. */
       __publicField(this, "stickyLeaveRethinks", 0);
       /**
@@ -1637,6 +1644,8 @@
         this.postHierarchyReleaseEscapeUntil = 0;
         this.postHierarchyReleaseEscapeCount = 0;
         this.pondSellPrisonLatched = false;
+        this.instaOscLeaveArmed = false;
+        this.instaOscPairKey = "";
         this.stickyLeaveRethinks = 0;
         this.stickyExploreBlockUntil = 0;
         this.stickyPhaseLeaveArmed = false;
@@ -5211,7 +5220,96 @@
      * (pond/tools/shop loops otherwise never arm stuck/pondBreak).
      */
     statusIgnoresHpMpProgress(st) {
-      return /food fish|enroute pond|find pond|food last farm|food buffer|food mine break|round-trip pond|util fish|tools find rock|tools mine|tools explore|tools wander|tools pickaxe|tools fund|rock osc|food sell ore|food find shop|bag find shop|sell-ore osc|sell trim|round-trip rock|round-trip tree|round-trip shop|util chop|chop for fire|cook\b|first wep|mine first wep|first-wep osc|remembered door|door through|door open|door thrash|tools hatchet|open chest|chest soft-block|mono thrash|mono divert|hatchet osc|hatchet thrash|explore-kite osc|emerg-tools osc|status osc explore\/kite|lethal kite|lethal close|approach kite|mob kite|kite outlook|enroute loot|walk HV loot|walk loot|emerg hub|food-mine osc|food-fish mono|altar runecraft|stuck rethink|stuck-wander osc|wander-mob osc|sticky progress|sticky leave|camp-chain osc|camp-shop osc|camp-tree osc|camp-rock osc|gear-explore-kite|sticky-explore mono|lethal-loot osc|sticky leave — phase|lethal-cover osc|camp-rock osc|mono divert escalate|FIRST_WEP hold|first wep mine|camp-chain osc|camp-chain same|gear-explore-kite osc|first-wep-combat osc|phase cool|camp-chest osc|explore-kite osc — wander|first-wep osc — wander|tools-hatchet hang|camp-trim osc|pond-sell osc|sell trim empty|door thrash|kite cool|FIRST_WEP hold — wander|quiet hold — tools bootstrap|quiet hold — bootstrap break|quiet hold — break escalate|quiet hold — escalate leave|quiet hold — progress mine|quiet hold — post RELEASE|post-RELEASE mine|post-RELEASE escape|pond break — wander|pond osc — wander|camp-tree osc — wander|camp-rock osc — wander|camp-shop osc — wander|camp-chest osc — wander|camp-chain osc — wander|food-mine osc — wander|food-fish mono — wander|altar-fund osc — wander|kite-cool-lethal osc — hub|kite-cool-lethal osc|kite-cool-wander osc — hub|kite-cool-wander osc|kite cool hub|kite cool exit|kite cool exit grace/i.test(st);
+      return /food fish|enroute pond|find pond|food last farm|food buffer|food mine break|round-trip pond|util fish|tools find rock|tools mine|tools explore|tools wander|tools pickaxe|tools fund|rock osc|food sell ore|food find shop|bag find shop|sell-ore osc|sell trim|round-trip rock|round-trip tree|round-trip shop|util chop|chop for fire|cook\b|first wep|mine first wep|first-wep osc|remembered door|door through|door open|door thrash|tools hatchet|open chest|chest soft-block|mono thrash|mono divert|hatchet osc|hatchet thrash|explore-kite osc|emerg-tools osc|status osc explore\/kite|lethal kite|lethal close|approach kite|mob kite|kite outlook|enroute loot|walk HV loot|walk loot|emerg hub|food-mine osc|food-fish mono|altar runecraft|stuck rethink|stuck-wander osc|wander-mob osc|sticky progress|sticky leave|camp-chain osc|camp-shop osc|camp-tree osc|camp-rock osc|gear-explore-kite|sticky-explore mono|lethal-loot osc|sticky leave — phase|lethal-cover osc|camp-rock osc|mono divert escalate|FIRST_WEP hold|first wep mine|camp-chain osc|camp-chain same|gear-explore-kite osc|first-wep-combat osc|phase cool|camp-chest osc|explore-kite osc — wander|first-wep osc — wander|tools-hatchet hang|camp-trim osc|pond-sell osc|sell trim empty|door thrash|kite cool|FIRST_WEP hold — wander|quiet hold — tools bootstrap|quiet hold — bootstrap break|quiet hold — break escalate|quiet hold — escalate leave|quiet hold — progress mine|quiet hold — post RELEASE|post-RELEASE mine|post-RELEASE escape|pond break — wander|pond osc — wander|camp-tree osc — wander|camp-rock osc — wander|camp-shop osc — wander|camp-chest osc — wander|camp-chain osc — wander|food-mine osc — wander|food-fish mono — wander|altar-fund osc — wander|kite-cool-lethal osc — hub|kite-cool-lethal osc|kite-cool-wander osc — hub|kite-cool-wander osc|kite cool hub|kite cool exit|kite cool exit grace|insta osc — leave|insta osc/i.test(st);
+    }
+    /**
+     * Eng 3000 / t1800: normalize status to family key (strip |tag and (x,y)).
+     */
+    statusFamKey(s) {
+      return s.toLowerCase().replace(/\s*\|.*$/, "").replace(/\s*\(\d+,\d+\)\s*/g, " ").trim();
+    }
+    /**
+     * Eng 3000 / t1800–t1801: short-window insta A↔B / ABCABC on recent statuses.
+     * Much tighter than statusOscPair (≥4 with a≥2∧b≥2) or mono (≥6).
+     * Patterns (adjacent unique fams in ring tail):
+     *   A-B-A (len≥3) or A-B-C-A-B-C (len≥6).
+     * Returns distinct fams involved, or null.
+     */
+    detectInstaOsc() {
+      const ring = this.stuckRecentStatus;
+      if (ring.length < 3) return null;
+      const fams = [];
+      for (const s of ring) {
+        const k = this.statusFamKey(s);
+        if (!k) continue;
+        if (fams.length === 0 || fams[fams.length - 1] !== k) fams.push(k);
+      }
+      const seq = fams.slice(-6);
+      if (seq.length >= 6) {
+        const a = seq.slice(0, 3);
+        const b = seq.slice(3, 6);
+        if (a[0] === b[0] && a[1] === b[1] && a[2] === b[2] && a[0] !== a[1] && a[1] !== a[2] && a[0] !== a[2]) {
+          return { fams: a.slice(), kind: "abcabc" };
+        }
+      }
+      if (seq.length >= 3) {
+        const n = seq.length;
+        if (seq[n - 1] === seq[n - 3] && seq[n - 1] !== seq[n - 2]) {
+          return { fams: [seq[n - 3], seq[n - 2]], kind: "aba" };
+        }
+      }
+      return null;
+    }
+    /**
+     * Eng 3000 / t1800 cool|leave|release: insta osc → latch thrash (+clash),
+     * cool the pair (forbid re-arm via existing cool family), leave once.
+     * No new timer stack — reuses armBreakerExploreCool + wander/hub leave.
+     */
+    tryInstaOscBreak(host, w, stance) {
+      var _a, _b;
+      const hit = this.detectInstaOsc();
+      if (!hit) return false;
+      const pairKey = hit.fams.slice(0, 3).join("|");
+      if (this.instaOscLeaveArmed && this.instaOscPairKey === pairKey && this.kiteExploreCoolActive()) {
+        return false;
+      }
+      this.latchThrash();
+      if (hit.fams.length >= 2) this.latchClash();
+      this.instaOscPairKey = pairKey;
+      this.instaOscLeaveArmed = true;
+      this.armBreakerExploreCool(768);
+      const joined = hit.fams.join(" ");
+      if (/pond|fish|sell|food mine|food sell|enroute pond|find pond|find shop|sell ore|sell trim/i.test(joined)) {
+        this.armPondBreakSticky(768, true);
+        this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 768);
+        this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 768);
+        if (/sell/.test(joined) && /pond|fish/.test(joined)) this.pondSellPrisonLatched = true;
+      }
+      if (/tools|explore|kite|lethal|sticky|pickaxe|emerg|wander|phase cool|quiet hold|first.?wep|kite cool/i.test(joined)) {
+        this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 768);
+        this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 640);
+        this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 768);
+        this.stickyExploreBlockUntil = Math.max(this.stickyExploreBlockUntil, this.runTicks + 768);
+      }
+      const ban = new RegExp(hit.fams.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "i");
+      this.stuckRecentStatus = this.stuckRecentStatus.filter((s) => !ban.test(this.statusFamKey(s)));
+      this.noteAction(`insta osc ${hit.kind} \u2014 leave`);
+      host.log(`AUTO: insta osc ${hit.kind} [${pairKey}] \u2014 cool+leave (3000)`);
+      this.stickyPhaseLeaveArmed = true;
+      this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+      const shop = this.mem(w, "shop");
+      const chest = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
+      if (shop) host.walkTo(shop.x, shop.y);
+      else if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) host.walkTo(chest.x, chest.y);
+      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+      else if (w.explore) {
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
+        host.walkTo(w.explore.x, w.explore.y);
+      }
+      this.setStatus(host, w, stance, `insta osc \u2014 leave`);
+      this.cool = 12;
+      return true;
     }
     /**
      * Eng 2038 / R8 + t1760: arm breakers from status oscillation alone
@@ -5219,6 +5317,7 @@
      */
     tryStatusOscBreak(host, w, stance) {
       var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G;
+      if (this.tryInstaOscBreak(host, w, stance)) return true;
       const st = (this.lastStatus || "").toLowerCase();
       const pondOsc = this.statusOscPair(/enroute pond|food last farm|round-trip pond/, /food fish|util fish|(^|\s)fish(\s|$)/) || this.statusOscPair(/find pond/, /enroute pond|food fish|remembered door|door through|door open/) || this.statusOscPair(/find shop|sell ore|sell trim/, /door through|door open|remembered door/) || /find pond|find shop/i.test(st) && this.stuckRecentTiles.length >= 6 || /find pond|find shop|door through|door open|sell trim/i.test(st) && this.doorOscStreak >= 2 || this.findPondMonoStreak >= 8;
       if (pondOsc && !this.pondBreakActive()) {
@@ -6464,6 +6563,9 @@
      * or escape to RELEASE once cap reached — never perpetual settle mine.
      */
     routeDurableLeaveSettleOrEscape(host, w, stance, why) {
+      if (this.durableLeaveHierarchyReleased) {
+        return this.finishPostHierarchyReleaseQuiet(host, w, stance, `route-after-release ${why}`);
+      }
       if (this.durableLeaveSettleCapReached()) {
         return this.escapeDurableLeaveSettleCap(host, w, stance, why);
       }
@@ -6476,6 +6578,9 @@
      */
     finishDurableLeaveSettle(host, w, stance, why, opts = {}) {
       var _a, _b, _c, _d;
+      if (this.durableLeaveHierarchyReleased) {
+        return this.finishPostHierarchyReleaseQuiet(host, w, stance, `settle-after-release ${why}`);
+      }
       if (this.durableLeaveSettleClosed() && !this.durableLeaveSettleActive()) {
         return this.finishDurableLeaveDone(host, w, stance, why);
       }
@@ -6687,6 +6792,9 @@
      */
     durableEscalateLeaveExit(host, w, stance, why) {
       var _a, _b, _c, _d;
+      if (this.durableLeaveHierarchyReleased) {
+        return this.finishPostHierarchyReleaseQuiet(host, w, stance, `durable-after-release ${why}`);
+      }
       if (this.durableLeaveSettleActive()) {
         return this.routeDurableLeaveSettleOrEscape(host, w, stance, why);
       }
@@ -6820,9 +6928,10 @@
       if (this.postHierarchyReleaseEscapeActive() || this.postHierarchyReleaseEscapeCount >= 1) {
         this.stickyPhaseLeaveArmed = true;
         this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+        this.durableLeaveSettleDone = true;
         this.latchThrash();
         this.latchClash();
-        host.log(`AUTO: post hierarchy RELEASE escape cool yield (2090) ${why}`);
+        host.log(`AUTO: post hierarchy RELEASE cool yield (3000) ${why}`);
         this.cool = 8;
         return false;
       }
@@ -6845,6 +6954,7 @@
         this.latchClash();
         const rockEsc = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
         if (rockEsc) this.blockGatherTile(rockEsc.x, rockEsc.y);
+        this.armBreakerExploreCool(1024);
         this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 768);
         this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
         this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 768);
@@ -6858,11 +6968,17 @@
         this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 1024);
         this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 1024);
         this.armPondBreakSticky(1024, true);
+        this.durableLeaveSettleDone = true;
+        this.durableLeaveSettleUntil = Math.min(this.durableLeaveSettleUntil, this.runTicks);
+        this.quietBreakEscalateUntil = Math.min(this.quietBreakEscalateUntil, this.runTicks);
+        this.quietEscalateLeaveHits = 0;
+        this.quietBreakEscalateHits = 0;
+        this.instaOscLeaveArmed = true;
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
-          (s) => !/quiet hold — post RELEASE|post-RELEASE mine|TOOLS sticky|emerg-tools|pond-break-cap|stuck-wander|first-wep-hold/i.test(s)
+          (s) => !/quiet hold — post RELEASE|post-RELEASE mine|TOOLS sticky|emerg-tools|pond-break-cap|stuck-wander|first-wep-hold|durable leave settle|quiet hold — durable settle/i.test(s)
         );
-        this.noteAction(`post-RELEASE escape (${why})`);
-        host.log(`AUTO: post hierarchy RELEASE escape wander (2090) #${this.postHierarchyReleaseEscapeCount} ${why}`);
+        this.noteAction(`post-RELEASE escape cool (${why})`);
+        host.log(`AUTO: post hierarchy RELEASE \u2192 cool leave (3000) #${this.postHierarchyReleaseEscapeCount} ${why}`);
         this.setStatus1001(host, w, stance, "post-RELEASE escape");
         if (w.wander) host.walkTo(w.wander.x, w.wander.y);
         else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
@@ -8511,6 +8627,11 @@
           if (usefulApproach) walkOsc = true;
           usefulApproach = false;
         }
+      }
+      const insta = this.detectInstaOsc();
+      if (insta) {
+        this.latchThrash();
+        if (insta.fams.length >= 2) this.latchClash();
       }
       const doorThrash = this.doorOscStreak >= 2;
       const sellTrimThrash = /sell trim|bag sell trim/i.test(stNow) && this.sellTrimNoSellStreak >= 2 && metersFlat;
