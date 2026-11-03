@@ -1,4 +1,4 @@
-/* phd auto-engine 3004 — pull via GET /api/auto-engine */
+/* phd auto-engine 3005 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3004";
+  var AUTO_ENGINE_VERSION = "3005";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -3779,6 +3779,9 @@
       }
       const liveRock = (_d = (_c = w.seen) == null ? void 0 : _c.rock) != null ? _d : null;
       if (liveRock && host.hasTool("pickaxe") && !this.rockFindBreakActive() && !this.isGatherTileBlocked(liveRock.x, liveRock.y)) {
+        if (this.oscCoolDivertActive() && this.statusFamilyHits(/tools mine|tools find rock/) >= 3) {
+          return this.coolHoldOscDivert(host, w, stance, "tools-mine-cool-hold");
+        }
         this.setStatus1001(host, w, stance, "tools mine");
         if (this.walkToTile(host, liveRock.x, liveRock.y)) return true;
         if (this.tryGather(host, w, stance, "tools mine")) return true;
@@ -5302,19 +5305,26 @@
       return false;
     }
     /**
-     * Eng 3003 / R63 + eng 3004 / R64: durable cool-hold walk after osc cool divert —
-     * no new timer, no re-escalate / no oscillating status spam (pond-sell prison /
-     * phase ABCD / tools wander / tools fund sell after cool).
+     * Eng 3003 / R63 + eng 3004 / R64 + eng 3005 / R65: durable cool-hold walk after
+     * osc cool divert — no new timer, no re-escalate / no oscillating status spam.
+     * Eng 3005: repeated cool-hold OR durable leave already done → one leave/release
+     * (t1800 cool→leave→release) so tools-sticky-hold cannot WD-prison after leave.
      */
     coolHoldOscDivert(host, w, stance, why) {
       var _a, _b;
+      const holdHits = this.statusFamilyHits(
+        /osc cool hold|tools-sticky-hold|tools-label-cool-hold|post-cool-theater|pond-sell-latched|sell-latch-hold|tools-sticky-explore/
+      );
+      if (holdHits >= 3 || this.durableLeaveSettleDone || this.durableLeaveDoneHits >= 1 || this.durableLeaveHierarchyReleased) {
+        return this.coolHoldEscalateLeave(host, w, stance, why);
+      }
       this.latchThrash();
       this.armBreakerExploreCool(640);
       this.stuckRecentStatus = this.stuckRecentStatus.filter(
-        (s) => !/food sell|pond break|food pond|emerg pond|pond-sell|food mine break|phase cool|FIRST_WEP hold|wanderSpin|tools wander|tools fund sell|tools mine|insta osc|pond-cap|pond-break-cap/i.test(s)
+        (s) => !/food sell|pond break|food pond|emerg pond|pond-sell|food mine break|phase cool|FIRST_WEP hold|wanderSpin|tools wander|tools fund sell|tools mine|tools find rock|insta osc|pond-cap|pond-break-cap/i.test(s)
       );
       this.actions = this.actions.filter(
-        (s) => !/food-sell\/pond-break — prison|pond-cap —|insta osc|wanderSpin hard leave|phase cool|FIRST_WEP hold — wander|tools wander|tools fund sell/i.test(s)
+        (s) => !/food-sell\/pond-break — prison|pond-cap —|insta osc|wanderSpin hard leave|phase cool|FIRST_WEP hold — wander|tools wander|tools fund sell|tools mine|tools find rock/i.test(s)
       );
       this.stickyPhaseLeaveArmed = true;
       this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
@@ -5330,9 +5340,62 @@
       }
       if (!/pond-cap — cool|insta osc — cool/i.test(this.lastStatus || "")) {
         this.noteAction(`osc cool hold \u2014 ${why}`);
-        host.log(`AUTO: osc cool hold divert (3004) ${why}`);
+        host.log(`AUTO: osc cool hold divert (3005) ${why}`);
         this.setStatus(host, w, stance, "insta osc \u2014 cool");
       }
+      this.cool = 12;
+      return true;
+    }
+    /**
+     * Eng 3005 / R65: cool-hold prison → one leave (or leave→release if leave already
+     * fired). Reuses cool|leave|release only — no new named timer (t1800).
+     */
+    coolHoldEscalateLeave(host, w, stance, why) {
+      var _a, _b;
+      this.latchThrash();
+      this.latchClash();
+      this.armBreakerExploreCool(768);
+      this.clearFundIntent("tool");
+      this.stickyPhaseLeaveArmed = true;
+      this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+      this.stuckRecentStatus = this.stuckRecentStatus.filter(
+        (s) => !/osc cool hold|tools-sticky|tools-label-cool|post-cool-theater|tools mine|tools find rock|tools wander|phase cool|quiet hold — tools bootstrap|kite cool exit grace|durable leave done|insta osc/i.test(s)
+      );
+      this.actions = this.actions.filter(
+        (s) => !/osc cool hold|tools wander|tools mine|tools find rock|insta osc|phase cool|FIRST_WEP hold — wander/i.test(s)
+      );
+      if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
+        this.h1001.phase = "GEAR_FARM";
+      } else if (host.hasTool("pickaxe")) {
+        this.h1001.phase = "FIRST_WEP";
+      }
+      const shop = this.mem(w, "shop");
+      const chest = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
+      if (shop) host.walkTo(shop.x, shop.y);
+      else if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) host.walkTo(chest.x, chest.y);
+      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+      else if (w.explore) {
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
+        host.walkTo(w.explore.x, w.explore.y);
+      }
+      if (this.instaOscLeaveHits >= 1 || this.durableLeaveSettleDone || this.durableLeaveHierarchyReleased || this.durableLeaveDoneHits >= 1) {
+        this.instaOscLeaveArmed = true;
+        this.instaOscLeaveHits = Math.max(this.instaOscLeaveHits, 2);
+        if (!this.durableLeaveHierarchyReleased) {
+          this.markDurableLeaveHierarchyReleased(host, `cool-hold-leave ${why}`);
+        }
+        this.noteAction("osc cool \u2014 leave\u2192release");
+        host.log(`AUTO: osc cool hold \u2192 leave/release (3005) ${why}`);
+        this.setStatus(host, w, stance, "insta osc \u2014 release");
+        this.cool = 10;
+        return true;
+      }
+      this.instaOscLeaveArmed = true;
+      this.instaOscLeaveHits = Math.max(this.instaOscLeaveHits, 1);
+      this.noteAction("osc cool \u2014 leave");
+      host.log(`AUTO: osc cool hold \u2192 leave (3005) ${why}`);
+      this.setStatus(host, w, stance, "insta osc \u2014 leave");
       this.cool = 12;
       return true;
     }
@@ -5457,7 +5520,7 @@
     tryStatusOscBreak(host, w, stance) {
       var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D, _E, _F, _G;
       if (this.tryInstaOscBreak(host, w, stance)) return true;
-      if (this.oscCoolDivertActive() && (this.statusFamilyHits(/tools wander|tools explore/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/phase cool|FIRST_WEP hold|wanderSpin hard leave/) >= 3 || this.statusFamilyHits(/food-sell\/pond-break — prison|pond-cap — cool/) >= 1)) {
+      if (this.oscCoolDivertActive() && (this.statusFamilyHits(/tools wander|tools explore/) >= 3 || this.statusFamilyHits(/tools fund sell|tools fund sell mats/) >= 3 || this.statusFamilyHits(/tools mine|tools find rock/) >= 4 || this.statusFamilyHits(/phase cool|FIRST_WEP hold|wanderSpin hard leave/) >= 3 || this.statusFamilyHits(/food-sell\/pond-break — prison|pond-cap — cool/) >= 1 || this.statusFamilyHits(/osc cool hold/) >= 2)) {
         return this.coolHoldOscDivert(host, w, stance, "post-cool-theater");
       }
       const st = (this.lastStatus || "").toLowerCase();
@@ -7754,7 +7817,7 @@
       }
       const stickyLeave = this.stuckWanderBreakActive() || this.exploreKiteBreakActive() || this.emergToolsBreakActive() || this.hatchetChestBreakActive();
       const label = this.stickyExploreBlockActive() ? "phase cool" : stickyLeave ? "sticky progress \u2014 explore" : breaking ? "tools wander" : "tools find rock";
-      if (this.oscCoolDivertActive() && /tools wander|phase cool|sticky progress/i.test(label)) {
+      if (this.oscCoolDivertActive() && /tools wander|phase cool|sticky progress|tools find rock/i.test(label)) {
         return this.coolHoldOscDivert(host, w, stance, "tools-label-cool-hold");
       }
       if (stickyLeave && !this.stickyExploreBlockActive()) {
