@@ -1,4 +1,4 @@
-/* phd auto-engine 3002 — pull via GET /api/auto-engine */
+/* phd auto-engine 3003 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3002";
+  var AUTO_ENGINE_VERSION = "3003";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2612,6 +2612,9 @@
           this.lastFoodFarm = null;
         }
         if (this.pondSellPrisonLatched) {
+          if (this.pondBreakCapHits >= 3 || this.instaOscLeaveHits >= 3) {
+            return this.coolHoldOscDivert(host, w, stance, `${labelPrefix}-sell-latch-hold`);
+          }
           return this.escalatePondBreakPrison(host, w, stance, `${labelPrefix}-sell-latch`);
         }
         if (this.hasSellableMats(w) && host.sellMatsForCoins(1)) {
@@ -3602,6 +3605,9 @@
             this.cool = 8;
             return false;
           }
+          if (this.oscCoolDivertActive()) {
+            return this.coolHoldOscDivert(host, w, stance, "tools-sticky-explore");
+          }
           this.noteAction("TOOLS sticky explore mono \u2014 phase leave");
           host.log("AUTO: TOOLS sticky explore mono \u2014 phase leave (2071)");
           if (w.wander) host.walkTo(w.wander.x, w.wander.y);
@@ -3643,6 +3649,9 @@
             host.log("AUTO: TOOLS sticky \u2014 quiet hold phase yield (2054)");
             this.cool = 8;
             return false;
+          }
+          if (this.oscCoolDivertActive()) {
+            return this.coolHoldOscDivert(host, w, stance, "tools-sticky-hold");
           }
           this.noteAction("TOOLS sticky \u2014 break hold phase");
           host.log("AUTO: TOOLS sticky \u2014 exploreKite/emerg hold phase leave (2071)");
@@ -5285,6 +5294,44 @@
     detectInstaOsc() {
       return this.detectInstaOscFrom(this.stuckRecentStatus) || this.detectInstaOscFrom(this.actions.slice(-8));
     }
+    /** Eng 3003: already past leave/release → cool divert latched (insta or pond-cap). */
+    oscCoolDivertActive() {
+      return this.instaOscLeaveHits >= 2 || this.pondBreakCapHits >= 3;
+    }
+    /**
+     * Eng 3003 / R63: durable cool-hold walk after osc cool divert — no new timer,
+     * no re-escalate / no oscillating status spam (pond-sell prison / phase ABCD).
+     */
+    coolHoldOscDivert(host, w, stance, why) {
+      var _a, _b;
+      this.latchThrash();
+      this.armBreakerExploreCool(640);
+      this.stuckRecentStatus = this.stuckRecentStatus.filter(
+        (s) => !/food sell|pond break|food pond|emerg pond|pond-sell|food mine break|phase cool|FIRST_WEP hold|wanderSpin|tools wander|insta osc|pond-cap|pond-break-cap/i.test(s)
+      );
+      this.actions = this.actions.filter(
+        (s) => !/food-sell\/pond-break — prison|pond-cap —|insta osc|wanderSpin hard leave|phase cool|FIRST_WEP hold — wander/i.test(s)
+      );
+      this.stickyPhaseLeaveArmed = true;
+      this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+      const shop = this.mem(w, "shop");
+      const chest = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
+      if (shop) host.walkTo(shop.x, shop.y);
+      else if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) host.walkTo(chest.x, chest.y);
+      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+      else if (w.explore) {
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
+        host.walkTo(w.explore.x, w.explore.y);
+      }
+      if (!/pond-cap — cool|insta osc — cool/i.test(this.lastStatus || "")) {
+        this.noteAction(`osc cool hold \u2014 ${why}`);
+        host.log(`AUTO: osc cool hold divert (3003) ${why}`);
+        this.setStatus(host, w, stance, "insta osc \u2014 cool");
+      }
+      this.cool = 12;
+      return true;
+    }
     /**
      * Eng 3001 / R61 + eng 3002 / R62: soft-end pondBreak + cool family + hub.
      * 3002: do NOT reset pondBreakCapHits (cc99yu release↔pond forever).
@@ -5529,6 +5576,9 @@
         this.latchThrash();
         this.latchClash();
         this.pondSellPrisonLatched = true;
+        if (this.pondBreakCapHits >= 3 || this.instaOscLeaveHits >= 3) {
+          return this.coolHoldOscDivert(host, w, stance, "pond-sell-latched");
+        }
         this.armPondBreakSticky(2048, true);
         this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 1536);
         this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 1536);
@@ -6017,6 +6067,9 @@
             );
             if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
             else this.h1001.phase = "FIRST_WEP";
+            if (this.oscCoolDivertActive()) {
+              return this.coolHoldOscDivert(host, w, stance, "first-wep-quiet-hold");
+            }
             this.noteAction("FIRST_WEP hold \u2014 wander");
             host.log("AUTO: status osc sticky \u2014 quiet hold no cool re-arm (2073)");
             this.setStatus(host, w, stance, "FIRST_WEP hold \u2014 wander");
@@ -6040,6 +6093,9 @@
             host.log("AUTO: status osc sticky \u2014 quiet phase divert (2054)");
             this.cool = 8;
             return true;
+          }
+          if (this.oscCoolDivertActive()) {
+            return this.coolHoldOscDivert(host, w, stance, "sticky-phase-divert");
           }
           this.noteAction("status osc sticky \u2014 phase divert");
           host.log("AUTO: status osc sticky \u2014 phase divert no re-arm (2071)");
@@ -6343,6 +6399,9 @@
      */
     escalatePondBreakPrison(host, w, stance, why) {
       this.latchThrash();
+      if (this.pondBreakCapHits >= 3) {
+        return this.coolHoldOscDivert(host, w, stance, `pond-cap-hold:${why}`);
+      }
       this.pondBreakCapHits++;
       if (this.pondBreakCapHits >= 2) {
         this.latchClash();
@@ -9042,6 +9101,10 @@
             }
             this.blockGatherTile(rock.x, rock.y);
           }
+          if (this.oscCoolDivertActive()) {
+            this.coolHoldOscDivert(host, w, stance, "wanderspin-cool-wander");
+            return;
+          }
           this.noteAction("wanderSpin \u2014 cool wander");
           host.log("AUTO: wanderSpin \u2014 phase cool plain wander ban (2071)");
           if (w.wander) host.walkTo(w.wander.x, w.wander.y);
@@ -9064,6 +9127,10 @@
           );
           if (w.hasMetalWeapon || w.hasStyleWeapon) this.h1001.phase = "GEAR_FARM";
           else this.h1001.phase = "FIRST_WEP";
+          if (this.oscCoolDivertActive()) {
+            this.coolHoldOscDivert(host, w, stance, "wanderspin-hard-leave");
+            return;
+          }
           this.noteAction(`wanderSpin hard leave#${this.stickyLeaveRethinks}`);
           host.log("AUTO: wanderSpin \u2014 exploreKite/emerg/watchdog hard phase leave (2071)");
           if (w.wander) host.walkTo(w.wander.x, w.wander.y);
