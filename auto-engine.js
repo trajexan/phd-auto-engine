@@ -1,4 +1,4 @@
-/* phd auto-engine 3006 — pull via GET /api/auto-engine */
+/* phd auto-engine 3007 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3006";
+  var AUTO_ENGINE_VERSION = "3007";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -5343,7 +5343,7 @@
       }
       if (!/pond-cap — cool|insta osc — cool/i.test(this.lastStatus || "")) {
         this.noteAction(`osc cool hold \u2014 ${why}`);
-        host.log(`AUTO: osc cool hold divert (3006) ${why}`);
+        host.log(`AUTO: osc cool hold divert (3007) ${why}`);
         this.setStatus(host, w, stance, "insta osc \u2014 cool");
       }
       this.cool = 12;
@@ -5394,7 +5394,7 @@
           this.markDurableLeaveHierarchyReleased(host, `cool-hold-leave ${why}`);
         }
         this.noteAction("osc cool \u2014 leave\u2192release");
-        host.log(`AUTO: osc cool hold \u2192 leave/release (3006) ${why}`);
+        host.log(`AUTO: osc cool hold \u2192 leave/release (3007) ${why}`);
         this.setStatus(host, w, stance, "insta osc \u2014 release");
         this.cool = 10;
         return true;
@@ -5402,17 +5402,67 @@
       this.instaOscLeaveArmed = true;
       this.instaOscLeaveHits = Math.max(this.instaOscLeaveHits, 1);
       this.noteAction("osc cool \u2014 leave");
-      host.log(`AUTO: osc cool hold \u2192 leave (3006) ${why}`);
+      host.log(`AUTO: osc cool hold \u2192 leave (3007) ${why}`);
       this.setStatus(host, w, stance, "insta osc \u2014 leave");
       this.cool = 12;
       return true;
     }
     /**
-     * Eng 3006 / R66: after release spent — durable cool walk only. No leave /
-     * leave→release / post-RELEASE quiet re-note. Still cool|leave|release (t1800).
+     * Eng 3006 / R66 + eng 3007 / R67: after release spent — productive cool walk.
+     * 3007: prison hits≥3 → exhaust yield (cool=0, return false) so brain resumes.
+     * No leave / leave→release / post-RELEASE quiet re-note. Still cool|leave|release (t1800).
      */
+    postReleaseCoolPrisonHits() {
+      const statusHits = this.statusFamilyHits(
+        /post-release cool|tools-label-cool-hold|tools-sticky-hold|insta osc — cool/
+      );
+      let actionHits = 0;
+      for (const s of this.actions) {
+        if (/post-release cool|tools-label-cool-hold|tools-sticky-hold/i.test(s)) actionHits++;
+      }
+      return Math.max(statusHits, actionHits);
+    }
     coolHoldPostReleaseWalk(host, w, stance, why) {
-      var _a, _b;
+      var _a, _b, _c, _d;
+      const prisonHits = this.postReleaseCoolPrisonHits();
+      if (prisonHits >= 3) {
+        this.latchThrash();
+        this.latchClash();
+        this.clearFundIntent("tool");
+        this.clearFundIntent("food");
+        this.stickyPhaseLeaveArmed = true;
+        this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
+        this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 768);
+        this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 640);
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 640);
+        this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 640);
+        this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 640);
+        if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
+          this.h1001.phase = "GEAR_FARM";
+        } else if (host.hasTool("pickaxe")) {
+          this.h1001.phase = "FIRST_WEP";
+        }
+        this.stuckRecentStatus = this.stuckRecentStatus.filter(
+          (s) => !/osc cool — leave|osc cool hold|leave→release|quiet hold — post RELEASE|post-RELEASE escape|pond-cap — release|tools-sticky|tools mine|tools find rock|tools wander|insta osc — release|insta osc — cool|post-release cool/i.test(s)
+        );
+        const shop2 = this.mem(w, "shop");
+        const chest2 = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
+        if (shop2) host.walkTo(shop2.x, shop2.y);
+        else if (chest2 && !this.isGatherTileBlocked(chest2.x, chest2.y)) host.walkTo(chest2.x, chest2.y);
+        else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+        else if (w.explore) {
+          this.desireXY = { x: w.explore.x, y: w.explore.y };
+          host.walkTo(w.explore.x, w.explore.y);
+        }
+        if (!/post-release cool — exhaust/i.test(this.actions[this.actions.length - 1] || "")) {
+          this.noteAction("post-release cool \u2014 exhaust yield");
+          host.log(`AUTO: post-release cool exhaust \u2192 yield (3007) ${why}`);
+        }
+        this.setStatus(host, w, stance, host.hasTool("pickaxe") ? "FIRST_WEP hold \u2014 wander" : "phase cool");
+        this.cool = 0;
+        return false;
+      }
       this.latchThrash();
       this.armBreakerExploreCool(1024);
       this.clearFundIntent("tool");
@@ -5436,7 +5486,7 @@
         (s) => !/osc cool — leave→release|osc cool — leave|quiet hold — post RELEASE|post-RELEASE escape|pond-cap — release|insta osc — release/i.test(s)
       );
       const shop = this.mem(w, "shop");
-      const chest = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
+      const chest = (_d = (_c = w.seen) == null ? void 0 : _c.chest) != null ? _d : this.mem(w, "chest");
       if (shop) host.walkTo(shop.x, shop.y);
       else if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) host.walkTo(chest.x, chest.y);
       else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
@@ -5447,7 +5497,7 @@
       }
       if (!/insta osc — cool|post-release cool/i.test(this.lastStatus || "")) {
         this.noteAction(`post-release cool \u2014 ${why}`);
-        host.log(`AUTO: post-release cool walk (3006) ${why}`);
+        host.log(`AUTO: post-release cool walk (3007) ${why}`);
         this.setStatus(host, w, stance, "insta osc \u2014 cool");
       }
       this.cool = 14;
@@ -6562,12 +6612,12 @@
         }
         if (this.pondBreakCapHits >= 3) {
           this.noteAction(`pond-cap \u2014 cool (${why})`);
-          host.log(`AUTO: pond-cap \u2014 cool divert (3006) ${why}`);
+          host.log(`AUTO: pond-cap \u2014 cool divert (3007) ${why}`);
           this.setStatus(host, w, stance, "pond-cap \u2014 cool");
           this.cool = 16;
         } else {
           this.noteAction(`pond-cap \u2014 release (${why})`);
-          host.log(`AUTO: pond-cap \u2014 release (3006) ${why}`);
+          host.log(`AUTO: pond-cap \u2014 release (3007) ${why}`);
           this.setStatus(host, w, stance, "pond-cap \u2014 release");
           this.cool = 14;
         }
