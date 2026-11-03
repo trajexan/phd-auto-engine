@@ -1,4 +1,4 @@
-/* phd auto-engine 3011 — pull via GET /api/auto-engine */
+/* phd auto-engine 3012 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3011";
+  var AUTO_ENGINE_VERSION = "3012";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1501,6 +1501,11 @@
        * Clears on real progress so a later stuck climb can divert again.
        */
       __publicField(this, "wdFirstClassDiverted", false);
+      /**
+       * Eng 3012 / R72: postExhaustDurableDivert / life-spent divert fires this life.
+       * ≥2 → no re-status flap; productive phase/explore only. Not a timer (t1800).
+       */
+      __publicField(this, "lifeSpentDivertHits", 0);
       /** Eng 2049 / R19: rethinks while sticky leave already active → escalate to progress. */
       __publicField(this, "stickyLeaveRethinks", 0);
       /**
@@ -1696,6 +1701,7 @@
         this.phaseIntentPhase = "";
         this.postReleaseQuietDone = false;
         this.wdFirstClassDiverted = false;
+        this.lifeSpentDivertHits = 0;
         this.stickyLeaveRethinks = 0;
         this.stickyExploreBlockUntil = 0;
         this.stickyPhaseLeaveArmed = false;
@@ -5311,7 +5317,14 @@
       if (/insta osc — cool|pond-cap — cool/.test(k)) return "osc-cool";
       if (/insta osc/.test(k)) return "insta-leave";
       if (/post-release escape|post hierarchy release/.test(k)) return "release-cool";
+      if (/after life escape|after cool exhaust|life-spent divert|post-exhaust divert|wd divert|early osc divert|productive quiet|divert-product scrub|gear farm — after|explore — after|gear farm — wd|explore — wd|gear farm — early|explore — early|phase intent/.test(k)) {
+        return "divert-product";
+      }
       return k;
+    }
+    /** Eng 3012: true if fam is a divert-product (ignore in insta-osc ABA). */
+    isDivertProductFam(k) {
+      return k === "divert-product" || /divert-product|after life escape|after cool exhaust|wd divert|early osc divert|life-spent divert|post-exhaust divert|productive quiet/i.test(k);
     }
     /**
      * Eng 3000 / t1800–t1801: short-window insta A↔B / ABCABC on recent statuses.
@@ -5324,6 +5337,7 @@
       for (const s of ring) {
         const k = this.statusFamKey(s);
         if (!k) continue;
+        if (this.isDivertProductFam(k)) continue;
         if (fams.length === 0 || fams[fams.length - 1] !== k) fams.push(k);
       }
       const seq = fams.slice(-8);
@@ -5366,7 +5380,6 @@
      * Does NOT spend life escape / arm leave. cool=0 so brain resumes.
      */
     earlyOscDurableDivert(host, w, stance, kind, pairKey) {
-      var _a, _b;
       this.earlyOscDivertHits = Math.max(this.earlyOscDivertHits, 1);
       this.latchThrash();
       this.latchClash();
@@ -5391,18 +5404,15 @@
         this.h1001.phase = "FIRST_WEP";
       }
       const shop = this.mem(w, "shop");
-      const chest = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
       if (shop) host.walkTo(shop.x, shop.y);
-      else if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) host.walkTo(chest.x, chest.y);
       else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
       else if (w.explore) {
         this.desireXY = { x: w.explore.x, y: w.explore.y };
         host.walkTo(w.explore.x, w.explore.y);
-      }
+      } else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
       if (!/early osc divert/i.test(this.actions[this.actions.length - 1] || "")) {
         this.noteAction(`early osc divert \u2014 ${kind}`);
-        host.log(`AUTO: early osc divert [${pairKey}] ${kind} (3011) \u2014 before leave/cool`);
+        host.log(`AUTO: early osc divert [${pairKey}] ${kind} (3012) \u2014 before leave/cool`);
       }
       this.setStatus(
         host,
@@ -5524,7 +5534,6 @@
      * Honor life-spent: no coolHold* re-arm after spent.
      */
     oneProductiveQuietAfterRelease(host, w, stance, why) {
-      var _a, _b;
       this.markLifeEscapeSpent(host, `productive-quiet:${why}`);
       if (this.postReleaseQuietDone) {
         if (this.statusFamilyHits(/stuck rethink|tools fund sell|tools wander|insta osc|post-RELEASE/) >= 3) {
@@ -5570,23 +5579,23 @@
       }
       if (!did) {
         const shop = this.mem(w, "shop");
-        const chest = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
         if (shop) {
           host.walkTo(shop.x, shop.y);
           did = "hub-shop";
-        } else if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) {
-          host.walkTo(chest.x, chest.y);
-          did = "chest";
         } else if (w.hub) {
           host.walkTo(w.hub.x, w.hub.y);
           did = "hub";
+        } else if (w.explore) {
+          this.desireXY = { x: w.explore.x, y: w.explore.y };
+          host.walkTo(w.explore.x, w.explore.y);
+          did = "explore";
         } else if (w.wander) {
           host.walkTo(w.wander.x, w.wander.y);
           did = "wander";
         }
       }
       this.noteAction(`productive quiet \u2014 ${did || "none"} (${why})`);
-      host.log(`AUTO: one productive quiet after RELEASE (3011) ${did || "none"} ${why}`);
+      host.log(`AUTO: one productive quiet after RELEASE (3012) ${did || "none"} ${why}`);
       this.setStatus(
         host,
         w,
@@ -5601,7 +5610,6 @@
      * immediately (don't wait for clash/thrash life-stain to paint the whole life).
      */
     forceWdFirstClassDivert(host, w, stance, why) {
-      var _a, _b;
       this.latchStuck();
       this.latchThrash();
       this.latchClash();
@@ -5611,23 +5619,24 @@
       this.stickyPhaseLeaveArmed = true;
       this.stickyLeaveRethinks = Math.max(this.stickyLeaveRethinks, 2);
       this.stuckRecentStatus = this.stuckRecentStatus.filter(
-        (s) => !/stuck rethink|stuck watchdog|tools fund|tools wander|insta osc|phase cool|FIRST_WEP hold/i.test(s)
+        (s) => !/stuck rethink|stuck watchdog|tools fund|tools wander|insta osc|phase cool|FIRST_WEP hold|mob engage|mob kite|lethal|open chest|hatchet|camp-chest|after life escape|wd divert|early osc divert|life-spent divert/i.test(s)
       );
+      this.actions = this.actions.filter((s) => !/wd divert|life-spent divert|after life escape/i.test(s));
       const shop = this.mem(w, "shop");
-      const chest = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
       if (shop) host.walkTo(shop.x, shop.y);
-      else if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) host.walkTo(chest.x, chest.y);
       else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
       else if (w.explore) {
         this.desireXY = { x: w.explore.x, y: w.explore.y };
         host.walkTo(w.explore.x, w.explore.y);
-      }
-      if (!/wd divert/i.test(this.actions[this.actions.length - 1] || "")) {
+      } else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+      if (!this.wdFirstClassDiverted) {
         this.noteAction(`wd divert \u2014 ${why}`);
-        host.log(`AUTO: WD first-class divert (3011) ${why}`);
+        host.log(`AUTO: WD first-class divert (3012) ${why}`);
+        this.setStatus(host, w, stance, host.hasTool("pickaxe") ? "gear farm \u2014 wd divert" : "explore \u2014 wd divert");
+      } else if (!/wd divert/i.test(this.actions[this.actions.length - 1] || "")) {
+        this.noteAction(`wd divert \u2014 ${why}`);
       }
-      this.setStatus(host, w, stance, host.hasTool("pickaxe") ? "gear farm \u2014 wd divert" : "explore \u2014 wd divert");
+      this.wdFirstClassDiverted = true;
       this.cool = 0;
     }
     /**
@@ -5654,7 +5663,7 @@
      * Returns true to consume the tick (walk issued); cool=0 so brain resumes next.
      */
     postExhaustDurableDivert(host, w, stance, why) {
-      var _a, _b;
+      this.lifeSpentDivertHits++;
       this.latchThrash();
       this.latchClash();
       this.armBreakerExploreCool(1024);
@@ -5674,24 +5683,47 @@
         this.h1001.phase = "FIRST_WEP";
       }
       this.stuckRecentStatus = this.stuckRecentStatus.filter(
-        (s) => !/stuck rethink|insta osc|tools fund sell|tools fund|tools explore|tools wander|tools mine|tools find rock|emerg hub|emerg-tools|FIRST_WEP hold|phase cool|lethal kite|osc cool|post-release cool|post-cool-theater|mono divert|camp-chain/i.test(s)
+        (s) => !/stuck rethink|insta osc|tools fund sell|tools fund|tools explore|tools wander|tools mine|tools find rock|emerg hub|emerg-tools|FIRST_WEP hold|phase cool|lethal kite|osc cool|post-release cool|post-cool-theater|mono divert|camp-chain|mob engage|mob kite|lethal|open chest|hatchet|camp-chest|after life escape|after cool exhaust|life-spent divert|wd divert|early osc divert|gear farm — after|explore — after/i.test(s)
       );
       this.actions = this.actions.filter(
-        (s) => !/stuck rethink|insta osc|tools fund|tools explore|tools wander|emerg hub|FIRST_WEP hold|post-release cool|osc cool/i.test(s)
+        (s) => !/stuck rethink|insta osc|tools fund|tools explore|tools wander|emerg hub|FIRST_WEP hold|post-release cool|osc cool|life-spent divert|after life escape|wd divert/i.test(s)
       );
+      if (this.lifeSpentDivertHits >= 3) {
+        this.noteAction(`divert-product scrub \u2014 ${why}`);
+        host.log(`AUTO: life-spent divert armed hits=${this.lifeSpentDivertHits} (3012) free brain ${why}`);
+        if (host.hasTool("pickaxe") && !w.hasMetalWeapon && !w.hasStyleWeapon) {
+          this.armPhaseIntent(this.h1001.phase === "TOOLS" ? "TOOLS" : "FIRST_WEP", "mine");
+        } else if (host.hasTool("pickaxe")) {
+          this.armPhaseIntent("GEAR_FARM", "hunt");
+        }
+        this.cool = 0;
+        return false;
+      }
       const shop = this.mem(w, "shop");
-      const chest = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
       if (shop) host.walkTo(shop.x, shop.y);
-      else if (chest && !this.isGatherTileBlocked(chest.x, chest.y)) host.walkTo(chest.x, chest.y);
       else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
       else if (w.explore) {
         this.desireXY = { x: w.explore.x, y: w.explore.y };
         host.walkTo(w.explore.x, w.explore.y);
+      } else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+      if (this.lifeSpentDivertHits >= 2) {
+        this.noteAction(this.lifeEscapeSpent ? `life-spent divert \u2014 armed (${why})` : `post-exhaust divert \u2014 armed (${why})`);
+        host.log(`AUTO: ${this.lifeEscapeSpent ? "life-spent" : "post-exhaust"} divert armed (3012) hits=${this.lifeSpentDivertHits} ${why}`);
+        if (host.hasTool("pickaxe") && !w.hasMetalWeapon && !w.hasStyleWeapon) {
+          this.armPhaseIntent(this.h1001.phase === "TOOLS" ? "TOOLS" : "FIRST_WEP", "mine");
+          this.setStatus(host, w, stance, "phase intent \u2014 mine");
+        } else if (host.hasTool("pickaxe")) {
+          this.armPhaseIntent("GEAR_FARM", "hunt");
+          this.setStatus(host, w, stance, "phase intent \u2014 hunt");
+        } else {
+          this.setStatus(host, w, stance, "explore \u2014 after life escape");
+        }
+        this.cool = 0;
+        return true;
       }
-      if (!/post-exhaust divert|life-spent divert|after cool exhaust|after life escape/i.test(this.actions[this.actions.length - 1] || "")) {
+      if (!/post-exhaust divert|life-spent divert|after cool exhaust|after life escape|divert-product scrub/i.test(this.actions[this.actions.length - 1] || "")) {
         this.noteAction(this.lifeEscapeSpent ? `life-spent divert \u2014 ${why}` : `post-exhaust divert \u2014 ${why}`);
-        host.log(`AUTO: ${this.lifeEscapeSpent ? "life-spent" : "post-exhaust"} durable divert (3010) ${why}`);
+        host.log(`AUTO: ${this.lifeEscapeSpent ? "life-spent" : "post-exhaust"} durable divert (3012) ${why}`);
       }
       this.setStatus(
         host,
@@ -5993,6 +6025,13 @@
       if (!hit) return false;
       const pairKey = hit.fams.slice(0, 4).join("|");
       if (this.isLifeEscapeSpent()) {
+        if (this.lifeSpentDivertHits >= 2) {
+          const ban2 = new RegExp(hit.fams.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "i");
+          this.stuckRecentStatus = this.stuckRecentStatus.filter((s) => !ban2.test(this.statusFamKey(s)) && !this.isDivertProductFam(this.statusFamKey(s)));
+          this.noteAction(`divert-product scrub \u2014 insta:${pairKey}`);
+          this.cool = 0;
+          return false;
+        }
         return this.postExhaustDurableDivert(host, w, stance, `insta-osc:${pairKey}`);
       }
       if (this.instaOscLeaveHits >= 2) {
