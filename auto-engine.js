@@ -1,4 +1,4 @@
-/* phd auto-engine 3102 — pull via GET /api/auto-engine */
+/* phd auto-engine 3103 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3102";
+  var AUTO_ENGINE_VERSION = "3103";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1505,6 +1505,9 @@
        * Not a cool timer — after done, free brain (cool=0).
        */
       __publicField(this, "postReleaseQuietDone", false);
+      /** Eng 3103: postBreak free-mine same-tile flap counter (not a timer). */
+      __publicField(this, "postBreakFreeMineKey", "");
+      __publicField(this, "postBreakFreeMineHits", 0);
       /**
        * Eng 3011 / t1808 #4: WD / near-stuck first-class divert already issued this climb.
        * Clears on real progress so a later stuck climb can divert again.
@@ -1744,6 +1747,8 @@
         this.phaseIntentGoal = "";
         this.phaseIntentPhase = "";
         this.postReleaseQuietDone = false;
+        this.postBreakFreeMineKey = "";
+        this.postBreakFreeMineHits = 0;
         this.wdFirstClassDiverted = false;
         this.lifeSpentDivertHits = 0;
         this.trwPrisonClearHits = 0;
@@ -3592,6 +3597,7 @@
      * registered mem tree/pond — cook → sell → gather. Prefer farm over explore loot.
      */
     tryFundBeginnerToolFarm(host, w, stance, tree, pond) {
+      if (this.postBreakAllowNormal() && host.hasTool("pickaxe")) return false;
       this.refreshPhaseIntent(host, w, stance);
       if (this.phaseIntentLocked()) {
         if (this.tryPhaseIntentHold(host, w, stance)) return true;
@@ -4771,6 +4777,7 @@
         if (o.id === "chop" && (this.chopBreakActive() || this.campChainBreakActive())) return false;
         if ((o.id === "mine" || o.id === "chop") && this.firstWepCampGatherBanActive()) return false;
         if (o.id === "shop" && (this.sellOreBreakActive() || this.campChainBreakActive())) return false;
+        if (o.id === "shop" && this.postBreakAllowNormal() && w.bagFree > 1) return false;
         if (o.id === "mine") return host.hasTool("pickaxe");
         if (o.id === "chop") return host.hasTool("hatchet");
         if (o.id === "fish") {
@@ -5795,7 +5802,7 @@
       this.quietBreakEscalateHits = 0;
       this.quietEscalateLeaveHits = 0;
       this.clearPhaseIntent();
-      host.log(`AUTO: early-osc \u2192 postBreak (3102) ${kind}`);
+      host.log(`AUTO: early-osc \u2192 postBreak (3103) ${kind}`);
       return this.postBreakFreeBrain(host, w, stance, `early-osc:${kind}`);
     }
     /**
@@ -6099,7 +6106,7 @@
         if (!this.actions.some((s) => /^postBreak —/i.test(s))) {
           this.noteAction(`postBreak \u2014 ${why}`);
         }
-        host.log(`AUTO: postBreak ENTER (3102) ${why}`);
+        host.log(`AUTO: postBreak ENTER (3103) ${why}`);
       }
     }
     /** Compat shim — all spent marks now enter postBreak. */
@@ -6147,24 +6154,50 @@
         return this.oneProductiveQuietAfterRelease(host, w, stance, `postBreak:${why}`);
       }
       this.cool = 0;
+      this.campChainBreakUntil = Math.min(this.campChainBreakUntil, this.runTicks);
+      this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
+      this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
+      this.kiteCoolExitUntil = Math.min(this.kiteCoolExitUntil, this.runTicks);
+      this.kiteCoolWanderBanUntil = Math.min(this.kiteCoolWanderBanUntil, this.runTicks);
+      this.kiteCoolMineBanUntil = Math.min(this.kiteCoolMineBanUntil, this.runTicks);
+      this.kiteCoolParkHits = 0;
+      this.kiteCoolMineKey = "";
+      this.kiteCoolMineHits = 0;
+      this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 512);
       if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
         this.noteAction(`postBreak free brain \u2014 ${why}`);
-        host.log(`AUTO: postBreak free brain (3102) ${why}`);
+        host.log(`AUTO: postBreak free brain (3103) ${why}`);
       }
       if (host.hasTool("pickaxe")) {
         this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
       }
       const rockFb = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
       if (rockFb && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rockFb.x, rockFb.y)) {
-        if (this.walkToTile(host, rockFb.x, rockFb.y)) {
-          this.stuckTicks = 0;
-          return true;
+        const mk = `${rockFb.x},${rockFb.y}`;
+        if (mk === this.postBreakFreeMineKey) this.postBreakFreeMineHits++;
+        else {
+          this.postBreakFreeMineKey = mk;
+          this.postBreakFreeMineHits = 1;
         }
-        if (this.tryGather(host, w, stance, "postBreak free mine")) {
-          this.stuckTicks = 0;
-          return true;
+        if (this.postBreakFreeMineHits >= 3) {
+          this.blockGatherTile(rockFb.x, rockFb.y);
+          this.postBreakFreeMineKey = "";
+          this.postBreakFreeMineHits = 0;
+          host.log(`AUTO: postBreak free mine flap \u2014 block (${mk}) (3103)`);
+          this.noteAction("postBreak free mine flap");
+        } else {
+          if (this.walkToTile(host, rockFb.x, rockFb.y)) {
+            this.stuckTicks = 0;
+            return true;
+          }
+          if (this.tryGather(host, w, stance, "postBreak free mine")) {
+            this.stuckTicks = 0;
+            return true;
+          }
+          this.blockGatherTile(rockFb.x, rockFb.y);
+          this.postBreakFreeMineKey = "";
+          this.postBreakFreeMineHits = 0;
         }
-        this.blockGatherTile(rockFb.x, rockFb.y);
       }
       if (w.explore) {
         this.desireXY = { x: w.explore.x, y: w.explore.y };
@@ -8985,6 +9018,7 @@
      * While any of these stickies live, bare explore fallback is banned.
      */
     kiteExploreCoolActive() {
+      if (this.postBreakAllowNormal()) return false;
       return this.exploreKiteBreakActive() || this.stickyExploreBlockActive() || this.stuckWanderBreakActive() || this.campChainBreakActive() || this.foodMineBreakActive() || this.pondBreakActive();
     }
     /**
