@@ -1,4 +1,4 @@
-/* phd auto-engine 3023 — pull via GET /api/auto-engine */
+/* phd auto-engine 3024 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3023";
+  var AUTO_ENGINE_VERSION = "3024";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -3677,6 +3677,25 @@
       var _a, _b, _c, _d, _e, _f;
       this.refreshPhaseIntent(host, w, stance);
       if (this.phaseIntentLocked() && this.tryPhaseIntentHold(host, w, stance)) return true;
+      if (this.aleFwTheaterBanned() && host.hasTool("pickaxe")) {
+        this.clearFundIntent("tool");
+        this.clearPhaseIntent();
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1280);
+        this.noteAleToolsBan(host, "phase-tools");
+        this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
+        const shop2 = this.mem(w, "shop");
+        if (shop2) {
+          host.walkTo(shop2.x, shop2.y);
+          this.cool = 0;
+          return true;
+        }
+        if (w.hub) {
+          host.walkTo(w.hub.x, w.hub.y);
+          this.cool = 0;
+          return true;
+        }
+        return false;
+      }
       if (this.trwReenterBanned()) {
         if (this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban")) return true;
         this.clearFundIntent("tool");
@@ -3918,6 +3937,9 @@
         if (this.trwReenterBanned()) {
           return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
         }
+        if (this.aleFwTheaterBanned()) {
+          return this.aleSpentToolsMineDivert(host, w, stance, "tools-mine-live");
+        }
         if (this.oscCoolDivertActive() && this.statusFamilyHits(/tools mine|tools find rock/) >= 3) {
           return this.coolHoldOscDivert(host, w, stance, "tools-mine-cool-hold");
         }
@@ -4002,6 +4024,9 @@
         if (this.tryFundBeginnerToolFarm(host, w, stance, tree, pond)) return true;
         const live = (_f = (_e = w.seen) == null ? void 0 : _e.rock) != null ? _f : null;
         if (live && host.hasTool("pickaxe") && !this.rockFindBreakActive() && !this.isGatherTileBlocked(live.x, live.y)) {
+          if (this.aleFwTheaterBanned()) {
+            return this.aleSpentToolsMineDivert(host, w, stance, "tools-mine-fund");
+          }
           this.setStatus1001(host, w, stance, "tools mine");
           this.armPhaseIntent(this.h1001.phase === "FIRST_WEP" || this.h1001.phase === "GEAR_FARM" ? this.h1001.phase : "TOOLS", "mine");
           if (this.walkToTile(host, live.x, live.y)) return true;
@@ -5416,7 +5441,7 @@
       if (/first_wep hold — wander|first wep hold — wander|quiet hold — wander/.test(k)) return "hold-wander";
       if (/wanderspin hard leave/.test(k)) return "leave-spin";
       if (/^phase cool$|phase cool$/.test(k) || k === "phase cool") return "phase-cool";
-      if (/tools wander thrash|tools-rock-wander prison|trw-prison|trw-wander-aba|trw-reenter-ban|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|after-life-escape-combat-ban|first_wep hold — explore|first wep hold — explore/.test(k)) {
+      if (/tools wander thrash|tools-rock-wander prison|trw-prison|trw-wander-aba|trw-reenter-ban|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|after-life-escape-combat-ban|after-life-escape-tools-ban|first_wep hold — explore|first wep hold — explore/.test(k)) {
         return "divert-product";
       }
       if (/tools wander/.test(k)) return "tools-wander";
@@ -5426,14 +5451,14 @@
       if (/insta osc — cool|pond-cap — cool/.test(k)) return "osc-cool";
       if (/insta osc/.test(k)) return "insta-leave";
       if (/post-release escape|post hierarchy release/.test(k)) return "release-cool";
-      if (/after life escape|after cool exhaust|life-spent divert|post-exhaust divert|wd divert|early osc divert|productive quiet|divert-product scrub|gear farm — after|explore — after|gear farm — wd|explore — wd|gear farm — early|explore — early|phase intent|tools-rock-wander prison|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|after-life-escape-combat-ban|first_wep hold — explore|first wep hold — explore/.test(k)) {
+      if (/after life escape|after cool exhaust|life-spent divert|post-exhaust divert|wd divert|early osc divert|productive quiet|divert-product scrub|gear farm — after|explore — after|gear farm — wd|explore — wd|gear farm — early|explore — early|phase intent|tools-rock-wander prison|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|after-life-escape-combat-ban|after-life-escape-tools-ban|first_wep hold — explore|first wep hold — explore/.test(k)) {
         return "divert-product";
       }
       return k;
     }
     /** Eng 3012: true if fam is a divert-product (ignore in insta-osc ABA). */
     isDivertProductFam(k) {
-      return k === "divert-product" || /divert-product|after life escape|after cool exhaust|wd divert|early osc divert|life-spent divert|post-exhaust divert|productive quiet|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|phase intent hold — hunt|phase intent — hunt|first_wep hold — explore|first wep hold — explore/i.test(k);
+      return k === "divert-product" || /divert-product|after life escape|after cool exhaust|wd divert|early osc divert|life-spent divert|post-exhaust divert|productive quiet|trw-prison|trw-wander|trw-reenter|phase-intent-mine-cap|after-life-escape-cap|after-life-escape-spent|after-life-escape-hunt-cap|after-life-escape-fw-cap|after-life-escape-fw-spent|after-life-escape-tools-ban|phase intent hold — hunt|phase intent — hunt|first_wep hold — explore|first wep hold — explore/i.test(k);
     }
     /**
      * Eng 3016 / R76: note trw-prison-clear; ≥2 clears this life → ban TRW re-enter.
@@ -5476,6 +5501,7 @@
       this.exploreKiteBreakUntil = Math.max(this.exploreKiteBreakUntil, this.runTicks + 1280);
       this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
       this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 768);
+      this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1280);
       this.armPondBreakSticky(768, true);
       this.armBreakerExploreCool(1024);
       this.cool = 0;
@@ -5490,6 +5516,46 @@
         this.noteAction("after-life-escape-combat-ban");
         host.log(`AUTO: after-life-escape combat BAN (3023) ${why}`);
       }
+      this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1280);
+      this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1024);
+      this.clearPhaseIntent();
+      this.phaseIntentMineMonoHits = 0;
+    }
+    /** Eng 3024: after ALE spent/capped — ban tools-mine / find-rock / phase-intent mine theater. */
+    noteAleToolsBan(host, why) {
+      if (!this.actions.some((s) => /after-life-escape-tools-ban/i.test(s))) {
+        this.noteAction("after-life-escape-tools-ban");
+        host.log(`AUTO: after-life-escape tools BAN (3024) ${why}`);
+      }
+    }
+    /**
+     * Eng 3024: when ALE spent/capped, do not re-emit tools mine / find-rock.
+     * Cool rockFindBreak + clear mine intent; durable shop/hub walk; free brain.
+     */
+    aleSpentToolsMineDivert(host, w, stance, why) {
+      this.noteAleToolsBan(host, why);
+      this.latchThrash();
+      this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1280);
+      this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 1024);
+      this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 1024);
+      this.clearPhaseIntent();
+      this.phaseIntentMineMonoHits = 0;
+      this.stuckRecentStatus = this.stuckRecentStatus.filter(
+        (s) => !/tools mine|tools find rock|phase intent — mine|first wep mine|tools-rock|tools fund/i.test(s)
+      );
+      const shop = this.mem(w, "shop");
+      if (shop) host.walkTo(shop.x, shop.y);
+      else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+      else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+      else if (w.explore) {
+        this.desireXY = { x: w.explore.x, y: w.explore.y };
+        host.walkTo(w.explore.x, w.explore.y);
+      }
+      if (host.hasTool("pickaxe")) {
+        this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
+      }
+      this.cool = 0;
+      return true;
     }
     /**
      * Eng 3021–3022: post-ALE-spent FIRST_WEP theater cap. Camp-chain / emerg-tools
@@ -5501,7 +5567,7 @@
       if (!this.afterLifeEscapeCapped) return false;
       this.afterLifeEscapeFwMonoHits++;
       this.latchThrash();
-      const early = /emerg|approach|mob engage|mob kite|lethal|fw-theater/i.test(why);
+      const early = /emerg|approach|mob engage|mob kite|lethal|fw-theater|tools-mine|find-rock|phase-intent-mine|tools-rock/i.test(why);
       const need = early ? 1 : 2;
       this.campChainBreakUntil = Math.max(this.campChainBreakUntil, this.runTicks + 1280);
       this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 1280);
@@ -5776,6 +5842,14 @@
         this.noteAction("phase-intent-mine-cap");
         return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
       }
+      if (goal === "mine" && this.aleFwTheaterBanned()) {
+        this.noteAleToolsBan(host, "phase-intent-mine");
+        this.clearPhaseIntent();
+        this.phaseIntentMineMonoHits = 0;
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1280);
+        this.cool = 0;
+        return false;
+      }
       if (goal === "mine" || goal === "forge") {
         if (!host.hasTool("pickaxe")) {
           this.clearPhaseIntent();
@@ -5999,6 +6073,8 @@
       this.lifeEscapeSpent = true;
       this.postReleaseCoolExhausted = true;
       this.postReleaseCoolWalkHits = Math.max(this.postReleaseCoolWalkHits, 3);
+      this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1024);
+      this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 768);
       host.log(`AUTO: life escape SPENT (3010) ${why}`);
     }
     /** Eng 3010: escape already spent this life (RELEASE/escape or exhaust latch). */
@@ -6043,8 +6119,9 @@
       if (this.lifeSpentDivertHits >= 3) {
         this.noteAction(`divert-product scrub \u2014 ${why}`);
         host.log(`AUTO: life-spent divert armed hits=${this.lifeSpentDivertHits} (3012) free brain ${why}`);
-        if (this.trwReenterBanned()) {
+        if (this.trwReenterBanned() || this.lifeEscapeSpent || this.aleFwTheaterBanned()) {
           this.clearPhaseIntent();
+          this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1280);
         } else if (host.hasTool("pickaxe") && !w.hasMetalWeapon && !w.hasStyleWeapon) {
           this.armPhaseIntent(this.h1001.phase === "TOOLS" ? "TOOLS" : "FIRST_WEP", "mine");
         } else if (host.hasTool("pickaxe")) {
@@ -6073,8 +6150,9 @@
             return false;
           }
           this.setStatus(host, w, stance, "explore \u2014 after life escape");
-        } else if (this.afterLifeEscapeCapped) {
+        } else if (this.afterLifeEscapeCapped || this.lifeEscapeSpent || this.aleFwTheaterBanned()) {
           this.clearPhaseIntent();
+          this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 1280);
           this.cool = 0;
           return false;
         } else if (host.hasTool("pickaxe") && !w.hasMetalWeapon && !w.hasStyleWeapon) {
@@ -6472,16 +6550,18 @@
             host.log(`AUTO: scrub TRW clear-seal divert hits=${this.lifeSpentDivertHits} [${pairKey}] (3016)`);
             if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
               this.armPhaseIntent("GEAR_FARM", "hunt");
-            } else if (host.hasTool("pickaxe") && !this.trwReenterBanned()) {
+            } else if (host.hasTool("pickaxe") && !this.trwReenterBanned() && !this.aleFwTheaterBanned() && !this.lifeEscapeSpent) {
               this.armPhaseIntent(this.h1001.phase === "TOOLS" ? "TOOLS" : "FIRST_WEP", "mine");
+            } else {
+              this.clearPhaseIntent();
             }
             const shop2 = this.mem(w, "shop");
             const rock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : this.mem(w, "rock");
-            if (trwCombat && rock && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rock.x, rock.y) && this.lifeSpentDivertHits < 4 && this.trwPrisonClearHits < 1) {
+            if (trwCombat && rock && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rock.x, rock.y) && this.lifeSpentDivertHits < 4 && this.trwPrisonClearHits < 1 && !this.aleFwTheaterBanned() && !this.lifeEscapeSpent) {
               this.desireXY = { x: rock.x, y: rock.y };
               host.walkTo(rock.x, rock.y);
               this.setStatus(host, w, stance, "phase intent \u2014 mine");
-            } else if (this.afterLifeEscapeCapped) {
+            } else if (this.afterLifeEscapeCapped || this.aleFwTheaterBanned() || this.lifeEscapeSpent) {
               if (shop2) host.walkTo(shop2.x, shop2.y);
               else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
               else if (w.explore) {
@@ -6915,10 +6995,10 @@
         this.cool = 14;
         return true;
       }
-      if (this.statusFamilyHits(/tools mine/) >= 4 || this.statusOscPair(/tools mine/, /open chest|looting|tools hatchet|scan HV loot/)) {
+      if (this.statusFamilyHits(/tools mine/) >= (this.aleFwTheaterBanned() ? 2 : 4) || this.statusOscPair(/tools mine/, /open chest|looting|tools hatchet|scan HV loot/)) {
         const rk = (_r = (_q = w.seen) == null ? void 0 : _q.rock) != null ? _r : this.mem(w, "rock");
         if (rk) this.blockGatherTile(rk.x, rk.y);
-        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 480);
+        this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + (this.aleFwTheaterBanned() ? 1280 : 480));
         this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 512);
         this.hatchetChestBreakUntil = Math.max(this.hatchetChestBreakUntil, this.runTicks + 320);
         this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 192);
@@ -6926,10 +7006,25 @@
           (s) => !/tools mine|tools find rock|open chest|looting|tools hatchet|scan HV loot/i.test(s)
         );
         this.clearFundIntent("tool");
+        this.clearPhaseIntent();
         if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
           this.h1001.phase = "GEAR_FARM";
         } else if (host.hasTool("pickaxe")) {
           this.h1001.phase = "FIRST_WEP";
+        }
+        if (this.aleFwTheaterBanned()) {
+          this.noteAleToolsBan(host, "tools-mine-mono");
+          if (this.afterLifeEscapeCapped) {
+            if (this.tryAleSpentFwCap(host, w, stance, "tools-mine-mono")) return true;
+          } else {
+            this.latchAleSpentCool(host, "tools-mine-mono");
+          }
+          const shop = this.mem(w, "shop");
+          if (shop) host.walkTo(shop.x, shop.y);
+          else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+          else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+          this.cool = 0;
+          return true;
         }
         this.noteAction("status osc tools-mine mono \u2014 explore");
         host.log("AUTO: status osc tools mine mono \u2014 explore (2051)");
