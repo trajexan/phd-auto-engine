@@ -1,4 +1,4 @@
-/* phd auto-engine 3149 — pull via GET /api/auto-engine */
+/* phd auto-engine 3150 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3149";
+  var AUTO_ENGINE_VERSION = "3150";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1559,6 +1559,13 @@
       __publicField(this, "_unlitStairsArmTick", -1);
       /** Eng 3149: after unlit stairs walk-to-light exhaust this life (not a timer). */
       __publicField(this, "postBreakUnlitStairsExhausted", false);
+      /**
+       * Eng 3150 / R141: hungryEmpty+!hasArmour explore hits seeking an unseen chest
+       * before lit hungry-stairs (not a timer). ≥96 → latch armourChestExhausted.
+       */
+      __publicField(this, "postBreakArmourSeekHits", 0);
+      /** Eng 3150: last runTicks we armed an armour-seek hit (dedupe). */
+      __publicField(this, "_armourSeekArmTick", -1);
       /** Eng 3124: free-fish attempts this life across any tile (not a timer). */
       __publicField(this, "postBreakFreeFishLifeHits", 0);
       /** Eng 3125: quiet sell/hub-shop under hungry+stairs this life (not a timer). */
@@ -1895,6 +1902,8 @@
           this.postBreakUnlitStairsHits = 0;
           this._unlitStairsArmTick = -1;
           this.postBreakUnlitStairsExhausted = false;
+          this.postBreakArmourSeekHits = 0;
+          this._armourSeekArmTick = -1;
           this.postBreakFreeFishLifeHits = 0;
           this.postBreakHungryQuietSellHits = 0;
           this.postBreakHungryScrubLatched = false;
@@ -7139,6 +7148,9 @@
           if (hungryEmpty && !w.stairsOpen) {
             this.noteHungryBanClosedStairs(host);
           } else if (this.stairsUsable(w)) {
+            if (hungryEmpty && this.tryHungryArmourSeekBeforeStairs(host, w)) {
+              return true;
+            }
             this.desireXY = { x: w.stairs.x, y: w.stairs.y };
             host.walkTo(w.stairs.x, w.stairs.y);
             this.stuckTicks = 0;
@@ -7161,6 +7173,9 @@
             if (hungryEmpty) {
               this.armHungryUnlitStairsWalk(host, w);
               if (this.postBreakUnlitStairsExhausted) {
+                if (this.tryHungryArmourSeekBeforeStairs(host, w)) {
+                  return true;
+                }
               } else {
                 this.desireXY = { x: w.stairs.x, y: w.stairs.y };
                 host.walkTo(w.stairs.x, w.stairs.y);
@@ -7328,16 +7343,23 @@
               }
             }
             if (w.stairs && this.hungryStairsWalkOk(w)) {
-              if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
-              this.desireXY = { x: w.stairs.x, y: w.stairs.y };
-              host.walkTo(w.stairs.x, w.stairs.y);
-              this.stuckTicks = 0;
-              this.latchHungryToolsBan(host, "hungry-stairs-postex");
-              if (!this.actions.some((s) => /free stairs hungry|hungry stairs after food/i.test(s))) {
-                this.noteAction("hungry stairs after food (3114)");
-                host.log("AUTO: hungry stairs after food (3114)");
+              if (this.stairsUsable(w) && this.tryHungryArmourSeekBeforeStairs(host, w)) {
+                return true;
               }
-              return true;
+              if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
+              if (!this.hungryStairsWalkOk(w)) {
+                if (this.tryHungryArmourSeekBeforeStairs(host, w)) return true;
+              } else {
+                this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+                host.walkTo(w.stairs.x, w.stairs.y);
+                this.stuckTicks = 0;
+                this.latchHungryToolsBan(host, "hungry-stairs-postex");
+                if (!this.actions.some((s) => /free stairs hungry|hungry stairs after food/i.test(s))) {
+                  this.noteAction("hungry stairs after food (3114)");
+                  host.log("AUTO: hungry stairs after food (3114)");
+                }
+                return true;
+              }
             }
           }
         }
@@ -7347,21 +7369,28 @@
           const foodBufferEx = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(hungryEmptyEx && hpPctEx < 0.4);
           if ((host.hasTool("pickaxe") || hungryEmptyEx) && (foodBufferEx || hungryEmptyEx) && w.stairs) {
             if (this.hungryStairsWalkOk(w)) {
-              if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
-              this.desireXY = { x: w.stairs.x, y: w.stairs.y };
-              host.walkTo(w.stairs.x, w.stairs.y);
-              this.stuckTicks = 0;
-              if (hungryEmptyEx) {
-                this.latchHungryToolsBan(host, "hungry-stairs-ex");
-                if (!this.actions.some((s) => /free stairs hungry|hungry stairs after food/i.test(s))) {
-                  this.noteAction("hungry stairs after food (3114)");
-                  host.log("AUTO: hungry stairs after food (3114)");
-                }
-              } else if (!this.actions.some((s) => /postBreak free stairs deep/i.test(s))) {
-                this.noteAction("postBreak free stairs deep");
-                host.log("AUTO: postBreak free stairs deep (3111)");
+              if (hungryEmptyEx && this.stairsUsable(w) && this.tryHungryArmourSeekBeforeStairs(host, w)) {
+                return true;
               }
-              return true;
+              if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
+              if (!this.hungryStairsWalkOk(w)) {
+                if (hungryEmptyEx && this.tryHungryArmourSeekBeforeStairs(host, w)) return true;
+              } else {
+                this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+                host.walkTo(w.stairs.x, w.stairs.y);
+                this.stuckTicks = 0;
+                if (hungryEmptyEx) {
+                  this.latchHungryToolsBan(host, "hungry-stairs-ex");
+                  if (!this.actions.some((s) => /free stairs hungry|hungry stairs after food/i.test(s))) {
+                    this.noteAction("hungry stairs after food (3114)");
+                    host.log("AUTO: hungry stairs after food (3114)");
+                  }
+                } else if (!this.actions.some((s) => /postBreak free stairs deep/i.test(s))) {
+                  this.noteAction("postBreak free stairs deep");
+                  host.log("AUTO: postBreak free stairs deep (3111)");
+                }
+                return true;
+              }
             }
           }
         }
@@ -12319,6 +12348,49 @@
           host.log("AUTO: hungry ban unlit-stairs (3149) \u2014 walk-to-light exhaust \u2192 explore");
         }
       }
+    }
+    /**
+     * Eng 3150 / R141: under hungryEmpty+!hasArmour, defer lit hungry-stairs until
+     * a chest is seen (3145 owns that path) OR explore/wander seek budget exhausts.
+     * Covers 61/183 F5 naked lives that never marked armour-chest — stairs fired
+     * with no chest in mem. Hit-cap only (not a timer). Returns true if this tick
+     * consumed a seek walk; false if stairs may proceed (armoured / latched /
+     * seek exhausted this call / not applicable).
+     */
+    tryHungryArmourSeekBeforeStairs(host, w) {
+      var _a, _b;
+      if (!(w.food <= 0 && w.healReserve <= 0)) return false;
+      if (w.hasArmour || this.postBreakArmourChestExhausted) return false;
+      const ch = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
+      if (ch && !this.isGatherTileBlocked(ch.x, ch.y)) return false;
+      if (this._armourSeekArmTick !== this.runTicks) {
+        this._armourSeekArmTick = this.runTicks;
+        this.postBreakArmourSeekHits++;
+      }
+      if (this.postBreakArmourSeekHits >= 96) {
+        this.postBreakArmourChestExhausted = true;
+        if (!this.actions.some((s) => /hungry ban armour-seek \(3150\)/i.test(s))) {
+          this.noteAction("hungry ban armour-seek (3150)");
+          host.log("AUTO: hungry ban armour-seek (3150) \u2014 no chest \u2192 stairs");
+        }
+        return false;
+      }
+      const spot = (w.explore && (!ch || w.explore.x !== ch.x || w.explore.y !== ch.y) ? w.explore : null) || (w.wander && (!ch || w.wander.x !== ch.x || w.wander.y !== ch.y) ? w.wander : null) || (w.hub && (!ch || w.hub.x !== ch.x || w.hub.y !== ch.y) ? w.hub : null);
+      if (!spot) {
+        this.postBreakArmourChestExhausted = true;
+        if (!this.actions.some((s) => /hungry ban armour-seek \(3150\)/i.test(s))) {
+          this.noteAction("hungry ban armour-seek (3150)");
+          host.log("AUTO: hungry ban armour-seek (3150) \u2014 no explore spot \u2192 stairs");
+        }
+        return false;
+      }
+      if (!this.actions.some((s) => /hungry armour-seek \(3150\)/i.test(s))) {
+        this.noteAction("hungry armour-seek (3150)");
+        host.log("AUTO: hungry armour-seek (3150) \u2014 explore before naked stairs");
+      }
+      this.desireXY = { x: spot.x, y: spot.y };
+      host.walkTo(spot.x, spot.y);
+      return true;
     }
     noteHungryBanClosedStairs(host) {
       if (!this.actions.some((s) => /hungry ban closed-stairs \(3142\)/i.test(s))) {
