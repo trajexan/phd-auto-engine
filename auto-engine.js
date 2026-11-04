@@ -1,4 +1,4 @@
-/* phd auto-engine 3132 — pull via GET /api/auto-engine */
+/* phd auto-engine 3133 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3132";
+  var AUTO_ENGINE_VERSION = "3133";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -6046,6 +6046,13 @@
       this.latchThrash();
       this.latchClash();
       this.enterPostBreak(host, `early-osc:${kind}`);
+      if (/tools|pickaxe|mine|wander|first.?wep|quiet hold|phase|aba|abc/i.test(`${kind}|${pairKey}`)) {
+        this.latchHungryToolsBan(host, "early-osc");
+        if (!this.actions.some((s) => /hungry tools-ban early-osc \(3133\)/i.test(s))) {
+          this.noteAction("hungry tools-ban early-osc (3133)");
+          host.log(`AUTO: hungry tools-ban early-osc (3133) \u2014 ${kind}`);
+        }
+      }
       this.clearFundIntent("tool");
       this.clearFundIntent("food");
       this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 640);
@@ -8245,15 +8252,15 @@
           return true;
         }
         this.noteAction("status osc tools-mine mono \u2014 explore");
-        host.log("AUTO: status osc tools mine mono \u2014 explore (2051)");
-        if (w.explore) {
-          this.desireXY = { x: w.explore.x, y: w.explore.y };
-          host.walkTo(w.explore.x, w.explore.y);
-        } else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
-        else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
-        this.setStatus(host, w, stance, "tools-mine mono \u2014 explore");
-        this.cool = 14;
-        return true;
+        host.log("AUTO: status osc tools mine mono \u2014 explore (2051/3133)");
+        this.enterPostBreak(host, "tools-mine-mono");
+        this.latchHungryToolsBan(host, "tools-mine-mono");
+        if (!this.actions.some((s) => /hungry tools-ban early-osc \(3133\)/i.test(s))) {
+          this.noteAction("hungry tools-ban early-osc (3133)");
+          host.log("AUTO: hungry tools-ban early-osc (3133) \u2014 tools-mine-mono");
+        }
+        this.cool = 0;
+        return this.postBreakFreeBrain(host, w, stance, "tools-mine-mono");
       }
       if (this.statusOscPair(
         /tools fund sell|tools fund sell mats|tools-hatchet hang/,
