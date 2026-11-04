@@ -1,4 +1,4 @@
-/* phd auto-engine 3147 — pull via GET /api/auto-engine */
+/* phd auto-engine 3148 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3147";
+  var AUTO_ENGINE_VERSION = "3148";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1545,6 +1545,11 @@
        * hungryEmpty+!hasArmour — 3145 bypassSoft must not re-enter → F1 WD.
        */
       __publicField(this, "postBreakArmourChestExhausted", false);
+      /**
+       * Eng 3148 / R139: runTicks when armourChestOk openChestOnce first succeeded
+       * still naked — grace then latch (soft-block needs re-opens that never come).
+       */
+      __publicField(this, "armourChestOpenedAt", -1);
       /** Eng 3124: free-fish attempts this life across any tile (not a timer). */
       __publicField(this, "postBreakFreeFishLifeHits", 0);
       /** Eng 3125: quiet sell/hub-shop under hungry+stairs this life (not a timer). */
@@ -1877,6 +1882,7 @@
           this.postBreakFreeFishHits = 0;
           this.postBreakFreeFishExhausted = false;
           this.postBreakArmourChestExhausted = false;
+          this.armourChestOpenedAt = -1;
           this.postBreakFreeFishLifeHits = 0;
           this.postBreakHungryQuietSellHits = 0;
           this.postBreakHungryScrubLatched = false;
@@ -7077,25 +7083,33 @@
       {
         const hungryEmptyArm = w.food <= 0 && w.healReserve <= 0;
         if (hungryEmptyArm && !w.hasArmour && !this.postBreakArmourChestExhausted) {
-          const chArm = (_g = (_f = w.seen) == null ? void 0 : _f.chest) != null ? _g : this.mem(w, "chest");
-          if (chArm && !this.isGatherTileBlocked(chArm.x, chArm.y)) {
-            if (this.runTicks < this.chestBlockUntil) {
-              this.postBreakArmourChestExhausted = true;
-              if (!this.actions.some((s) => /hungry ban armour-chest \(3146\)/i.test(s))) {
-                this.noteAction("hungry ban armour-chest (3146)");
-                host.log("AUTO: hungry ban armour-chest (3146) \u2014 softActive \u2192 stairs");
-              }
-            } else {
-              if (!this.actions.some((s) => /hungry stairs armour-chest \(3145\)/i.test(s))) {
-                this.noteAction("hungry stairs armour-chest (3145)");
-                host.log("AUTO: hungry stairs armour-chest (3145)");
-              }
-              if (this.walkToTile(host, chArm.x, chArm.y)) {
-                return true;
-              }
-              if (this.tryOpenChestOnce(host, w, stance, { needBag: false, cool: 2, bypassSoft: true })) {
-                if (w.hasArmour) this.stuckTicks = 0;
-                return true;
+          if (this.armourChestOpenedAt >= 0 && this.runTicks >= this.armourChestOpenedAt + 24) {
+            this.postBreakArmourChestExhausted = true;
+            if (!this.actions.some((s) => /hungry ban armour-chest \(3148\)/i.test(s))) {
+              this.noteAction("hungry ban armour-chest (3148)");
+              host.log("AUTO: hungry ban armour-chest (3148) \u2014 open-grace \u2192 stairs");
+            }
+          } else {
+            const chArm = (_g = (_f = w.seen) == null ? void 0 : _f.chest) != null ? _g : this.mem(w, "chest");
+            if (chArm && !this.isGatherTileBlocked(chArm.x, chArm.y)) {
+              if (this.runTicks < this.chestBlockUntil) {
+                this.postBreakArmourChestExhausted = true;
+                if (!this.actions.some((s) => /hungry ban armour-chest \(3146\)/i.test(s))) {
+                  this.noteAction("hungry ban armour-chest (3146)");
+                  host.log("AUTO: hungry ban armour-chest (3146) \u2014 softActive \u2192 stairs");
+                }
+              } else {
+                if (!this.actions.some((s) => /hungry stairs armour-chest \(3145\)/i.test(s))) {
+                  this.noteAction("hungry stairs armour-chest (3145)");
+                  host.log("AUTO: hungry stairs armour-chest (3145)");
+                }
+                if (this.walkToTile(host, chArm.x, chArm.y)) {
+                  return true;
+                }
+                if (this.tryOpenChestOnce(host, w, stance, { needBag: false, cool: 2, bypassSoft: true })) {
+                  if (w.hasArmour) this.stuckTicks = 0;
+                  return true;
+                }
               }
             }
           }
@@ -12706,6 +12720,9 @@
       if (this.runTicks < this.chestBlockUntil && (!opts.bypassSoft || this.postBreakArmourChestExhausted)) return false;
       if (opts.needBag && w.bagFree <= 0) return false;
       if (!host.openChestOnce()) return false;
+      if (armourChestOk && !w.hasArmour && this.armourChestOpenedAt < 0) {
+        this.armourChestOpenedAt = this.runTicks;
+      }
       const fp = armourChestOk ? `arm${w.hasArmour ? 1 : 0}` : `c${w.coins}|bf${w.bagFree}|f${w.food}|h${w.healReserve}|a${w.hasArmour ? 1 : 0}`;
       if (this.chestProgKey !== "" && fp === this.chestProgKey) {
         this.chestFailStreak++;
