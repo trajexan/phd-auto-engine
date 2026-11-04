@@ -1,4 +1,4 @@
-/* phd auto-engine 3127 — pull via GET /api/auto-engine */
+/* phd auto-engine 3128 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3127";
+  var AUTO_ENGINE_VERSION = "3128";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1521,7 +1521,7 @@
       __publicField(this, "postBreakFreeFishLifeHits", 0);
       /** Eng 3125: quiet sell/hub-shop under hungry+stairs this life (not a timer). */
       __publicField(this, "postBreakHungryQuietSellHits", 0);
-      /** Eng 3127: after hungry scrub stairs/no-mine this life — ban tools theater under hungryEmpty (not a timer). */
+      /** Eng 3127/3128: life-latch — after hungry stairs/scrub/tools-rock under food0, ban tools theater under postBreak+food0 (not a timer). */
       __publicField(this, "postBreakHungryScrubLatched", false);
       /** Eng 3106: free-brain walk desire key after free-mine exhaust (not a timer). */
       __publicField(this, "postBreakFreeWalkKey", "");
@@ -4104,16 +4104,11 @@
         if (this.aleFwTheaterBanned() && !this.postBreakAllowNormal()) {
           return this.aleSpentToolsMineDivert(host, w, stance, "tools-mine-live");
         }
-        if (this.isPostBreak() && w.food <= 0 && (w.healReserve <= 0 || this.postBreakHungryScrubLatched)) {
-          if (this.postBreakHungryScrubLatched) {
-            if (!this.actions.some((s) => /hungry ban tools-latch/i.test(s))) {
-              this.noteAction("hungry ban tools-latch (3127)");
-              host.log("AUTO: hungry ban tools-latch (3127) \u2014 tools mine");
-            }
-          } else if (!this.actions.some((s) => /hungry ban mine/i.test(s))) {
-            this.noteAction("hungry ban mine (3120)");
-            host.log("AUTO: hungry ban mine (3120) \u2014 tools any-postBreak");
-          }
+        if (this.isPostBreak() && w.food <= 0) {
+          this.latchHungryToolsBan(host, "tools-mine");
+        }
+        if (this.hungryToolsTheaterBanned(w)) {
+          this.noteHungryBanTools(host, "tools-mine");
           return this.postBreakFreeBrain(host, w, stance, "hungry-ban-mine-tools");
         }
         if (this.oscCoolDivertActive() && this.statusFamilyHits(/tools mine|tools find rock/) >= 3) {
@@ -4203,16 +4198,11 @@
           if (this.aleFwTheaterBanned() && !this.postBreakAllowNormal()) {
             return this.aleSpentToolsMineDivert(host, w, stance, "tools-mine-fund");
           }
-          if (this.isPostBreak() && w.food <= 0 && (w.healReserve <= 0 || this.postBreakHungryScrubLatched)) {
-            if (this.postBreakHungryScrubLatched) {
-              if (!this.actions.some((s) => /hungry ban tools-latch/i.test(s))) {
-                this.noteAction("hungry ban tools-latch (3127)");
-                host.log("AUTO: hungry ban tools-latch (3127) \u2014 fund mine");
-              }
-            } else if (!this.actions.some((s) => /hungry ban mine/i.test(s))) {
-              this.noteAction("hungry ban mine (3122)");
-              host.log("AUTO: hungry ban mine (3122) \u2014 tools fund-path");
-            }
+          if (this.isPostBreak() && w.food <= 0) {
+            this.latchHungryToolsBan(host, "fund-mine");
+          }
+          if (this.hungryToolsTheaterBanned(w)) {
+            this.noteHungryBanTools(host, "fund-mine");
             return this.postBreakFreeBrain(host, w, stance, "hungry-ban-mine-fund");
           }
           this.setStatus1001(host, w, stance, "tools mine");
@@ -6056,11 +6046,11 @@
         this.cool = 0;
         return false;
       }
-      if (goal === "mine" && this.isPostBreak() && w.food <= 0 && w.healReserve <= 0) {
-        if (!this.actions.some((s) => /hungry ban phase-mine/i.test(s))) {
-          this.noteAction("hungry ban phase-mine (3126)");
-          host.log("AUTO: hungry ban phase-mine (3126) \u2014 free brain");
-        }
+      if (goal === "mine" && this.isPostBreak() && w.food <= 0) {
+        this.latchHungryToolsBan(host, "phase-mine");
+      }
+      if (goal === "mine" && this.hungryToolsTheaterBanned(w)) {
+        this.noteHungryBanTools(host, "phase-mine");
         this.clearPhaseIntent();
         this.phaseIntentMineMonoHits = 0;
         return this.postBreakFreeBrain(host, w, stance, "hungry-ban-phase-mine");
@@ -6860,6 +6850,7 @@
               this.sealPostExhaustChestSell(host, w);
             }
             if (hungryEmpty) {
+              this.latchHungryToolsBan(host, "hungry-stairs");
               if (!this.actions.some((s) => /free stairs hungry|hungry stairs after food/i.test(s))) {
                 this.noteAction("hungry stairs after food (3114)");
                 host.log("AUTO: hungry stairs after food (3114)");
@@ -6875,6 +6866,7 @@
             host.walkTo(w.stairs.x, w.stairs.y);
             this.stuckTicks = 0;
             if (hungryEmpty) {
+              this.latchHungryToolsBan(host, "hungry-stairs");
               if (!this.actions.some((s) => /free stairs hungry|hungry stairs after food/i.test(s))) {
                 this.noteAction("hungry stairs after food (3114)");
                 host.log("AUTO: hungry stairs after food (3114)");
@@ -7033,6 +7025,7 @@
               this.desireXY = { x: w.stairs.x, y: w.stairs.y };
               host.walkTo(w.stairs.x, w.stairs.y);
               this.stuckTicks = 0;
+              this.latchHungryToolsBan(host, "hungry-stairs-postex");
               if (!this.actions.some((s) => /free stairs hungry|hungry stairs after food/i.test(s))) {
                 this.noteAction("hungry stairs after food (3114)");
                 host.log("AUTO: hungry stairs after food (3114)");
@@ -7051,6 +7044,7 @@
               host.walkTo(w.stairs.x, w.stairs.y);
               this.stuckTicks = 0;
               if (hungryEmptyEx) {
+                this.latchHungryToolsBan(host, "hungry-stairs-ex");
                 if (!this.actions.some((s) => /free stairs hungry|hungry stairs after food/i.test(s))) {
                   this.noteAction("hungry stairs after food (3114)");
                   host.log("AUTO: hungry stairs after food (3114)");
@@ -7625,15 +7619,17 @@
             }
             host.log(`AUTO: scrub TRW clear-seal divert hits=${this.lifeSpentDivertHits} [${pairKey}] (3016)`);
             const hungryScrub = w.food <= 0 && w.healReserve <= 0;
-            if (hungryScrub) {
+            if (w.food <= 0) {
+              this.latchHungryToolsBan(host, "divert-scrub");
+              if (hungryScrub && !this.actions.some((s) => /hungry scrub latch/i.test(s))) {
+                this.noteAction("hungry scrub latch (3127)");
+                host.log("AUTO: hungry scrub latch (3127) \u2014 complementary");
+              }
+            }
+            if (hungryScrub || this.postBreakHungryScrubLatched) {
               this.clearPhaseIntent();
               this.phaseIntentMineMonoHits = 0;
               this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 320);
-              this.postBreakHungryScrubLatched = true;
-              if (!this.actions.some((s) => /hungry scrub latch/i.test(s))) {
-                this.noteAction("hungry scrub latch (3127)");
-                host.log("AUTO: hungry scrub latch (3127) \u2014 tools theater ban");
-              }
               if (w.stairs && (this.stairsUsable(w) || !w.stairsLit)) {
                 if (!this.actions.some((s) => /hungry scrub stairs/i.test(s))) {
                   this.noteAction("hungry scrub stairs (3126)");
@@ -9729,16 +9725,11 @@
         /quiet hold — tools|quiet hold — bootstrap break/,
         /tools fund sell|tools-hatchet hang|FIRST_WEP hold|kite cool exit grace|stuck rethink/
       ) || this.statusFamilyHits(/tools fund sell|tools-hatchet hang/) >= 3 && bootHits >= 2 || breakHits >= 2;
-      if (this.isPostBreak() && w.food <= 0 && w.healReserve <= 0) {
-        if (this.postBreakHungryScrubLatched) {
-          if (!this.actions.some((s) => /hungry ban tools-latch/i.test(s))) {
-            this.noteAction("hungry ban tools-latch (3127)");
-            host.log("AUTO: hungry ban tools-latch (3127) \u2014 quiet hold");
-          }
-        } else if (!this.actions.some((s) => /hungry ban fish|hungry ban kit/i.test(s))) {
-          this.noteAction("hungry ban kit (3121)");
-          host.log("AUTO: hungry ban kit (3121) \u2014 quiet bootstrap");
-        }
+      if (this.isPostBreak() && w.food <= 0) {
+        this.latchHungryToolsBan(host, "quiet-bootstrap");
+      }
+      if (this.hungryToolsTheaterBanned(w)) {
+        this.noteHungryBanTools(host, "quiet-bootstrap");
         return this.postBreakFreeBrain(host, w, stance, "hungry-ban-quiet-bootstrap");
       }
       if (this.beginnerToolsIncomplete(host) && !bootstrapMono) {
@@ -10201,22 +10192,36 @@
       }
       return n;
     }
+    /** Eng 3128: arm life-latch so heal flicker cannot re-open tools theater under food0. */
+    latchHungryToolsBan(host, why) {
+      if (this.postBreakHungryScrubLatched) return;
+      this.postBreakHungryScrubLatched = true;
+      if (!this.actions.some((s) => /hungry tools-ban latch|hungry scrub latch/i.test(s))) {
+        this.noteAction("hungry tools-ban latch (3128)");
+        host.log(`AUTO: hungry tools-ban latch (3128) \u2014 ${why}`);
+      }
+    }
+    /** Eng 3128: postBreak + food0 + (hungryEmpty OR latched) → ban tools theater. */
+    hungryToolsTheaterBanned(w) {
+      return this.isPostBreak() && w.food <= 0 && (w.healReserve <= 0 || this.postBreakHungryScrubLatched);
+    }
+    noteHungryBanTools(host, where) {
+      if (!this.actions.some((s) => /hungry ban tools \(3128\)|hungry ban tools-latch/i.test(s))) {
+        this.noteAction("hungry ban tools (3128)");
+        host.log(`AUTO: hungry ban tools (3128) \u2014 ${where}`);
+      }
+    }
     /**
      * Eng 2035 / R4: tools find rock with explore/wander — or break-label explore
      * when rockFindBreakActive (m54rep/r7juze).
      */
     tryToolsFindRockOrBreak(host, w, stance) {
       var _a, _b;
-      if (this.isPostBreak() && w.food <= 0 && (w.healReserve <= 0 || this.postBreakHungryScrubLatched)) {
-        if (this.postBreakHungryScrubLatched) {
-          if (!this.actions.some((s) => /hungry ban tools-latch/i.test(s))) {
-            this.noteAction("hungry ban tools-latch (3127)");
-            host.log("AUTO: hungry ban tools-latch (3127) \u2014 find-rock");
-          }
-        } else if (!this.actions.some((s) => /hungry ban mine/i.test(s))) {
-          this.noteAction("hungry ban mine (3120)");
-          host.log("AUTO: hungry ban mine (3120) \u2014 find-rock");
-        }
+      if (this.isPostBreak() && w.food <= 0) {
+        this.latchHungryToolsBan(host, "find-rock");
+      }
+      if (this.hungryToolsTheaterBanned(w)) {
+        this.noteHungryBanTools(host, "find-rock");
         return this.postBreakFreeBrain(host, w, stance, "hungry-ban-find-rock");
       }
       if (this.trwReenterBanned()) {
