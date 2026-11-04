@@ -1,4 +1,4 @@
-/* phd auto-engine 3136 — pull via GET /api/auto-engine */
+/* phd auto-engine 3137 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3136";
+  var AUTO_ENGINE_VERSION = "3137";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -6306,8 +6306,13 @@
         return false;
       }
       this.postReleaseQuietDone = true;
-      this.latchThrash();
-      this.latchClash();
+      if (!this.postBreakHungryScrubLatched) {
+        this.latchThrash();
+        this.latchClash();
+      } else if (!this.actions.some((s) => /hungry tools-ban quiet-productive \(3137\)/i.test(s))) {
+        this.noteAction("hungry tools-ban quiet-productive (3137)");
+        host.log("AUTO: hungry tools-ban quiet-productive (3137) \u2014 productive no TCS");
+      }
       this.clearFundIntent("tool");
       this.stickyPhaseLeaveArmed = false;
       this.stickyExploreBlockUntil = Math.min(this.stickyExploreBlockUntil, this.runTicks);
@@ -6641,8 +6646,13 @@
      */
     forceWdFirstClassDivert(host, w, stance, why) {
       this.latchStuck();
-      this.latchThrash();
-      this.latchClash();
+      if (!this.postBreakHungryScrubLatched) {
+        this.latchThrash();
+        this.latchClash();
+      } else if (!this.actions.some((s) => /hungry tools-ban wd-quiet \(3137\)/i.test(s))) {
+        this.noteAction("hungry tools-ban wd-quiet (3137)");
+        host.log(`AUTO: hungry tools-ban wd-quiet (3137) \u2014 ${why}`);
+      }
       if (this.isPostBreak() || this.wdFirstClassDiverted) {
         if (!this.wdFirstClassDiverted) {
           this.noteAction(`wd divert \u2014 ${why}`);
