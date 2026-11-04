@@ -1,4 +1,4 @@
-/* phd auto-engine 3113 — pull via GET /api/auto-engine */
+/* phd auto-engine 3114 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3113";
+  var AUTO_ENGINE_VERSION = "3114";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -4370,8 +4370,8 @@
       if ((anvil || w.anvilNearby) && this.wantSmithKit(w) && host.smithKitOnce()) return true;
       if (rock && host.hasTool("pickaxe") && this.postBreakAllowNormal() && w.food <= 0 && w.healReserve <= 0) {
         if (!this.actions.some((s) => /hungry ban mine/i.test(s))) {
-          this.noteAction("hungry ban mine (3113)");
-          host.log("AUTO: hungry ban mine (3113)");
+          this.noteAction("hungry ban mine (3114)");
+          host.log("AUTO: hungry ban mine (3114)");
         }
         return this.postBreakFreeBrain(host, w, stance, "hungry-ban-mine");
       }
@@ -6141,13 +6141,23 @@
           did = "wander";
         }
       }
+      if ((did === "sell" || did === "walk-shop" || did === "hub-shop") && w.food <= 0 && w.healReserve <= 0 && w.coins > 0) {
+        host.buyFoodIfCritical();
+        if (w.food > 0 || w.healReserve > 0) {
+          did = "buy-food";
+          if (!this.actions.some((s) => /hungry food first/i.test(s))) {
+            this.noteAction("hungry food first (3114)");
+            host.log("AUTO: hungry food first (3114) \u2014 quiet buy");
+          }
+        }
+      }
       this.noteAction(`productive quiet \u2014 ${did || "none"} (${why})`);
       host.log(`AUTO: one productive quiet after RELEASE (3101) ${did || "none"} ${why}`);
       this.setStatus(
         host,
         w,
         stance,
-        did === "eat" ? "productive quiet \u2014 eat" : did === "sell" || did === "walk-shop" || did === "hub-shop" ? "productive quiet \u2014 sell" : did === "re-kit" ? "productive quiet \u2014 re-kit" : "productive quiet \u2014 hub"
+        did === "eat" || did === "buy-food" ? "productive quiet \u2014 eat" : did === "sell" || did === "walk-shop" || did === "hub-shop" ? "productive quiet \u2014 sell" : did === "re-kit" ? "productive quiet \u2014 re-kit" : "productive quiet \u2014 hub"
       );
       this.cool = 0;
       return true;
@@ -6299,7 +6309,7 @@
       this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 512);
       if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
         this.noteAction(`postBreak free brain \u2014 ${why}`);
-        host.log(`AUTO: postBreak free brain (3113) ${why}`);
+        host.log(`AUTO: postBreak free brain (3114) ${why}`);
       }
       if (host.hasTool("pickaxe")) {
         this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
@@ -6344,64 +6354,32 @@
         }
       }
       {
-        const hpPctDeep = w.maxHp > 0 ? w.hp / w.maxHp : 1;
-        const hungryEmpty = w.food <= 0 && w.healReserve <= 0;
-        const foodBufferAllows = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(hungryEmpty && hpPctDeep < 0.4);
-        const pickReady = host.hasTool("pickaxe");
-        if (pickReady && w.stairs && (foodBufferAllows || hungryEmpty)) {
-          if (this.stairsUsable(w)) {
-            this.desireXY = { x: w.stairs.x, y: w.stairs.y };
-            host.walkTo(w.stairs.x, w.stairs.y);
-            this.stuckTicks = 0;
-            if (!this.postBreakFreeMineExhausted) {
-              this.postBreakFreeMineExhausted = true;
-              this.sealPostExhaustChestSell(host, w);
-            }
-            if (hungryEmpty) {
-              if (!this.actions.some((s) => /free stairs hungry/i.test(s))) {
-                this.noteAction("free stairs hungry (3112)");
-                host.log("AUTO: free stairs hungry (3112)");
-              }
-            } else if (!this.actions.some((s) => /postBreak free stairs deep/i.test(s))) {
-              this.noteAction("postBreak free stairs deep");
-              host.log("AUTO: postBreak free stairs deep (3111)");
-            }
-            return true;
-          }
-          if (!w.stairsLit) {
-            this.desireXY = { x: w.stairs.x, y: w.stairs.y };
-            host.walkTo(w.stairs.x, w.stairs.y);
-            this.stuckTicks = 0;
-            if (hungryEmpty) {
-              if (!this.actions.some((s) => /free stairs hungry/i.test(s))) {
-                this.noteAction("free stairs hungry (3112)");
-                host.log("AUTO: free stairs hungry (3112)");
-              }
-            } else if (!this.actions.some((s) => /postBreak free stairs light/i.test(s))) {
-              this.noteAction("postBreak free stairs light");
-              host.log("AUTO: postBreak free stairs light (3111)");
-            }
-            return true;
-          }
-        }
-      }
-      {
         const hungryEmptyPre = w.food <= 0 && w.healReserve <= 0;
         if (hungryEmptyPre) {
+          if (w.coins <= 0 && (this.hasSellableMats(w) || this.oreLiquidateBeforeFish(w) || this.hasBagCookables(w))) {
+            if (this.trySellUnusedOnce(host, w) || host.sellMatsForCoins(1)) {
+              this.stuckTicks = 0;
+              if (!this.actions.some((s) => /hungry food first/i.test(s))) {
+                this.noteAction("hungry food first (3114)");
+                host.log("AUTO: hungry food first (3114) \u2014 sell for food");
+              }
+              return true;
+            }
+          }
           if (w.coins > 0) host.buyFoodIfCritical();
           if (w.food > 0 || w.healReserve > 0) {
             this.stuckTicks = 0;
             if (!this.actions.some((s) => /hungry food first/i.test(s))) {
-              this.noteAction("hungry food first (3113)");
-              host.log("AUTO: hungry food first (3113) \u2014 bought");
+              this.noteAction("hungry food first (3114)");
+              host.log("AUTO: hungry food first (3114) \u2014 bought");
             }
             return true;
           }
           const pondPre = (_e = (_d = this.resolvePond(w)) != null ? _d : (_c = w.seen) == null ? void 0 : _c.pond) != null ? _e : this.mem(w, "pond");
           if (!host.hasTool("rod") && this.canFundRodNow(w) && (w.pondKnown || pondPre)) {
             if (!this.actions.some((s) => /hungry food first/i.test(s))) {
-              this.noteAction("hungry food first (3113)");
-              host.log("AUTO: hungry food first (3113) \u2014 fund rod");
+              this.noteAction("hungry food first (3114)");
+              host.log("AUTO: hungry food first (3114) \u2014 fund rod");
             }
             if (host.acquireTool("rod")) {
               this.stuckTicks = 0;
@@ -6420,8 +6398,8 @@
             this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
             this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
             if (!this.actions.some((s) => /hungry food first/i.test(s))) {
-              this.noteAction("hungry food first (3113)");
-              host.log("AUTO: hungry food first (3113) \u2014 fish");
+              this.noteAction("hungry food first (3114)");
+              host.log("AUTO: hungry food first (3114) \u2014 fish");
             }
             if (this.walkToTile(host, pondPre.x, pondPre.y)) {
               this.stuckTicks = 0;
@@ -6437,12 +6415,54 @@
             this.sealPostExhaustChestSell(host, w);
             if (!this.actions.some((s) => /postBreak free mine exhaust/i.test(s))) {
               this.noteAction("postBreak free mine exhaust");
-              host.log("AUTO: postBreak free mine exhaust \u2014 hungry-skip (3113)");
+              host.log("AUTO: postBreak free mine exhaust \u2014 hungry-skip (3114)");
             }
             if (!this.actions.some((s) => /hungry ban mine/i.test(s))) {
-              this.noteAction("hungry ban mine (3113)");
-              host.log("AUTO: hungry ban mine (3113) \u2014 skip free-mine");
+              this.noteAction("hungry ban mine (3114)");
+              host.log("AUTO: hungry ban mine (3114) \u2014 skip free-mine");
             }
+          }
+        }
+      }
+      {
+        const hpPctDeep = w.maxHp > 0 ? w.hp / w.maxHp : 1;
+        const hungryEmpty = w.food <= 0 && w.healReserve <= 0;
+        const foodBufferAllows = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(hungryEmpty && hpPctDeep < 0.4);
+        const pickReady = host.hasTool("pickaxe");
+        if (pickReady && w.stairs && (foodBufferAllows || hungryEmpty)) {
+          if (this.stairsUsable(w)) {
+            this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+            host.walkTo(w.stairs.x, w.stairs.y);
+            this.stuckTicks = 0;
+            if (!this.postBreakFreeMineExhausted) {
+              this.postBreakFreeMineExhausted = true;
+              this.sealPostExhaustChestSell(host, w);
+            }
+            if (hungryEmpty) {
+              if (!this.actions.some((s) => /free stairs hungry|hungry stairs after food/i.test(s))) {
+                this.noteAction("hungry stairs after food (3114)");
+                host.log("AUTO: hungry stairs after food (3114)");
+              }
+            } else if (!this.actions.some((s) => /postBreak free stairs deep/i.test(s))) {
+              this.noteAction("postBreak free stairs deep");
+              host.log("AUTO: postBreak free stairs deep (3111)");
+            }
+            return true;
+          }
+          if (!w.stairsLit) {
+            this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+            host.walkTo(w.stairs.x, w.stairs.y);
+            this.stuckTicks = 0;
+            if (hungryEmpty) {
+              if (!this.actions.some((s) => /free stairs hungry|hungry stairs after food/i.test(s))) {
+                this.noteAction("hungry stairs after food (3114)");
+                host.log("AUTO: hungry stairs after food (3114)");
+              }
+            } else if (!this.actions.some((s) => /postBreak free stairs light/i.test(s))) {
+              this.noteAction("postBreak free stairs light");
+              host.log("AUTO: postBreak free stairs light (3111)");
+            }
+            return true;
           }
         }
       }
@@ -6485,12 +6505,22 @@
         {
           const hungryEmpty = w.food <= 0 && w.healReserve <= 0;
           if (hungryEmpty) {
+            if (w.coins <= 0 && (this.hasSellableMats(w) || this.oreLiquidateBeforeFish(w) || this.hasBagCookables(w))) {
+              if (this.trySellUnusedOnce(host, w) || host.sellMatsForCoins(1)) {
+                this.stuckTicks = 0;
+                if (!this.actions.some((s) => /hungry food first/i.test(s))) {
+                  this.noteAction("hungry food first (3114)");
+                  host.log("AUTO: hungry food first (3114) \u2014 sell post-ex");
+                }
+                return true;
+              }
+            }
             if (w.coins > 0) host.buyFoodIfCritical();
             if (w.food > 0 || w.healReserve > 0) {
               this.stuckTicks = 0;
               if (!this.actions.some((s) => /hungry food first/i.test(s))) {
-                this.noteAction("hungry food first (3113)");
-                host.log("AUTO: hungry food first (3113) \u2014 bought post-ex");
+                this.noteAction("hungry food first (3114)");
+                host.log("AUTO: hungry food first (3114) \u2014 bought post-ex");
               }
               return true;
             }
@@ -6499,8 +6529,8 @@
             const pond = (_j = (_i = this.resolvePond(w)) != null ? _i : (_h = w.seen) == null ? void 0 : _h.pond) != null ? _j : this.mem(w, "pond");
             if (!host.hasTool("rod") && this.canFundRodNow(w) && (w.pondKnown || pond)) {
               if (!this.actions.some((s) => /hungry food first/i.test(s))) {
-                this.noteAction("hungry food first (3113)");
-                host.log("AUTO: hungry food first (3113) \u2014 fund rod post-ex");
+                this.noteAction("hungry food first (3114)");
+                host.log("AUTO: hungry food first (3114) \u2014 fund rod post-ex");
               }
               if (host.acquireTool("rod")) {
                 this.stuckTicks = 0;
@@ -6529,9 +6559,9 @@
               this.desireXY = { x: w.stairs.x, y: w.stairs.y };
               host.walkTo(w.stairs.x, w.stairs.y);
               this.stuckTicks = 0;
-              if (!this.actions.some((s) => /free stairs hungry/i.test(s))) {
-                this.noteAction("free stairs hungry (3112)");
-                host.log("AUTO: free stairs hungry (3112)");
+              if (!this.actions.some((s) => /free stairs hungry|hungry stairs after food/i.test(s))) {
+                this.noteAction("hungry stairs after food (3114)");
+                host.log("AUTO: hungry stairs after food (3114)");
               }
               return true;
             }
@@ -6547,9 +6577,9 @@
               host.walkTo(w.stairs.x, w.stairs.y);
               this.stuckTicks = 0;
               if (hungryEmptyEx) {
-                if (!this.actions.some((s) => /free stairs hungry/i.test(s))) {
-                  this.noteAction("free stairs hungry (3112)");
-                  host.log("AUTO: free stairs hungry (3112)");
+                if (!this.actions.some((s) => /free stairs hungry|hungry stairs after food/i.test(s))) {
+                  this.noteAction("hungry stairs after food (3114)");
+                  host.log("AUTO: hungry stairs after food (3114)");
                 }
               } else if (!this.actions.some((s) => /postBreak free stairs deep/i.test(s))) {
                 this.noteAction("postBreak free stairs deep");
