@@ -1,4 +1,4 @@
-/* phd auto-engine 3133 — pull via GET /api/auto-engine */
+/* phd auto-engine 3134 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3133";
+  var AUTO_ENGINE_VERSION = "3134";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -4190,6 +4190,7 @@
       }
       const liveRock = (_h = (_g = w.seen) == null ? void 0 : _g.rock) != null ? _h : null;
       if (liveRock && host.hasTool("pickaxe") && !this.rockFindBreakActive() && !this.isGatherTileBlocked(liveRock.x, liveRock.y)) {
+        if (this.tryToolsPreMineBan(host, w, stance, "tools-mine-live")) return true;
         if (this.trwReenterBanned()) {
           return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
         }
@@ -4287,6 +4288,7 @@
         if (this.tryFundBeginnerToolFarm(host, w, stance, tree, pond)) return true;
         const live = (_j = (_i = w.seen) == null ? void 0 : _i.rock) != null ? _j : null;
         if (live && host.hasTool("pickaxe") && !this.rockFindBreakActive() && !this.isGatherTileBlocked(live.x, live.y)) {
+          if (this.tryToolsPreMineBan(host, w, stance, "tools-mine-fund")) return true;
           if (this.aleFwTheaterBanned() && !this.postBreakAllowNormal()) {
             return this.aleSpentToolsMineDivert(host, w, stance, "tools-mine-fund");
           }
@@ -10306,6 +10308,28 @@
       }
       return n;
     }
+    /**
+     * Eng 3134 / R125: pickaxe-owned TOOLS mine↔find-rock mono → latch tools-ban +
+     * postBreak free brain BEFORE early-osc ABA latches thrash/clash (R125 root).
+     * Does NOT call latchThrash/latchClash — smoothness first.
+     */
+    tryToolsPreMineBan(host, w, stance, where) {
+      if (!host.hasTool("pickaxe")) return false;
+      if (this.hungryToolsTheaterBanned(w) || this.postBreakHungryScrubLatched) return false;
+      if (this.earlyOscDivertHits >= 1) return false;
+      const hits = this.statusFamilyHits(/tools mine|tools find rock/);
+      if (hits < 2) return false;
+      this.enterPostBreak(host, `tools-pre:${where}`);
+      this.latchHungryToolsBan(host, `tools-pre:${where}`);
+      if (!this.actions.some((s) => /hungry tools-ban tools-pre \(3134\)/i.test(s))) {
+        this.noteAction("hungry tools-ban tools-pre (3134)");
+        host.log(`AUTO: hungry tools-ban tools-pre (3134) \u2014 ${where} hits=${hits}`);
+      }
+      this.clearFundIntent("tool");
+      this.clearPhaseIntent();
+      this.cool = 0;
+      return this.postBreakFreeBrain(host, w, stance, `tools-pre:${where}`);
+    }
     /** Eng 3128: arm life-latch so heal flicker cannot re-open tools theater under food0. */
     latchHungryToolsBan(host, why) {
       if (this.postBreakHungryScrubLatched) return;
@@ -10341,6 +10365,7 @@
         this.noteHungryBanTools(host, "find-rock");
         return this.postBreakFreeBrain(host, w, stance, "hungry-ban-find-rock");
       }
+      if (this.tryToolsPreMineBan(host, w, stance, "find-rock")) return true;
       if (this.trwReenterBanned()) {
         return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
       }
