@@ -1,4 +1,4 @@
-/* phd auto-engine 3139 — pull via GET /api/auto-engine */
+/* phd auto-engine 3140 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3139";
+  var AUTO_ENGINE_VERSION = "3140";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2236,7 +2236,7 @@
       return true;
     }
     setStatus1001(host, w, stance, desire) {
-      if (this.hungryToolsTheaterBanned(w) && /tools mine|tools find rock|tools explore|tools wander|tools fund|quiet hold — tools|tools-rock/i.test(desire)) {
+      if (this.hungryToolsTheaterBanned(w) && /tools mine|tools find rock|tools find shop|tools pickaxe|tools explore|tools wander|tools fund|quiet hold — tools|tools-rock/i.test(desire)) {
         if (!this.actions.some((s) => /hungry ban tools theater \(3131\)/i.test(s))) {
           this.noteAction("hungry ban tools theater (3131)");
           host.log(`AUTO: hungry ban tools theater (3131) \u2014 status:${desire}`);
@@ -3821,20 +3821,27 @@
             return true;
           }
           const shopF = this.mem(w, "shop");
+          if (w.food <= 0 && w.healReserve <= 0) {
+            this.stuckRecentStatus.push("tools find shop");
+            if (this.tryToolsPreMineBan(host, w, stance, "fund-chop-shop")) return true;
+          }
           if (shopF && cheb(w.tile.x, w.tile.y, shopF.x, shopF.y) > 1) {
             this.setStatus1001(host, w, stance, "tools find shop");
+            if (this.tryToolsPreMineBan(host, w, stance, "fund-chop-shop-live")) return true;
             this.desireXY = { x: shopF.x, y: shopF.y };
             host.walkTo(shopF.x, shopF.y);
             return true;
           }
           if (w.hub && cheb(w.tile.x, w.tile.y, w.hub.x, w.hub.y) > 2) {
             this.setStatus1001(host, w, stance, "tools find shop");
+            if (this.tryToolsPreMineBan(host, w, stance, "fund-chop-hub-live")) return true;
             this.desireXY = { x: w.hub.x, y: w.hub.y };
             host.walkTo(w.hub.x, w.hub.y);
             return true;
           }
           if (w.explore) {
             this.setStatus1001(host, w, stance, "tools find shop");
+            if (this.tryToolsPreMineBan(host, w, stance, "fund-chop-explore-live")) return true;
             host.walkTo(w.explore.x, w.explore.y);
             return true;
           }
@@ -4090,7 +4097,12 @@
         if (host.hasTool("pickaxe") && tool !== "pickaxe") {
           if (this.tryKitAcquireWalk(host, w, stance, tool, anvil)) return true;
         } else {
+          if (tool === "pickaxe" && w.food <= 0 && w.healReserve <= 0) {
+            this.stuckRecentStatus.push("tools pickaxe");
+            if (this.tryToolsPreMineBan(host, w, stance, "tools-pickaxe")) return true;
+          }
           this.setStatus1001(host, w, stance, `tools ${tool}`);
+          if (tool === "pickaxe" && this.tryToolsPreMineBan(host, w, stance, "tools-pickaxe-live")) return true;
           if (host.acquireTool(tool)) return true;
         }
       }
@@ -4102,7 +4114,12 @@
           }
           return this.postBreakFreeBrain(host, w, stance, "hungry-ban-tools-shop");
         }
+        if (w.food <= 0 && w.healReserve <= 0) {
+          this.stuckRecentStatus.push("tools find shop");
+          if (this.tryToolsPreMineBan(host, w, stance, "find-shop")) return true;
+        }
         this.setStatus1001(host, w, stance, "tools find shop");
+        if (this.tryToolsPreMineBan(host, w, stance, "find-shop-live")) return true;
         if (host.acquireTool(tool || "pickaxe")) return true;
         if (w.hub) {
           this.desireXY = { x: w.hub.x, y: w.hub.y };
@@ -4140,7 +4157,12 @@
           if (host.hasTool("pickaxe") && tool !== "pickaxe" && !host.hasTool(tool)) {
             if (this.tryKitAcquireWalk(host, w, stance, tool, anvil)) return true;
           }
+          if (tool === "pickaxe" && w.food <= 0 && w.healReserve <= 0) {
+            this.stuckRecentStatus.push("tools pickaxe");
+            if (this.tryToolsPreMineBan(host, w, stance, "tools-pickaxe2")) return true;
+          }
           this.setStatus1001(host, w, stance, `tools ${tool}`);
+          if (tool === "pickaxe" && this.tryToolsPreMineBan(host, w, stance, "tools-pickaxe2-live")) return true;
           if (host.acquireTool(tool)) {
             if (tool === "rod" && host.hasTool("rod") && (pond || w.pondKnown)) {
               const t = pond != null ? pond : w.gather;
@@ -4317,7 +4339,12 @@
         return true;
       }
       if (tool && !host.hasTool(tool) && this.canFundToolNow(tool, w, anvil) && !(tool === "hatchet" && this.hatchetChestBreakActive())) {
+        if (tool === "pickaxe" && w.food <= 0 && w.healReserve <= 0) {
+          this.stuckRecentStatus.push("tools pickaxe");
+          if (this.tryToolsPreMineBan(host, w, stance, "tools-pickaxe3")) return true;
+        }
         this.setStatus1001(host, w, stance, `tools ${tool}`);
+        if (tool === "pickaxe" && this.tryToolsPreMineBan(host, w, stance, "tools-pickaxe3-live")) return true;
         if (host.acquireTool(tool)) return true;
         return true;
       }
@@ -4354,7 +4381,12 @@
           }
           return this.postBreakFreeBrain(host, w, stance, "hungry-ban-hub-shop");
         }
+        if (w.food <= 0 && w.healReserve <= 0) {
+          this.stuckRecentStatus.push("tools find shop");
+          if (this.tryToolsPreMineBan(host, w, stance, "hub-find-shop")) return true;
+        }
         this.setStatus1001(host, w, stance, "tools find shop");
+        if (this.tryToolsPreMineBan(host, w, stance, "hub-find-shop-live")) return true;
         this.desireXY = { x: w.hub.x, y: w.hub.y };
         host.walkTo(w.hub.x, w.hub.y);
         return true;
@@ -6675,6 +6707,11 @@
             this.noteAction("hungry tools-ban wd-stuck-quiet (3139)");
             host.log(`AUTO: hungry tools-ban wd-stuck-quiet (3139) \u2014 ${why}`);
           }
+          this.latchHungryToolsBan(host, `wd-seal:${why}`);
+          if (!this.actions.some((s) => /hungry tools-ban wd-seal \(3140\)/i.test(s))) {
+            this.noteAction("hungry tools-ban wd-seal (3140)");
+            host.log(`AUTO: hungry tools-ban wd-seal (3140) \u2014 ${why}`);
+          }
         } else {
           this.latchStuck();
           this.latchThrash();
@@ -8582,13 +8619,18 @@
         return true;
       }
       if (this.statusFamilyHits(/tools pickaxe/) >= 6 || this.statusOscPair(/tools pickaxe/, /stuck rethink/) || this.statusFamilyHits(/tools pickaxe/) >= 4 && this.statusFamilyHits(/stuck rethink/) >= 2) {
+        if (w.food <= 0 && w.healReserve <= 0) {
+          if (this.tryToolsPreMineBan(host, w, stance, "pickaxe-mono")) return true;
+        }
         this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 768);
         this.stuckWanderBreakUntil = Math.max(this.stuckWanderBreakUntil, this.runTicks + 768);
         this.emergToolsBreakUntil = Math.max(this.emergToolsBreakUntil, this.runTicks + 640);
         this.kitAcquireBlockUntil = Math.max(this.kitAcquireBlockUntil, this.runTicks + 384);
         this.clearFundIntent("tool");
-        this.latchThrash();
-        this.latchClash();
+        if (!(w.food <= 0 && w.healReserve <= 0)) {
+          this.latchThrash();
+          this.latchClash();
+        }
         this.stuckRecentStatus = this.stuckRecentStatus.filter(
           (s) => !/tools pickaxe|tools mine|tools find rock|stuck rethink|emerg-tools|mob engage/i.test(s)
         );
@@ -10378,19 +10420,30 @@
      * Eng 3134 / R125: pickaxe-owned TOOLS mine↔find-rock mono → latch tools-ban +
      * postBreak free brain BEFORE early-osc ABA latches thrash/clash (R125 root).
      * Does NOT call latchThrash/latchClash — smoothness first.
+     * Eng 3140 / R131: also seal on tools find shop / tools pickaxe (ALL 24 clash lives
+     * started there; mine/rock-only pre left shop/pickaxe mono free to stain clashHits).
+     * Under food0, pickaxe-owned gate drops so shop/pickaxe can seal before kit owns pick.
      */
     tryToolsPreMineBan(host, w, stance, where) {
-      if (!host.hasTool("pickaxe")) return false;
       if (this.hungryToolsTheaterBanned(w) || this.postBreakHungryScrubLatched) return false;
       if (this.earlyOscDivertHits >= 1) return false;
-      const hits = this.statusFamilyHits(/tools mine|tools find rock/);
+      const hungryEmpty = w.food <= 0 && w.healReserve <= 0;
+      const mineRockHits = this.statusFamilyHits(/tools mine|tools find rock/);
+      const shopPickHits = this.statusFamilyHits(/tools find shop|tools pickaxe/);
+      const hits = mineRockHits + shopPickHits;
       if (hits < 1) return false;
+      if (mineRockHits >= 1 && shopPickHits < 1 && !host.hasTool("pickaxe")) return false;
+      if (shopPickHits >= 1 && !hungryEmpty && !host.hasTool("pickaxe")) return false;
       this.enterPostBreak(host, `tools-pre:${where}`);
       this.latchHungryToolsBan(host, `tools-pre:${where}`);
       this.stuckRecentStatus = [];
       if (!this.actions.some((s) => /hungry tools-ban tools-pre \(3134\)/i.test(s))) {
         this.noteAction("hungry tools-ban tools-pre (3134)");
         host.log(`AUTO: hungry tools-ban tools-pre (3134) \u2014 ${where} hits=${hits}`);
+      }
+      if (shopPickHits >= 1 && !this.actions.some((s) => /hungry tools-ban tools-pre-shop \(3140\)/i.test(s))) {
+        this.noteAction("hungry tools-ban tools-pre-shop (3140)");
+        host.log(`AUTO: hungry tools-ban tools-pre-shop (3140) \u2014 ${where} shopPick=${shopPickHits}`);
       }
       if (!this.actions.some((s) => /hungry tools-ban fw-skip \(3135\)/i.test(s))) {
         this.noteAction("hungry tools-ban fw-skip (3135)");
