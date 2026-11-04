@@ -1,4 +1,4 @@
-/* phd auto-engine 3129 — pull via GET /api/auto-engine */
+/* phd auto-engine 3130 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3129";
+  var AUTO_ENGINE_VERSION = "3130";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1285,6 +1285,20 @@
       __publicField(this, "lifeThrash", false);
       __publicField(this, "lifeClash", false);
       __publicField(this, "lifeStuck", false);
+      /**
+       * Eng 3130 / t1836: event-rate counters beside life-latch booleans.
+       * Increment once per latch* call (edge by runTicks); reset on brand-new life only.
+       * Rate = 100 * hits / lifeTicks — hesitation intensity; latch stays ever-happened.
+       */
+      __publicField(this, "thrashHits", 0);
+      __publicField(this, "clashHits", 0);
+      __publicField(this, "stuckHits", 0);
+      /** runTicks at brand-new life reset — for lifeTicks in detectMarks(). */
+      __publicField(this, "lifeStartTick", 0);
+      /** Edge-count: only +1 hit when runTicks advanced since last hit of that type. */
+      __publicField(this, "lastThrashHitTick", -1);
+      __publicField(this, "lastClashHitTick", -1);
+      __publicField(this, "lastStuckHitTick", -1);
       /** Last progressFp (heal+gear+ore); reset stall when it changes. */
       __publicField(this, "progressFp", "");
       /** runTicks when progressFp last changed (heal up / equip / forge+). */
@@ -1854,10 +1868,17 @@
           this.lifeThrash = false;
           this.lifeClash = false;
           this.lifeStuck = false;
+          this.thrashHits = 0;
+          this.clashHits = 0;
+          this.stuckHits = 0;
+          this.lifeStartTick = this.runTicks;
+          this.lastThrashHitTick = -1;
+          this.lastClashHitTick = -1;
+          this.lastStuckHitTick = -1;
         } else {
-          if (this.lifeThrash) this.latchThrash();
-          if (this.lifeClash) this.latchClash();
-          if (this.lifeStuck) this.latchStuck();
+          if (this.lifeThrash) this.markThrash = true;
+          if (this.lifeClash) this.markClash = true;
+          if (this.lifeStuck) this.markStuck = true;
         }
         this.eliteThrash = 0;
         this.eliteThrashKey = "";
@@ -11109,30 +11130,50 @@
     }
     /**
      * Eng 2060 / t1789: latch thrash for the rest of this life (recovery may still break).
+     * Eng 3130 / t1836: also count thrashHits (edge by runTicks) for event-rate.
      */
     latchThrash() {
       this.markThrash = true;
       this.lifeThrash = true;
+      if (this.runTicks > this.lastThrashHitTick) {
+        this.thrashHits++;
+        this.lastThrashHitTick = this.runTicks;
+      }
     }
-    /** Eng 2060 / t1789: latch clash for the rest of this life. */
+    /** Eng 2060 / t1789: latch clash for the rest of this life. Eng 3130: clashHits. */
     latchClash() {
       this.markClash = true;
       this.lifeClash = true;
+      if (this.runTicks > this.lastClashHitTick) {
+        this.clashHits++;
+        this.lastClashHitTick = this.runTicks;
+      }
     }
-    /** Eng 2060 / t1789: latch stuck for the rest of this life. */
+    /** Eng 2060 / t1789: latch stuck for the rest of this life. Eng 3130: stuckHits. */
     latchStuck() {
       this.markStuck = true;
       this.lifeStuck = true;
+      if (this.runTicks > this.lastStuckHitTick) {
+        this.stuckHits++;
+        this.lastStuckHitTick = this.runTicks;
+      }
     }
     /**
      * Eng 2020 / t1669 + Eng 2060 life-latch: thrash | clash | stuck observational marks.
+     * Eng 3130 / t1836: thrashHits/clashHits/stuckHits + lifeTicks for event-rate
+     * (100*hits/lifeTicks). Primary = no hesitation → WD→0; rate is diagnostic.
      * Always available for FHD / SIT / LIVE STATS. Latched bits survive combat/progress.
      */
     detectMarks() {
+      const lifeTicks = Math.max(1, this.runTicks - this.lifeStartTick);
       return {
         thrash: !!(this.markThrash || this.lifeThrash),
         clash: !!(this.markClash || this.lifeClash),
-        stuck: !!(this.markStuck || this.lifeStuck)
+        stuck: !!(this.markStuck || this.lifeStuck),
+        thrashHits: this.thrashHits | 0,
+        clashHits: this.clashHits | 0,
+        stuckHits: this.stuckHits | 0,
+        lifeTicks
       };
     }
     /** A meal owns the hero. Shop and chest wait until the catch is cooked. */
