@@ -1,4 +1,4 @@
-/* phd auto-engine 3143 — pull via GET /api/auto-engine */
+/* phd auto-engine 3144 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3143";
+  var AUTO_ENGINE_VERSION = "3144";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1040,8 +1040,13 @@
       if (id === "retreat") s += w.descendSafe && stance.stocked ? 1.2 : 4;
       if (id === "enter" || id === "eat_enter") s *= w.descendSafe && stance.stocked && hpPct > 0.7 ? 0.7 : 0.12;
       if (food <= 0 && !w.stairsOpen && w.descendSafe && hpPct > 0.55 && !stance.stocked) {
-        if (id === "enter" || id === "eat_enter") s += 4.5;
-        if (id === "retreat") s *= 0.2;
+        if (w.hasArmour) {
+          if (id === "enter" || id === "eat_enter") s += 4.5;
+          if (id === "retreat") s *= 0.2;
+        } else {
+          if (id === "enter" || id === "eat_enter") s *= 0.08;
+          if (id === "retreat") s += 2;
+        }
       }
     }
     if (ev.id === "pack_vs_pull") {
@@ -1962,10 +1967,17 @@
           this.forkCounts[key] = ((_f = this.forkCounts[key]) != null ? _f : 0) + 1;
         }
         this.noteAction(`fork ${ev.id}\u2192${opt.id}`);
-        if (ev.id === "boss_door" && (opt.id === "enter" || opt.id === "eat_enter") && w.food <= 0 && w.healReserve <= 0 && !w.stairsOpen) {
-          if (!this.actions.some((s) => /hungry closed-stairs boss-open \(3143\)/i.test(s))) {
-            this.noteAction("hungry closed-stairs boss-open (3143)");
-            host.log("AUTO: hungry closed-stairs boss-open (3143)");
+        if (ev.id === "boss_door" && w.food <= 0 && w.healReserve <= 0 && !w.stairsOpen) {
+          if ((opt.id === "enter" || opt.id === "eat_enter") && w.hasArmour) {
+            if (!this.actions.some((s) => /hungry closed-stairs boss-open \(3143\)/i.test(s))) {
+              this.noteAction("hungry closed-stairs boss-open (3143)");
+              host.log("AUTO: hungry closed-stairs boss-open (3143)");
+            }
+          } else if (opt.id === "retreat" && !w.hasArmour) {
+            if (!this.actions.some((s) => /hungry closed-stairs boss-armour \(3144\)/i.test(s))) {
+              this.noteAction("hungry closed-stairs boss-armour (3144)");
+              host.log("AUTO: hungry closed-stairs boss-armour (3144)");
+            }
           }
         }
         host.log(`AUTO: ${ev.title} \u2192 ${opt.label}`);
