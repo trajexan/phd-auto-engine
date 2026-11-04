@@ -1,4 +1,4 @@
-/* phd auto-engine 3115 — pull via GET /api/auto-engine */
+/* phd auto-engine 3116 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3115";
+  var AUTO_ENGINE_VERSION = "3116";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1510,6 +1510,8 @@
       __publicField(this, "postBreakFreeMineHits", 0);
       /** Eng 3104: after free-mine flap/fail this life — never re-enter free-mine (not a timer). */
       __publicField(this, "postBreakFreeMineExhausted", false);
+      /** Eng 3116: hungry pond-seek walks this life before hungry stairs (not a timer). */
+      __publicField(this, "postBreakHungryPondSeekHits", 0);
       /** Eng 3106: free-brain walk desire key after free-mine exhaust (not a timer). */
       __publicField(this, "postBreakFreeWalkKey", "");
       __publicField(this, "postBreakFreeWalkHits", 0);
@@ -1757,6 +1759,7 @@
         this.postBreakFreeMineKey = "";
         this.postBreakFreeMineHits = 0;
         this.postBreakFreeMineExhausted = false;
+        this.postBreakHungryPondSeekHits = 0;
         this.postBreakFreeWalkKey = "";
         this.postBreakFreeWalkHits = 0;
         this.postBreakFreeWalkOsc = 0;
@@ -6316,7 +6319,7 @@
       this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 512);
       if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
         this.noteAction(`postBreak free brain \u2014 ${why}`);
-        host.log(`AUTO: postBreak free brain (3115) ${why}`);
+        host.log(`AUTO: postBreak free brain (3116) ${why}`);
       }
       if (host.hasTool("pickaxe")) {
         this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
@@ -6392,10 +6395,10 @@
             return true;
           }
           const pondPre = (_e = (_d = this.resolvePond(w)) != null ? _d : (_c = w.seen) == null ? void 0 : _c.pond) != null ? _e : this.mem(w, "pond");
-          if (!host.hasTool("rod") && this.canFundRodNow(w) && (w.pondKnown || pondPre)) {
+          if (!host.hasTool("rod") && this.canFundRodNow(w)) {
             if (!this.actions.some((s) => /hungry food first/i.test(s))) {
-              this.noteAction("hungry food first (3114)");
-              host.log("AUTO: hungry food first (3114) \u2014 fund rod");
+              this.noteAction("hungry food first (3116)");
+              host.log("AUTO: hungry food first (3116) \u2014 fund rod");
             }
             if (host.acquireTool("rod")) {
               this.stuckTicks = 0;
@@ -6414,8 +6417,8 @@
             this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
             this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
             if (!this.actions.some((s) => /hungry food first/i.test(s))) {
-              this.noteAction("hungry food first (3114)");
-              host.log("AUTO: hungry food first (3114) \u2014 fish");
+              this.noteAction("hungry food first (3116)");
+              host.log("AUTO: hungry food first (3116) \u2014 fish");
             }
             if (this.walkToTile(host, pondPre.x, pondPre.y)) {
               this.stuckTicks = 0;
@@ -6426,16 +6429,32 @@
               return true;
             }
           }
+          if (host.hasTool("rod") && !pondPre && this.postBreakHungryPondSeekHits < 6) {
+            this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
+            this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
+            const spot = this.pickFindPondSpot(w);
+            if (spot) {
+              this.postBreakHungryPondSeekHits++;
+              this.desireXY = { x: spot.x, y: spot.y };
+              host.walkTo(spot.x, spot.y);
+              this.stuckTicks = 0;
+              if (!this.actions.some((s) => /hungry pond seek/i.test(s))) {
+                this.noteAction("hungry pond seek (3116)");
+                host.log("AUTO: hungry pond seek (3116)");
+              }
+              return true;
+            }
+          }
           if (!this.postBreakFreeMineExhausted) {
             this.postBreakFreeMineExhausted = true;
             this.sealPostExhaustChestSell(host, w);
             if (!this.actions.some((s) => /postBreak free mine exhaust/i.test(s))) {
               this.noteAction("postBreak free mine exhaust");
-              host.log("AUTO: postBreak free mine exhaust \u2014 hungry-skip (3114)");
+              host.log("AUTO: postBreak free mine exhaust \u2014 hungry-skip (3116)");
             }
             if (!this.actions.some((s) => /hungry ban mine/i.test(s))) {
-              this.noteAction("hungry ban mine (3114)");
-              host.log("AUTO: hungry ban mine (3114) \u2014 skip free-mine");
+              this.noteAction("hungry ban mine (3116)");
+              host.log("AUTO: hungry ban mine (3116) \u2014 skip free-mine");
             }
           }
         }
@@ -6543,10 +6562,10 @@
             this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
             this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
             const pond = (_j = (_i = this.resolvePond(w)) != null ? _i : (_h = w.seen) == null ? void 0 : _h.pond) != null ? _j : this.mem(w, "pond");
-            if (!host.hasTool("rod") && this.canFundRodNow(w) && (w.pondKnown || pond)) {
+            if (!host.hasTool("rod") && this.canFundRodNow(w)) {
               if (!this.actions.some((s) => /hungry food first/i.test(s))) {
-                this.noteAction("hungry food first (3114)");
-                host.log("AUTO: hungry food first (3114) \u2014 fund rod post-ex");
+                this.noteAction("hungry food first (3116)");
+                host.log("AUTO: hungry food first (3116) \u2014 fund rod post-ex");
               }
               if (host.acquireTool("rod")) {
                 this.stuckTicks = 0;
@@ -6568,6 +6587,20 @@
               }
               if (this.tryGather(host, w, stance, "postBreak free fish hungry")) {
                 this.stuckTicks = 0;
+                return true;
+              }
+            }
+            if (host.hasTool("rod") && !pond && this.postBreakHungryPondSeekHits < 6) {
+              const spotEx = this.pickFindPondSpot(w);
+              if (spotEx) {
+                this.postBreakHungryPondSeekHits++;
+                this.desireXY = { x: spotEx.x, y: spotEx.y };
+                host.walkTo(spotEx.x, spotEx.y);
+                this.stuckTicks = 0;
+                if (!this.actions.some((s) => /hungry pond seek/i.test(s))) {
+                  this.noteAction("hungry pond seek (3116)");
+                  host.log("AUTO: hungry pond seek (3116) \u2014 post-ex");
+                }
                 return true;
               }
             }
