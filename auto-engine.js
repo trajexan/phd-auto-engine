@@ -1,4 +1,4 @@
-/* phd auto-engine 3120 — pull via GET /api/auto-engine */
+/* phd auto-engine 3121 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3120";
+  var AUTO_ENGINE_VERSION = "3121";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1512,6 +1512,11 @@
       __publicField(this, "postBreakFreeMineExhausted", false);
       /** Eng 3116: hungry pond-seek walks this life before hungry stairs (not a timer). */
       __publicField(this, "postBreakHungryPondSeekHits", 0);
+      /** Eng 3121: postBreak hungry free-fish same-tile flap counter (not a timer). */
+      __publicField(this, "postBreakFreeFishKey", "");
+      __publicField(this, "postBreakFreeFishHits", 0);
+      /** Eng 3121: after free-fish flap this life — never re-enter hungry fish (not a timer). */
+      __publicField(this, "postBreakFreeFishExhausted", false);
       /** Eng 3106: free-brain walk desire key after free-mine exhaust (not a timer). */
       __publicField(this, "postBreakFreeWalkKey", "");
       __publicField(this, "postBreakFreeWalkHits", 0);
@@ -1760,6 +1765,9 @@
         this.postBreakFreeMineHits = 0;
         this.postBreakFreeMineExhausted = false;
         this.postBreakHungryPondSeekHits = 0;
+        this.postBreakFreeFishKey = "";
+        this.postBreakFreeFishHits = 0;
+        this.postBreakFreeFishExhausted = false;
         this.postBreakFreeWalkKey = "";
         this.postBreakFreeWalkHits = 0;
         this.postBreakFreeWalkOsc = 0;
@@ -6155,13 +6163,34 @@
               }
             }
           }
-          if (!didNs) {
+          if (!didNs && !this.postBreakFreeFishExhausted) {
             const pondNs = (_c = (_b = this.resolvePond(w)) != null ? _b : (_a = w.seen) == null ? void 0 : _a.pond) != null ? _c : this.mem(w, "pond");
             if (pondNs && host.hasTool("rod") && !this.isGatherTileBlocked(pondNs.x, pondNs.y)) {
               this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
               this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
-              if (this.walkToTile(host, pondNs.x, pondNs.y)) didNs = "fish";
+              const fkNs = `${pondNs.x},${pondNs.y}`;
+              if (fkNs === this.postBreakFreeFishKey) this.postBreakFreeFishHits++;
+              else {
+                this.postBreakFreeFishKey = fkNs;
+                this.postBreakFreeFishHits = 1;
+              }
+              if (this.postBreakFreeFishHits >= 3) {
+                this.blockGatherTile(pondNs.x, pondNs.y);
+                this.postBreakFreeFishKey = "";
+                this.postBreakFreeFishHits = 0;
+                this.postBreakFreeFishExhausted = true;
+                this.armPondBreakSticky(768, true);
+                if (!this.actions.some((s) => /hungry ban fish/i.test(s))) {
+                  this.noteAction("hungry ban fish (3121)");
+                  host.log(`AUTO: hungry ban fish (3121) \u2014 near-stuck (${fkNs})`);
+                }
+              } else if (this.walkToTile(host, pondNs.x, pondNs.y)) didNs = "fish";
               else if (this.tryGather(host, w, stance, "near-stuck fish hungry")) didNs = "fish";
+              else {
+                this.blockGatherTile(pondNs.x, pondNs.y);
+                this.postBreakFreeFishExhausted = true;
+                this.armPondBreakSticky(768, true);
+              }
             }
           }
           if (!didNs && this.postBreakHungryPondSeekHits < 6) {
@@ -6269,13 +6298,34 @@
             }
           }
         }
-        if (!did) {
+        if (!did && !this.postBreakFreeFishExhausted) {
           const pondQ = (_f = (_e = this.resolvePond(w)) != null ? _e : (_d = w.seen) == null ? void 0 : _d.pond) != null ? _f : this.mem(w, "pond");
           if (pondQ && host.hasTool("rod") && !this.isGatherTileBlocked(pondQ.x, pondQ.y)) {
             this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
             this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
-            if (this.walkToTile(host, pondQ.x, pondQ.y)) did = "fish";
+            const fkQ = `${pondQ.x},${pondQ.y}`;
+            if (fkQ === this.postBreakFreeFishKey) this.postBreakFreeFishHits++;
+            else {
+              this.postBreakFreeFishKey = fkQ;
+              this.postBreakFreeFishHits = 1;
+            }
+            if (this.postBreakFreeFishHits >= 3) {
+              this.blockGatherTile(pondQ.x, pondQ.y);
+              this.postBreakFreeFishKey = "";
+              this.postBreakFreeFishHits = 0;
+              this.postBreakFreeFishExhausted = true;
+              this.armPondBreakSticky(768, true);
+              if (!this.actions.some((s) => /hungry ban fish/i.test(s))) {
+                this.noteAction("hungry ban fish (3121)");
+                host.log(`AUTO: hungry ban fish (3121) \u2014 quiet (${fkQ})`);
+              }
+            } else if (this.walkToTile(host, pondQ.x, pondQ.y)) did = "fish";
             else if (this.tryGather(host, w, stance, "quiet fish hungry")) did = "fish";
+            else {
+              this.blockGatherTile(pondQ.x, pondQ.y);
+              this.postBreakFreeFishExhausted = true;
+              this.armPondBreakSticky(768, true);
+            }
           }
         }
         if (!did && this.postBreakHungryPondSeekHits < 6) {
@@ -6590,20 +6640,50 @@
               return true;
             }
           }
-          if (pondPre && host.hasTool("rod") && !this.isGatherTileBlocked(pondPre.x, pondPre.y)) {
+          if (this.postBreakFreeFishExhausted) {
+            if (!this.actions.some((s) => /hungry ban fish/i.test(s))) {
+              this.noteAction("hungry ban fish (3121)");
+              host.log("AUTO: hungry ban fish (3121) \u2014 skip pre");
+            }
+          } else if (pondPre && host.hasTool("rod") && !this.isGatherTileBlocked(pondPre.x, pondPre.y)) {
             this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
             this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
             if (!this.actions.some((s) => /hungry food first/i.test(s))) {
               this.noteAction("hungry food first (3116)");
               host.log("AUTO: hungry food first (3116) \u2014 fish");
             }
-            if (this.walkToTile(host, pondPre.x, pondPre.y)) {
-              this.stuckTicks = 0;
-              return true;
+            const fk = `${pondPre.x},${pondPre.y}`;
+            if (fk === this.postBreakFreeFishKey) this.postBreakFreeFishHits++;
+            else {
+              this.postBreakFreeFishKey = fk;
+              this.postBreakFreeFishHits = 1;
             }
-            if (this.tryGather(host, w, stance, "postBreak free fish hungry")) {
+            if (this.postBreakFreeFishHits >= 3) {
+              this.blockGatherTile(pondPre.x, pondPre.y);
+              this.postBreakFreeFishKey = "";
+              this.postBreakFreeFishHits = 0;
+              this.postBreakFreeFishExhausted = true;
+              this.armPondBreakSticky(768, true);
+              if (!this.actions.some((s) => /hungry ban fish/i.test(s))) {
+                this.noteAction("hungry ban fish (3121)");
+                host.log(`AUTO: hungry ban fish (3121) \u2014 flap (${fk})`);
+              }
+            } else if (this.walkToTile(host, pondPre.x, pondPre.y)) {
               this.stuckTicks = 0;
               return true;
+            } else if (this.tryGather(host, w, stance, "postBreak free fish hungry")) {
+              this.stuckTicks = 0;
+              return true;
+            } else {
+              this.blockGatherTile(pondPre.x, pondPre.y);
+              this.postBreakFreeFishKey = "";
+              this.postBreakFreeFishHits = 0;
+              this.postBreakFreeFishExhausted = true;
+              this.armPondBreakSticky(768, true);
+              if (!this.actions.some((s) => /hungry ban fish/i.test(s))) {
+                this.noteAction("hungry ban fish (3121)");
+                host.log(`AUTO: hungry ban fish (3121) \u2014 gather-fail (${fk})`);
+              }
             }
           }
           if (!pondPre && this.postBreakHungryPondSeekHits < 6) {
@@ -6757,14 +6837,44 @@
                 return true;
               }
             }
-            if (pond && host.hasTool("rod") && !this.isGatherTileBlocked(pond.x, pond.y)) {
-              if (this.walkToTile(host, pond.x, pond.y)) {
-                this.stuckTicks = 0;
-                return true;
+            if (this.postBreakFreeFishExhausted) {
+              if (!this.actions.some((s) => /hungry ban fish/i.test(s))) {
+                this.noteAction("hungry ban fish (3121)");
+                host.log("AUTO: hungry ban fish (3121) \u2014 skip post-ex");
               }
-              if (this.tryGather(host, w, stance, "postBreak free fish hungry")) {
+            } else if (pond && host.hasTool("rod") && !this.isGatherTileBlocked(pond.x, pond.y)) {
+              const fkEx = `${pond.x},${pond.y}`;
+              if (fkEx === this.postBreakFreeFishKey) this.postBreakFreeFishHits++;
+              else {
+                this.postBreakFreeFishKey = fkEx;
+                this.postBreakFreeFishHits = 1;
+              }
+              if (this.postBreakFreeFishHits >= 3) {
+                this.blockGatherTile(pond.x, pond.y);
+                this.postBreakFreeFishKey = "";
+                this.postBreakFreeFishHits = 0;
+                this.postBreakFreeFishExhausted = true;
+                this.armPondBreakSticky(768, true);
+                if (!this.actions.some((s) => /hungry ban fish/i.test(s))) {
+                  this.noteAction("hungry ban fish (3121)");
+                  host.log(`AUTO: hungry ban fish (3121) \u2014 flap post-ex (${fkEx})`);
+                }
+              } else if (this.walkToTile(host, pond.x, pond.y)) {
                 this.stuckTicks = 0;
                 return true;
+              } else if (this.tryGather(host, w, stance, "postBreak free fish hungry")) {
+                this.stuckTicks = 0;
+                return true;
+              } else {
+                this.blockGatherTile(pond.x, pond.y);
+                this.postBreakFreeFishKey = "";
+                this.postBreakFreeFishHits = 0;
+                this.postBreakFreeFishExhausted = true;
+                this.armPondBreakSticky(768, true);
+                if (!this.actions.some((s) => /hungry ban fish/i.test(s))) {
+                  this.noteAction("hungry ban fish (3121)");
+                  host.log(`AUTO: hungry ban fish (3121) \u2014 gather-fail post-ex (${fkEx})`);
+                }
               }
             }
             if (!pond && this.postBreakHungryPondSeekHits < 6) {
@@ -9423,7 +9533,12 @@
         /quiet hold — tools|quiet hold — bootstrap break/,
         /tools fund sell|tools-hatchet hang|FIRST_WEP hold|kite cool exit grace|stuck rethink/
       ) || this.statusFamilyHits(/tools fund sell|tools-hatchet hang/) >= 3 && bootHits >= 2 || breakHits >= 2;
-      if (this.beginnerToolsIncomplete(host) && !bootstrapMono) {
+      if (this.isPostBreak() && w.food <= 0 && w.healReserve <= 0) {
+        if (!this.actions.some((s) => /hungry ban fish|hungry ban kit/i.test(s))) {
+          this.noteAction("hungry ban kit (3121)");
+          host.log("AUTO: hungry ban kit (3121) \u2014 quiet bootstrap");
+        }
+      } else if (this.beginnerToolsIncomplete(host) && !bootstrapMono) {
         this.clearFundIntent("food");
         this.h1001.phase = "TOOLS";
         const anvil = this.mem(w, "anvil");
