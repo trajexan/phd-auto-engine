@@ -1,4 +1,4 @@
-/* phd auto-engine 3134 — pull via GET /api/auto-engine */
+/* phd auto-engine 3135 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3134";
+  var AUTO_ENGINE_VERSION = "3135";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -5892,6 +5892,16 @@
      */
     tryAleSpentFwCap(host, w, stance, why) {
       if (!this.afterLifeEscapeCapped && !this.isPostBreak()) return false;
+      if ((this.postBreakHungryScrubLatched || this.hungryToolsTheaterBanned(w)) && /tools-mine|find-rock|tools-rock|phase-intent-mine/i.test(why)) {
+        if (!this.actions.some((s) => /hungry tools-ban fw-skip \(3135\)/i.test(s))) {
+          this.noteAction("hungry tools-ban fw-skip (3135)");
+          host.log(`AUTO: hungry tools-ban fw-skip (3135) \u2014 fw-cap ${why}`);
+        }
+        this.stuckRecentStatus = this.stuckRecentStatus.filter(
+          (s) => !/tools mine|tools find rock|tools-rock|phase intent — mine/i.test(s)
+        );
+        return this.postBreakFreeBrain(host, w, stance, `fw-skip:${why}`);
+      }
       this.afterLifeEscapeFwMonoHits++;
       this.latchThrash();
       const early = /emerg|approach|mob engage|mob kite|lethal|fw-theater|tools-mine|find-rock|phase-intent-mine|tools-rock|fw-hold|hold-wander|bootstrap|escalate leave|first-wep-hold/i.test(why);
@@ -8241,6 +8251,17 @@
         }
         if (this.aleFwTheaterBanned()) {
           this.noteAleToolsBan(host, "tools-mine-mono");
+          if (this.postBreakHungryScrubLatched || this.hungryToolsTheaterBanned(w)) {
+            if (!this.actions.some((s) => /hungry tools-ban fw-skip \(3135\)/i.test(s))) {
+              this.noteAction("hungry tools-ban fw-skip (3135)");
+              host.log("AUTO: hungry tools-ban fw-skip (3135) \u2014 mono residual");
+            }
+            this.stuckRecentStatus = this.stuckRecentStatus.filter(
+              (s) => !/tools mine|tools find rock|tools-rock|phase intent — mine/i.test(s)
+            );
+            this.cool = 0;
+            return this.postBreakFreeBrain(host, w, stance, "fw-skip:tools-mine-mono");
+          }
           if (this.afterLifeEscapeCapped) {
             if (this.tryAleSpentFwCap(host, w, stance, "tools-mine-mono")) return true;
           } else {
@@ -10318,12 +10339,19 @@
       if (this.hungryToolsTheaterBanned(w) || this.postBreakHungryScrubLatched) return false;
       if (this.earlyOscDivertHits >= 1) return false;
       const hits = this.statusFamilyHits(/tools mine|tools find rock/);
-      if (hits < 2) return false;
+      if (hits < 1) return false;
       this.enterPostBreak(host, `tools-pre:${where}`);
       this.latchHungryToolsBan(host, `tools-pre:${where}`);
+      this.stuckRecentStatus = this.stuckRecentStatus.filter(
+        (s) => !/tools mine|tools find rock|tools-rock|phase intent — mine|first wep mine|tools fund/i.test(s)
+      );
       if (!this.actions.some((s) => /hungry tools-ban tools-pre \(3134\)/i.test(s))) {
         this.noteAction("hungry tools-ban tools-pre (3134)");
         host.log(`AUTO: hungry tools-ban tools-pre (3134) \u2014 ${where} hits=${hits}`);
+      }
+      if (!this.actions.some((s) => /hungry tools-ban fw-skip \(3135\)/i.test(s))) {
+        this.noteAction("hungry tools-ban fw-skip (3135)");
+        host.log(`AUTO: hungry tools-ban fw-skip (3135) \u2014 tools-pre clear mine hist ${where}`);
       }
       this.clearFundIntent("tool");
       this.clearPhaseIntent();
