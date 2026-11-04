@@ -1,4 +1,4 @@
-/* phd auto-engine 3118 — pull via GET /api/auto-engine */
+/* phd auto-engine 3119 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3118";
+  var AUTO_ENGINE_VERSION = "3119";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2665,21 +2665,28 @@
       if (!hasRod) {
         const anvilFood = this.mem(w, "anvil");
         if (this.beginnerToolsIncomplete(host) && w.coins >= 30) {
-          if (!host.hasTool("pickaxe") && this.canFundToolNow("pickaxe", w, anvilFood)) {
-            if (host.acquireTool("pickaxe") && host.hasTool("pickaxe")) {
-              this.setStatus1001(host, w, stance, "kit pickaxe");
-              return true;
+          if (this.postBreakAllowNormal() && w.food <= 0 && w.healReserve <= 0) {
+            if (!this.actions.some((s) => /hungry ban kit/i.test(s))) {
+              this.noteAction("hungry ban kit (3119)");
+              host.log("AUTO: hungry ban kit (3119) \u2014 food phase");
             }
-          }
-          if (!host.hasTool("hatchet") && this.canFundToolNow("hatchet", w, anvilFood)) {
-            if (host.acquireTool("hatchet") && host.hasTool("hatchet")) {
-              this.setStatus1001(host, w, stance, "kit hatchet");
-              return true;
+          } else {
+            if (!host.hasTool("pickaxe") && this.canFundToolNow("pickaxe", w, anvilFood)) {
+              if (host.acquireTool("pickaxe") && host.hasTool("pickaxe")) {
+                this.setStatus1001(host, w, stance, "kit pickaxe");
+                return true;
+              }
             }
+            if (!host.hasTool("hatchet") && this.canFundToolNow("hatchet", w, anvilFood)) {
+              if (host.acquireTool("hatchet") && host.hasTool("hatchet")) {
+                this.setStatus1001(host, w, stance, "kit hatchet");
+                return true;
+              }
+            }
+            this.clearFundIntent("food");
+            this.h1001.phase = "TOOLS";
+            return false;
           }
-          this.clearFundIntent("food");
-          this.h1001.phase = "TOOLS";
-          return false;
         }
         if ((w.pondKnown || pond) && this.canFundRodNow(w)) {
           this.setStatus1001(host, w, stance, `${labelPrefix} rod`);
@@ -3941,6 +3948,13 @@
         }
       }
       if (this.beginnerToolsIncomplete(host) && w.coins >= 30 && !shop && !(anvil && w.oreCount >= 2) && !(w.anvilNearby && w.oreCount >= 2)) {
+        if (this.postBreakAllowNormal() && w.food <= 0 && w.healReserve <= 0) {
+          if (!this.actions.some((s) => /hungry ban shop/i.test(s))) {
+            this.noteAction("hungry ban shop (3119)");
+            host.log("AUTO: hungry ban shop (3119) \u2014 tools find shop");
+          }
+          return this.postBreakFreeBrain(host, w, stance, "hungry-ban-tools-shop");
+        }
         this.setStatus1001(host, w, stance, "tools find shop");
         if (host.acquireTool(tool || "pickaxe")) return true;
         if (w.hub) {
@@ -3969,6 +3983,13 @@
       if (tool) {
         const tryAcquire = host.hasTool(tool) || this.canFundToolNow(tool, w, anvil);
         if (tryAcquire) {
+          if ((tool === "hatchet" || tool === "pickaxe") && this.postBreakAllowNormal() && w.food <= 0 && w.healReserve <= 0) {
+            if (!this.actions.some((s) => /hungry ban kit/i.test(s))) {
+              this.noteAction("hungry ban kit (3119)");
+              host.log(`AUTO: hungry ban kit (3119) \u2014 tools2 ${tool}`);
+            }
+            return this.postBreakFreeBrain(host, w, stance, `hungry-ban-kit2-${tool}`);
+          }
           if (host.hasTool("pickaxe") && tool !== "pickaxe" && !host.hasTool(tool)) {
             if (this.tryKitAcquireWalk(host, w, stance, tool, anvil)) return true;
           }
@@ -3993,6 +4014,13 @@
             }
             if (host.acquireTool(tool)) return true;
             if (w.hub) {
+              if (this.postBreakAllowNormal() && w.food <= 0 && w.healReserve <= 0) {
+                if (!this.actions.some((s) => /hungry ban shop/i.test(s))) {
+                  this.noteAction("hungry ban shop (3119)");
+                  host.log("AUTO: hungry ban shop (3119) \u2014 funded hub");
+                }
+                return this.postBreakFreeBrain(host, w, stance, "hungry-ban-funded-hub");
+              }
               this.setStatus1001(host, w, stance, "tools find shop");
               this.desireXY = { x: w.hub.x, y: w.hub.y };
               host.walkTo(w.hub.x, w.hub.y);
@@ -4155,6 +4183,13 @@
         return true;
       }
       if (w.hub) {
+        if (this.postBreakAllowNormal() && w.food <= 0 && w.healReserve <= 0) {
+          if (!this.actions.some((s) => /hungry ban shop/i.test(s))) {
+            this.noteAction("hungry ban shop (3119)");
+            host.log("AUTO: hungry ban shop (3119) \u2014 hub find shop");
+          }
+          return this.postBreakFreeBrain(host, w, stance, "hungry-ban-hub-shop");
+        }
         this.setStatus1001(host, w, stance, "tools find shop");
         this.desireXY = { x: w.hub.x, y: w.hub.y };
         host.walkTo(w.hub.x, w.hub.y);
@@ -6095,13 +6130,13 @@
             if (w.food > 0 || w.healReserve > 0) didNs = "buy-food";
           }
           if (!didNs && !host.hasTool("rod") && this.canFundRodNow(w)) {
-            if (host.acquireTool("rod")) didNs = "fund-rod";
-            else {
+            if (host.acquireTool("rod") && host.hasTool("rod")) {
+              didNs = "fund-rod";
+            } else {
               const shopRod = this.mem(w, "shop");
-              const destRod = shopRod || w.hub;
-              if (destRod) {
-                this.desireXY = { x: destRod.x, y: destRod.y };
-                host.walkTo(destRod.x, destRod.y);
+              if (shopRod) {
+                this.desireXY = { x: shopRod.x, y: shopRod.y };
+                host.walkTo(shopRod.x, shopRod.y);
                 didNs = "fund-rod";
               }
             }
@@ -6144,8 +6179,8 @@
           }
           this.stuckTicks = 0;
           if (!this.actions.some((s) => /near-stuck food/i.test(s))) {
-            this.noteAction(`near-stuck food (3117) ${didNs || "none"}`);
-            host.log(`AUTO: near-stuck food (3117) ${didNs || "none"} ${why}`);
+            this.noteAction(`near-stuck food (3119) ${didNs || "none"}`);
+            host.log(`AUTO: near-stuck food (3119) ${didNs || "none"} ${why}`);
           }
           this.noteAction(`productive quiet \u2014 near-stuck harden (3109) ${didNs || "none"} (${why})`);
           host.log(`AUTO: near-stuck harden (3109) ${didNs || "none"} ${why}`);
@@ -9922,6 +9957,13 @@
     tryKitAcquireWalk(host, w, stance, tool, anvil) {
       var _a, _b;
       if (this.runTicks < this.kitAcquireBlockUntil) return false;
+      if ((tool === "pickaxe" || tool === "hatchet") && this.postBreakAllowNormal() && w.food <= 0 && w.healReserve <= 0) {
+        if (!this.actions.some((s) => /hungry ban kit/i.test(s))) {
+          this.noteAction("hungry ban kit (3119)");
+          host.log(`AUTO: hungry ban kit (3119) \u2014 kitWalk ${tool}`);
+        }
+        return false;
+      }
       if (tool === "hatchet" && this.hatchetChestBreakActive()) return false;
       this.kitAcquireTicks++;
       const label = tool === "pickaxe" ? "kit pickaxe" : tool === "hatchet" ? "kit hatchet" : "kit rod";
