@@ -1,4 +1,4 @@
-/* phd auto-engine 3148 — pull via GET /api/auto-engine */
+/* phd auto-engine 3149 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3148";
+  var AUTO_ENGINE_VERSION = "3149";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1550,6 +1550,15 @@
        * still naked — grace then latch (soft-block needs re-opens that never come).
        */
       __publicField(this, "armourChestOpenedAt", -1);
+      /**
+       * Eng 3149 / R140: hungryEmpty walk-to-unlit-stairs hits this life (not a timer).
+       * ≥96 without lighting → latch — far open+unlit stairs never light (9x4dw2).
+       */
+      __publicField(this, "postBreakUnlitStairsHits", 0);
+      /** Eng 3149: last runTicks we armed an unlit-stairs walk hit (dedupe). */
+      __publicField(this, "_unlitStairsArmTick", -1);
+      /** Eng 3149: after unlit stairs walk-to-light exhaust this life (not a timer). */
+      __publicField(this, "postBreakUnlitStairsExhausted", false);
       /** Eng 3124: free-fish attempts this life across any tile (not a timer). */
       __publicField(this, "postBreakFreeFishLifeHits", 0);
       /** Eng 3125: quiet sell/hub-shop under hungry+stairs this life (not a timer). */
@@ -1883,6 +1892,9 @@
           this.postBreakFreeFishExhausted = false;
           this.postBreakArmourChestExhausted = false;
           this.armourChestOpenedAt = -1;
+          this.postBreakUnlitStairsHits = 0;
+          this._unlitStairsArmTick = -1;
+          this.postBreakUnlitStairsExhausted = false;
           this.postBreakFreeFishLifeHits = 0;
           this.postBreakHungryQuietSellHits = 0;
           this.postBreakHungryScrubLatched = false;
@@ -2070,6 +2082,7 @@
         }
         if (this.postBreakFreeBrain(host, w, stance, "hungry-ban-tick-gate")) return true;
         if (w.stairs && this.hungryStairsWalkOk(w)) {
+          if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
           this.desireXY = { x: w.stairs.x, y: w.stairs.y };
           host.walkTo(w.stairs.x, w.stairs.y);
           this.stuckTicks = 0;
@@ -6431,6 +6444,7 @@
           }
           if (!didNs && (this.postBreakFreeFishExhausted || !!w.stairs)) {
             if (w.stairs && this.hungryStairsWalkOk(w)) {
+              if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
               this.desireXY = { x: w.stairs.x, y: w.stairs.y };
               host.walkTo(w.stairs.x, w.stairs.y);
               didNs = "stairs";
@@ -6485,6 +6499,7 @@
             }
           }
           if (!didNs && w.stairs && this.hungryStairsWalkOk(w)) {
+            if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
             this.desireXY = { x: w.stairs.x, y: w.stairs.y };
             host.walkTo(w.stairs.x, w.stairs.y);
             didNs = "stairs";
@@ -7143,20 +7158,30 @@
             }
             return true;
           } else if (!w.stairsLit && !(hungryEmpty && !w.stairsOpen)) {
-            this.desireXY = { x: w.stairs.x, y: w.stairs.y };
-            host.walkTo(w.stairs.x, w.stairs.y);
-            this.stuckTicks = 0;
             if (hungryEmpty) {
-              this.latchHungryToolsBan(host, "hungry-stairs");
-              if (!this.actions.some((s) => /free stairs hungry|hungry stairs after food/i.test(s))) {
-                this.noteAction("hungry stairs after food (3114)");
-                host.log("AUTO: hungry stairs after food (3114)");
+              this.armHungryUnlitStairsWalk(host, w);
+              if (this.postBreakUnlitStairsExhausted) {
+              } else {
+                this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+                host.walkTo(w.stairs.x, w.stairs.y);
+                this.stuckTicks = 0;
+                this.latchHungryToolsBan(host, "hungry-stairs");
+                if (!this.actions.some((s) => /free stairs hungry|hungry stairs after food/i.test(s))) {
+                  this.noteAction("hungry stairs after food (3114)");
+                  host.log("AUTO: hungry stairs after food (3114)");
+                }
+                return true;
               }
-            } else if (!this.actions.some((s) => /postBreak free stairs light/i.test(s))) {
-              this.noteAction("postBreak free stairs light");
-              host.log("AUTO: postBreak free stairs light (3111)");
+            } else {
+              this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+              host.walkTo(w.stairs.x, w.stairs.y);
+              this.stuckTicks = 0;
+              if (!this.actions.some((s) => /postBreak free stairs light/i.test(s))) {
+                this.noteAction("postBreak free stairs light");
+                host.log("AUTO: postBreak free stairs light (3111)");
+              }
+              return true;
             }
-            return true;
           }
         }
       }
@@ -7303,6 +7328,7 @@
               }
             }
             if (w.stairs && this.hungryStairsWalkOk(w)) {
+              if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
               this.desireXY = { x: w.stairs.x, y: w.stairs.y };
               host.walkTo(w.stairs.x, w.stairs.y);
               this.stuckTicks = 0;
@@ -7321,6 +7347,7 @@
           const foodBufferEx = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(hungryEmptyEx && hpPctEx < 0.4);
           if ((host.hasTool("pickaxe") || hungryEmptyEx) && (foodBufferEx || hungryEmptyEx) && w.stairs) {
             if (this.hungryStairsWalkOk(w)) {
+              if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
               this.desireXY = { x: w.stairs.x, y: w.stairs.y };
               host.walkTo(w.stairs.x, w.stairs.y);
               this.stuckTicks = 0;
@@ -12253,12 +12280,45 @@
      * Eng 3142 / R133: under hungryEmpty, closed/boss stairs are never walk targets —
      * including walk-to-light. FOV unlit↔closed flaps walk_stairs↔walk until WD/starve
      * (7e45um F5 boss_door retreat; 210/233 boss_door lives).
+     * Eng 3149 / R140: after unlit walk-to-light exhaust, only lit usable stairs.
      */
     hungryStairsWalkOk(w) {
       if (w.food <= 0 && w.healReserve <= 0 && w.stairs && !w.stairsOpen) {
         return false;
       }
-      return this.stairsUsable(w) || !!w.stairs && !w.stairsLit;
+      if (this.stairsUsable(w)) {
+        this.postBreakUnlitStairsHits = 0;
+        return true;
+      }
+      if (!!w.stairs && !w.stairsLit) {
+        if (w.food <= 0 && w.healReserve <= 0 && this.postBreakUnlitStairsExhausted) {
+          return false;
+        }
+        return true;
+      }
+      return false;
+    }
+    /**
+     * Eng 3149 / R140: count hungryEmpty walk-to-unlit-stairs; ≥96 still unlit → latch.
+     * Used by the free-brain unlit walk branch (does not go through hungryStairsWalkOk).
+     */
+    armHungryUnlitStairsWalk(host, w) {
+      if (!(w.food <= 0 && w.healReserve <= 0)) return;
+      if (!w.stairs || w.stairsLit) {
+        this.postBreakUnlitStairsHits = 0;
+        return;
+      }
+      if (this.postBreakUnlitStairsExhausted) return;
+      if (this.postBreakUnlitStairsHits > 0 && this._unlitStairsArmTick === this.runTicks) return;
+      this._unlitStairsArmTick = this.runTicks;
+      this.postBreakUnlitStairsHits++;
+      if (this.postBreakUnlitStairsHits >= 160) {
+        this.postBreakUnlitStairsExhausted = true;
+        if (!this.actions.some((s) => /hungry ban unlit-stairs \(3149\)/i.test(s))) {
+          this.noteAction("hungry ban unlit-stairs (3149)");
+          host.log("AUTO: hungry ban unlit-stairs (3149) \u2014 walk-to-light exhaust \u2192 explore");
+        }
+      }
     }
     noteHungryBanClosedStairs(host) {
       if (!this.actions.some((s) => /hungry ban closed-stairs \(3142\)/i.test(s))) {
