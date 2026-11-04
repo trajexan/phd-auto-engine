@@ -1,4 +1,4 @@
-/* phd auto-engine 3111 — pull via GET /api/auto-engine */
+/* phd auto-engine 3112 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3111";
+  var AUTO_ENGINE_VERSION = "3112";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -6233,10 +6233,20 @@
       this.campChainBreakUntil = Math.max(this.campChainBreakUntil, this.runTicks + 768);
       this.sellTrimStickyUntil = 0;
       this.sellTrimEmptyUntil = Math.max(this.sellTrimEmptyUntil, this.runTicks + 256);
-      this.pondBreakUntil = Math.max(this.pondBreakUntil, this.runTicks + 1280);
-      this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 1280);
-      const ch = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
-      if (ch) this.softBlockChest(host, w, ch.x, ch.y, "postBreak exhaust chest");
+      const hungryEmpty = w.food <= 0 && w.healReserve <= 0;
+      if (hungryEmpty) {
+        if (!this.actions.some((s) => /exhaust no-chest/i.test(s))) {
+          this.noteAction("exhaust no-chest (3112)");
+          host.log("AUTO: exhaust no-chest (3112)");
+        }
+      } else {
+        this.pondBreakUntil = Math.max(this.pondBreakUntil, this.runTicks + 1280);
+        this.foodMineBreakUntil = Math.max(this.foodMineBreakUntil, this.runTicks + 1280);
+        const ch = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
+        if (ch && !this.actions.some((s) => /chest soft-block — postBreak exhaust chest/i.test(s))) {
+          this.softBlockChest(host, w, ch.x, ch.y, "postBreak exhaust chest");
+        }
+      }
       if (!this.actions.some((s) => /postBreak exhaust seal/i.test(s))) {
         this.noteAction("postBreak exhaust seal");
         host.log("AUTO: postBreak exhaust seal (3110)");
@@ -6248,7 +6258,7 @@
      * Returns true only while issuing the one productive action.
      */
     postBreakFreeBrain(host, w, stance, why) {
-      var _a, _b, _c, _d, _e, _f;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
       this.enterPostBreak(host, `free:${why}`);
       this.quietBootstrapEmitHits = 0;
       this.quietBootstrapBreakUntil = Math.min(this.quietBootstrapBreakUntil, this.runTicks);
@@ -6282,7 +6292,7 @@
       this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 512);
       if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
         this.noteAction(`postBreak free brain \u2014 ${why}`);
-        host.log(`AUTO: postBreak free brain (3111) ${why}`);
+        host.log(`AUTO: postBreak free brain (3112) ${why}`);
       }
       if (host.hasTool("pickaxe")) {
         this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
@@ -6328,9 +6338,10 @@
       }
       {
         const hpPctDeep = w.maxHp > 0 ? w.hp / w.maxHp : 1;
-        const foodBufferAllows = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(w.food <= 0 && w.healReserve <= 0 && hpPctDeep < 0.4);
+        const hungryEmpty = w.food <= 0 && w.healReserve <= 0;
+        const foodBufferAllows = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(hungryEmpty && hpPctDeep < 0.4);
         const pickReady = host.hasTool("pickaxe");
-        if (pickReady && foodBufferAllows && w.stairs) {
+        if (pickReady && w.stairs && (foodBufferAllows || hungryEmpty)) {
           if (this.stairsUsable(w)) {
             this.desireXY = { x: w.stairs.x, y: w.stairs.y };
             host.walkTo(w.stairs.x, w.stairs.y);
@@ -6339,7 +6350,12 @@
               this.postBreakFreeMineExhausted = true;
               this.sealPostExhaustChestSell(host, w);
             }
-            if (!this.actions.some((s) => /postBreak free stairs deep/i.test(s))) {
+            if (hungryEmpty) {
+              if (!this.actions.some((s) => /free stairs hungry/i.test(s))) {
+                this.noteAction("free stairs hungry (3112)");
+                host.log("AUTO: free stairs hungry (3112)");
+              }
+            } else if (!this.actions.some((s) => /postBreak free stairs deep/i.test(s))) {
               this.noteAction("postBreak free stairs deep");
               host.log("AUTO: postBreak free stairs deep (3111)");
             }
@@ -6349,7 +6365,12 @@
             this.desireXY = { x: w.stairs.x, y: w.stairs.y };
             host.walkTo(w.stairs.x, w.stairs.y);
             this.stuckTicks = 0;
-            if (!this.actions.some((s) => /postBreak free stairs light/i.test(s))) {
+            if (hungryEmpty) {
+              if (!this.actions.some((s) => /free stairs hungry/i.test(s))) {
+                this.noteAction("free stairs hungry (3112)");
+                host.log("AUTO: free stairs hungry (3112)");
+              }
+            } else if (!this.actions.some((s) => /postBreak free stairs light/i.test(s))) {
               this.noteAction("postBreak free stairs light");
               host.log("AUTO: postBreak free stairs light (3111)");
             }
@@ -6394,14 +6415,48 @@
       if (this.postBreakFreeMineExhausted) {
         this.sealPostExhaustChestSell(host, w);
         {
+          const hungryEmpty = w.food <= 0 && w.healReserve <= 0;
+          if (hungryEmpty) {
+            this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
+            this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
+            const pond = (_g = (_f = this.resolvePond(w)) != null ? _f : (_e = w.seen) == null ? void 0 : _e.pond) != null ? _g : this.mem(w, "pond");
+            if (pond && host.hasTool("rod") && !this.isGatherTileBlocked(pond.x, pond.y)) {
+              if (this.walkToTile(host, pond.x, pond.y)) {
+                this.stuckTicks = 0;
+                return true;
+              }
+              if (this.tryGather(host, w, stance, "postBreak free fish hungry")) {
+                this.stuckTicks = 0;
+                return true;
+              }
+            }
+            if (w.stairs && (this.stairsUsable(w) || !w.stairsLit)) {
+              this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+              host.walkTo(w.stairs.x, w.stairs.y);
+              this.stuckTicks = 0;
+              if (!this.actions.some((s) => /free stairs hungry/i.test(s))) {
+                this.noteAction("free stairs hungry (3112)");
+                host.log("AUTO: free stairs hungry (3112)");
+              }
+              return true;
+            }
+          }
+        }
+        {
           const hpPctEx = w.maxHp > 0 ? w.hp / w.maxHp : 1;
-          const foodBufferEx = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(w.food <= 0 && w.healReserve <= 0 && hpPctEx < 0.4);
-          if (host.hasTool("pickaxe") && foodBufferEx && w.stairs) {
+          const hungryEmptyEx = w.food <= 0 && w.healReserve <= 0;
+          const foodBufferEx = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(hungryEmptyEx && hpPctEx < 0.4);
+          if (host.hasTool("pickaxe") && (foodBufferEx || hungryEmptyEx) && w.stairs) {
             if (this.stairsUsable(w) || !w.stairsLit) {
               this.desireXY = { x: w.stairs.x, y: w.stairs.y };
               host.walkTo(w.stairs.x, w.stairs.y);
               this.stuckTicks = 0;
-              if (!this.actions.some((s) => /postBreak free stairs deep/i.test(s))) {
+              if (hungryEmptyEx) {
+                if (!this.actions.some((s) => /free stairs hungry/i.test(s))) {
+                  this.noteAction("free stairs hungry (3112)");
+                  host.log("AUTO: free stairs hungry (3112)");
+                }
+              } else if (!this.actions.some((s) => /postBreak free stairs deep/i.test(s))) {
                 this.noteAction("postBreak free stairs deep");
                 host.log("AUTO: postBreak free stairs deep (3111)");
               }
@@ -6437,7 +6492,7 @@
             }
           }
         }
-        const treeFb = (_f = (_e = w.seen) == null ? void 0 : _e.tree) != null ? _f : this.mem(w, "tree");
+        const treeFb = (_i = (_h = w.seen) == null ? void 0 : _h.tree) != null ? _i : this.mem(w, "tree");
         if (treeFb && host.hasTool("hatchet") && !this.isGatherTileBlocked(treeFb.x, treeFb.y)) {
           if (this.walkToTile(host, treeFb.x, treeFb.y)) {
             this.stuckTicks = 0;
@@ -6455,7 +6510,16 @@
           return true;
         }
       }
-      const walkTarget = w.explore ? w.explore : w.wander ? w.wander : w.hub ? w.hub : null;
+      let walkTarget = w.explore ? w.explore : w.wander ? w.wander : w.hub ? w.hub : null;
+      if (walkTarget && this.postBreakFreeMineExhausted) {
+        const hungryWalk = w.food <= 0 && w.healReserve <= 0;
+        const chWalk = (_k = (_j = w.seen) == null ? void 0 : _j.chest) != null ? _k : this.mem(w, "chest");
+        if (hungryWalk && chWalk && walkTarget.x === chWalk.x && walkTarget.y === chWalk.y) {
+          const alt = w.hub && (w.hub.x !== chWalk.x || w.hub.y !== chWalk.y) ? w.hub : w.wander && (w.wander.x !== chWalk.x || w.wander.y !== chWalk.y) ? w.wander : w.explore && (w.explore.x !== chWalk.x || w.explore.y !== chWalk.y) ? w.explore : null;
+          if (alt) walkTarget = alt;
+          else walkTarget = null;
+        }
+      }
       if (walkTarget && this.postBreakFreeMineExhausted) {
         const wk = `${walkTarget.x},${walkTarget.y}`;
         if (wk === this.postBreakFreeWalkKey) this.postBreakFreeWalkHits++;
