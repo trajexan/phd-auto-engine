@@ -1,4 +1,4 @@
-/* phd auto-engine 3121 — pull via GET /api/auto-engine */
+/* phd auto-engine 3122 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3121";
+  var AUTO_ENGINE_VERSION = "3122";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2667,6 +2667,14 @@
           return true;
         }
       }
+      if (this.isPostBreak() && w.food <= 0 && w.healReserve <= 0 && (this.postBreakFreeFishExhausted || !!w.stairs)) {
+        const mark = this.postBreakFreeFishExhausted ? "hungry ban fish (3122)" : "hungry ban rod (3122)";
+        if (!this.actions.some((s) => /hungry ban rod|hungry ban fish \(3122\)/i.test(s))) {
+          this.noteAction(mark);
+          host.log(`AUTO: ${mark} \u2014 food-seek yield stairs/exhaust`);
+        }
+        return this.postBreakFreeBrain(host, w, stance, "hungry-ban-food-seek");
+      }
       const pond = this.resolvePond(w);
       const tree = this.mem(w, "tree");
       const hasRod = host.hasTool("rod");
@@ -4164,6 +4172,13 @@
         if (live && host.hasTool("pickaxe") && !this.rockFindBreakActive() && !this.isGatherTileBlocked(live.x, live.y)) {
           if (this.aleFwTheaterBanned() && !this.postBreakAllowNormal()) {
             return this.aleSpentToolsMineDivert(host, w, stance, "tools-mine-fund");
+          }
+          if (this.isPostBreak() && w.food <= 0 && w.healReserve <= 0) {
+            if (!this.actions.some((s) => /hungry ban mine/i.test(s))) {
+              this.noteAction("hungry ban mine (3122)");
+              host.log("AUTO: hungry ban mine (3122) \u2014 tools fund-path");
+            }
+            return this.postBreakFreeBrain(host, w, stance, "hungry-ban-mine-fund");
           }
           this.setStatus1001(host, w, stance, "tools mine");
           this.armPhaseIntent(this.h1001.phase === "FIRST_WEP" || this.h1001.phase === "GEAR_FARM" ? this.h1001.phase : "TOOLS", "mine");
