@@ -1,4 +1,4 @@
-/* phd auto-engine 3112 — pull via GET /api/auto-engine */
+/* phd auto-engine 3113 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3112";
+  var AUTO_ENGINE_VERSION = "3113";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -4368,6 +4368,13 @@
       const tree = this.mem(w, "tree");
       if (this.tryScoreSmithEquip(host, w, stance, "first wep")) return true;
       if ((anvil || w.anvilNearby) && this.wantSmithKit(w) && host.smithKitOnce()) return true;
+      if (rock && host.hasTool("pickaxe") && this.postBreakAllowNormal() && w.food <= 0 && w.healReserve <= 0) {
+        if (!this.actions.some((s) => /hungry ban mine/i.test(s))) {
+          this.noteAction("hungry ban mine (3113)");
+          host.log("AUTO: hungry ban mine (3113)");
+        }
+        return this.postBreakFreeBrain(host, w, stance, "hungry-ban-mine");
+      }
       if (rock && host.hasTool("pickaxe")) {
         this.h1001.lockedMats = true;
         if (this.walkToTile(host, rock.x, rock.y)) return true;
@@ -6258,7 +6265,7 @@
      * Returns true only while issuing the one productive action.
      */
     postBreakFreeBrain(host, w, stance, why) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n;
       this.enterPostBreak(host, `free:${why}`);
       this.quietBootstrapEmitHits = 0;
       this.quietBootstrapBreakUntil = Math.min(this.quietBootstrapBreakUntil, this.runTicks);
@@ -6292,7 +6299,7 @@
       this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 512);
       if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
         this.noteAction(`postBreak free brain \u2014 ${why}`);
-        host.log(`AUTO: postBreak free brain (3112) ${why}`);
+        host.log(`AUTO: postBreak free brain (3113) ${why}`);
       }
       if (host.hasTool("pickaxe")) {
         this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
@@ -6378,7 +6385,68 @@
           }
         }
       }
-      const rockFb = (_d = (_c = w.seen) == null ? void 0 : _c.rock) != null ? _d : this.mem(w, "rock");
+      {
+        const hungryEmptyPre = w.food <= 0 && w.healReserve <= 0;
+        if (hungryEmptyPre) {
+          if (w.coins > 0) host.buyFoodIfCritical();
+          if (w.food > 0 || w.healReserve > 0) {
+            this.stuckTicks = 0;
+            if (!this.actions.some((s) => /hungry food first/i.test(s))) {
+              this.noteAction("hungry food first (3113)");
+              host.log("AUTO: hungry food first (3113) \u2014 bought");
+            }
+            return true;
+          }
+          const pondPre = (_e = (_d = this.resolvePond(w)) != null ? _d : (_c = w.seen) == null ? void 0 : _c.pond) != null ? _e : this.mem(w, "pond");
+          if (!host.hasTool("rod") && this.canFundRodNow(w) && (w.pondKnown || pondPre)) {
+            if (!this.actions.some((s) => /hungry food first/i.test(s))) {
+              this.noteAction("hungry food first (3113)");
+              host.log("AUTO: hungry food first (3113) \u2014 fund rod");
+            }
+            if (host.acquireTool("rod")) {
+              this.stuckTicks = 0;
+              return true;
+            }
+            const shopRod = this.mem(w, "shop");
+            const destRod = shopRod || w.hub;
+            if (destRod) {
+              this.desireXY = { x: destRod.x, y: destRod.y };
+              host.walkTo(destRod.x, destRod.y);
+              this.stuckTicks = 0;
+              return true;
+            }
+          }
+          if (pondPre && host.hasTool("rod") && !this.isGatherTileBlocked(pondPre.x, pondPre.y)) {
+            this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
+            this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
+            if (!this.actions.some((s) => /hungry food first/i.test(s))) {
+              this.noteAction("hungry food first (3113)");
+              host.log("AUTO: hungry food first (3113) \u2014 fish");
+            }
+            if (this.walkToTile(host, pondPre.x, pondPre.y)) {
+              this.stuckTicks = 0;
+              return true;
+            }
+            if (this.tryGather(host, w, stance, "postBreak free fish hungry")) {
+              this.stuckTicks = 0;
+              return true;
+            }
+          }
+          if (!this.postBreakFreeMineExhausted) {
+            this.postBreakFreeMineExhausted = true;
+            this.sealPostExhaustChestSell(host, w);
+            if (!this.actions.some((s) => /postBreak free mine exhaust/i.test(s))) {
+              this.noteAction("postBreak free mine exhaust");
+              host.log("AUTO: postBreak free mine exhaust \u2014 hungry-skip (3113)");
+            }
+            if (!this.actions.some((s) => /hungry ban mine/i.test(s))) {
+              this.noteAction("hungry ban mine (3113)");
+              host.log("AUTO: hungry ban mine (3113) \u2014 skip free-mine");
+            }
+          }
+        }
+      }
+      const rockFb = (_g = (_f = w.seen) == null ? void 0 : _f.rock) != null ? _g : this.mem(w, "rock");
       if (!this.postBreakFreeMineExhausted && rockFb && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rockFb.x, rockFb.y)) {
         const mk = `${rockFb.x},${rockFb.y}`;
         if (mk === this.postBreakFreeMineKey) this.postBreakFreeMineHits++;
@@ -6417,9 +6485,36 @@
         {
           const hungryEmpty = w.food <= 0 && w.healReserve <= 0;
           if (hungryEmpty) {
+            if (w.coins > 0) host.buyFoodIfCritical();
+            if (w.food > 0 || w.healReserve > 0) {
+              this.stuckTicks = 0;
+              if (!this.actions.some((s) => /hungry food first/i.test(s))) {
+                this.noteAction("hungry food first (3113)");
+                host.log("AUTO: hungry food first (3113) \u2014 bought post-ex");
+              }
+              return true;
+            }
             this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
             this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
-            const pond = (_g = (_f = this.resolvePond(w)) != null ? _f : (_e = w.seen) == null ? void 0 : _e.pond) != null ? _g : this.mem(w, "pond");
+            const pond = (_j = (_i = this.resolvePond(w)) != null ? _i : (_h = w.seen) == null ? void 0 : _h.pond) != null ? _j : this.mem(w, "pond");
+            if (!host.hasTool("rod") && this.canFundRodNow(w) && (w.pondKnown || pond)) {
+              if (!this.actions.some((s) => /hungry food first/i.test(s))) {
+                this.noteAction("hungry food first (3113)");
+                host.log("AUTO: hungry food first (3113) \u2014 fund rod post-ex");
+              }
+              if (host.acquireTool("rod")) {
+                this.stuckTicks = 0;
+                return true;
+              }
+              const shopRod = this.mem(w, "shop");
+              const destRod = shopRod || w.hub;
+              if (destRod) {
+                this.desireXY = { x: destRod.x, y: destRod.y };
+                host.walkTo(destRod.x, destRod.y);
+                this.stuckTicks = 0;
+                return true;
+              }
+            }
             if (pond && host.hasTool("rod") && !this.isGatherTileBlocked(pond.x, pond.y)) {
               if (this.walkToTile(host, pond.x, pond.y)) {
                 this.stuckTicks = 0;
@@ -6492,7 +6587,7 @@
             }
           }
         }
-        const treeFb = (_i = (_h = w.seen) == null ? void 0 : _h.tree) != null ? _i : this.mem(w, "tree");
+        const treeFb = (_l = (_k = w.seen) == null ? void 0 : _k.tree) != null ? _l : this.mem(w, "tree");
         if (treeFb && host.hasTool("hatchet") && !this.isGatherTileBlocked(treeFb.x, treeFb.y)) {
           if (this.walkToTile(host, treeFb.x, treeFb.y)) {
             this.stuckTicks = 0;
@@ -6513,7 +6608,7 @@
       let walkTarget = w.explore ? w.explore : w.wander ? w.wander : w.hub ? w.hub : null;
       if (walkTarget && this.postBreakFreeMineExhausted) {
         const hungryWalk = w.food <= 0 && w.healReserve <= 0;
-        const chWalk = (_k = (_j = w.seen) == null ? void 0 : _j.chest) != null ? _k : this.mem(w, "chest");
+        const chWalk = (_n = (_m = w.seen) == null ? void 0 : _m.chest) != null ? _n : this.mem(w, "chest");
         if (hungryWalk && chWalk && walkTarget.x === chWalk.x && walkTarget.y === chWalk.y) {
           const alt = w.hub && (w.hub.x !== chWalk.x || w.hub.y !== chWalk.y) ? w.hub : w.wander && (w.wander.x !== chWalk.x || w.wander.y !== chWalk.y) ? w.wander : w.explore && (w.explore.x !== chWalk.x || w.explore.y !== chWalk.y) ? w.explore : null;
           if (alt) walkTarget = alt;
