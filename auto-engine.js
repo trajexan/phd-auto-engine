@@ -1,4 +1,4 @@
-/* phd auto-engine 3124 — pull via GET /api/auto-engine */
+/* phd auto-engine 3125 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3124";
+  var AUTO_ENGINE_VERSION = "3125";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1519,6 +1519,8 @@
       __publicField(this, "postBreakFreeFishExhausted", false);
       /** Eng 3124: free-fish attempts this life across any tile (not a timer). */
       __publicField(this, "postBreakFreeFishLifeHits", 0);
+      /** Eng 3125: quiet sell/hub-shop under hungry+stairs this life (not a timer). */
+      __publicField(this, "postBreakHungryQuietSellHits", 0);
       /** Eng 3106: free-brain walk desire key after free-mine exhaust (not a timer). */
       __publicField(this, "postBreakFreeWalkKey", "");
       __publicField(this, "postBreakFreeWalkHits", 0);
@@ -1771,6 +1773,7 @@
         this.postBreakFreeFishHits = 0;
         this.postBreakFreeFishExhausted = false;
         this.postBreakFreeFishLifeHits = 0;
+        this.postBreakHungryQuietSellHits = 0;
         this.postBreakFreeWalkKey = "";
         this.postBreakFreeWalkHits = 0;
         this.postBreakFreeWalkOsc = 0;
@@ -3982,10 +3985,10 @@
       const tool = bootstrapTool(host, w, this.h1001.nodes);
       const shop = this.mem(w, "shop");
       if (this.beginnerToolsIncomplete(host) && (shop || anvil || w.anvilNearby) && tool && !host.hasTool(tool) && this.canFundToolNow(tool, w, anvil) && !(tool === "hatchet" && this.hatchetChestBreakActive())) {
-        if ((tool === "hatchet" || tool === "pickaxe") && this.postBreakAllowNormal() && w.food <= 0 && w.healReserve <= 0) {
+        if ((tool === "hatchet" || tool === "pickaxe") && this.isPostBreak() && w.food <= 0 && w.healReserve <= 0) {
           if (!this.actions.some((s) => /hungry ban kit/i.test(s))) {
-            this.noteAction("hungry ban kit (3118)");
-            host.log(`AUTO: hungry ban kit (3118) \u2014 tools ${tool}`);
+            this.noteAction("hungry ban kit (3125)");
+            host.log(`AUTO: hungry ban kit (3125) \u2014 tools ${tool}`);
           }
           return this.postBreakFreeBrain(host, w, stance, `hungry-ban-kit-${tool}`);
         }
@@ -6409,6 +6412,35 @@
           }
         }
       }
+      {
+        const hungryStairsQ = w.food <= 0 && w.healReserve <= 0 && !!w.stairs;
+        if (hungryStairsQ && (did === "sell" || did === "walk-shop" || did === "hub-shop")) {
+          this.postBreakHungryQuietSellHits++;
+        }
+        if (!did && hungryStairsQ && (this.stairsUsable(w) || !w.stairsLit)) {
+          if (this.postBreakHungryQuietSellHits >= 3) {
+            if (!this.actions.some((s) => /hungry ban quiet-sell/i.test(s))) {
+              this.noteAction("hungry ban quiet-sell (3125)");
+              host.log("AUTO: hungry ban quiet-sell (3125) \u2014 stairs");
+            }
+          }
+          this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+          host.walkTo(w.stairs.x, w.stairs.y);
+          did = "stairs";
+          if (!this.actions.some((s) => /hungry quiet stairs/i.test(s))) {
+            this.noteAction("hungry quiet stairs (3125)");
+            host.log("AUTO: hungry quiet stairs (3125) \u2014 food miss");
+          }
+        } else if (did === "sell" && hungryStairsQ && this.postBreakHungryQuietSellHits >= 3 && (this.stairsUsable(w) || !w.stairsLit)) {
+          if (!this.actions.some((s) => /hungry ban quiet-sell/i.test(s))) {
+            this.noteAction("hungry ban quiet-sell (3125)");
+            host.log("AUTO: hungry ban quiet-sell (3125) \u2014 after sell");
+          }
+          this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+          host.walkTo(w.stairs.x, w.stairs.y);
+          did = "stairs";
+        }
+      }
       if (!did) {
         const shop = this.mem(w, "shop");
         if (shop) {
@@ -6434,6 +6466,17 @@
             this.noteAction("hungry food first (3114)");
             host.log("AUTO: hungry food first (3114) \u2014 quiet buy");
           }
+        } else if (w.stairs && (this.stairsUsable(w) || !w.stairsLit)) {
+          this.postBreakHungryQuietSellHits++;
+          if (this.postBreakHungryQuietSellHits >= 2) {
+            if (!this.actions.some((s) => /hungry quiet stairs/i.test(s))) {
+              this.noteAction("hungry quiet stairs (3125)");
+              host.log("AUTO: hungry quiet stairs (3125) \u2014 buy miss");
+            }
+            this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+            host.walkTo(w.stairs.x, w.stairs.y);
+            did = "stairs";
+          }
         }
       }
       this.noteAction(`productive quiet \u2014 ${did || "none"} (${why})`);
@@ -6442,7 +6485,7 @@
         host,
         w,
         stance,
-        did === "eat" || did === "buy-food" || did === "fund-rod" || did === "fish" || did === "pond-seek" ? "productive quiet \u2014 eat" : did === "sell" || did === "walk-shop" || did === "hub-shop" ? "productive quiet \u2014 sell" : did === "re-kit" ? "productive quiet \u2014 re-kit" : "productive quiet \u2014 hub"
+        did === "eat" || did === "buy-food" || did === "fund-rod" || did === "fish" || did === "pond-seek" ? "productive quiet \u2014 eat" : did === "stairs" ? "productive quiet \u2014 stairs" : did === "sell" || did === "walk-shop" || did === "hub-shop" ? "productive quiet \u2014 sell" : did === "re-kit" ? "productive quiet \u2014 re-kit" : "productive quiet \u2014 hub"
       );
       this.cool = 0;
       return true;
