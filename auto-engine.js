@@ -1,4 +1,4 @@
-/* phd auto-engine 3135 — pull via GET /api/auto-engine */
+/* phd auto-engine 3136 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3135";
+  var AUTO_ENGINE_VERSION = "3136";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -6055,15 +6055,22 @@
      */
     earlyOscDurableDivert(host, w, stance, kind, pairKey) {
       this.earlyOscDivertHits = Math.max(this.earlyOscDivertHits, 1);
-      this.latchThrash();
-      this.latchClash();
       this.enterPostBreak(host, `early-osc:${kind}`);
-      if (/tools|pickaxe|mine|wander|first.?wep|quiet hold|phase|aba|abc/i.test(`${kind}|${pairKey}`)) {
+      const toolsFamily = /tools|pickaxe|mine|wander|first.?wep|quiet hold|phase|aba|abc/i.test(`${kind}|${pairKey}`);
+      if (toolsFamily) {
         this.latchHungryToolsBan(host, "early-osc");
         if (!this.actions.some((s) => /hungry tools-ban early-osc \(3133\)/i.test(s))) {
           this.noteAction("hungry tools-ban early-osc (3133)");
           host.log(`AUTO: hungry tools-ban early-osc (3133) \u2014 ${kind}`);
         }
+        if (!this.actions.some((s) => /hungry tools-ban early-osc-quiet \(3136\)/i.test(s))) {
+          this.noteAction("hungry tools-ban early-osc-quiet (3136)");
+          host.log(`AUTO: hungry tools-ban early-osc-quiet (3136) \u2014 ${kind}`);
+        }
+        this.stuckRecentStatus = [];
+      } else {
+        this.latchThrash();
+        this.latchClash();
       }
       this.clearFundIntent("tool");
       this.clearFundIntent("food");
@@ -10342,9 +10349,7 @@
       if (hits < 1) return false;
       this.enterPostBreak(host, `tools-pre:${where}`);
       this.latchHungryToolsBan(host, `tools-pre:${where}`);
-      this.stuckRecentStatus = this.stuckRecentStatus.filter(
-        (s) => !/tools mine|tools find rock|tools-rock|phase intent — mine|first wep mine|tools fund/i.test(s)
-      );
+      this.stuckRecentStatus = [];
       if (!this.actions.some((s) => /hungry tools-ban tools-pre \(3134\)/i.test(s))) {
         this.noteAction("hungry tools-ban tools-pre (3134)");
         host.log(`AUTO: hungry tools-ban tools-pre (3134) \u2014 ${where} hits=${hits}`);
@@ -11493,8 +11498,13 @@
         this.findPondMonoStreak = 0;
       }
       if (this.tryStatusOscBreak(host, w, stance)) {
-        this.latchThrash();
-        if (uniqueStatuses >= 2) this.latchClash();
+        if (!this.postBreakHungryScrubLatched) {
+          this.latchThrash();
+          if (uniqueStatuses >= 2) this.latchClash();
+        } else if (!this.actions.some((s) => /hungry tools-ban tcs-quiet \(3136\)/i.test(s))) {
+          this.noteAction("hungry tools-ban tcs-quiet (3136)");
+          host.log("AUTO: hungry tools-ban tcs-quiet (3136) \u2014 osc-break no TCS");
+        }
         this.stuckTicks = 0;
         this.stuckRecentTiles = [];
         return;
@@ -11540,8 +11550,13 @@
       }
       const insta = this.detectInstaOsc();
       if (insta) {
-        this.latchThrash();
-        if (insta.fams.length >= 2) this.latchClash();
+        if (!this.postBreakHungryScrubLatched) {
+          this.latchThrash();
+          if (insta.fams.length >= 2) this.latchClash();
+        } else if (!this.actions.some((s) => /hungry tools-ban tcs-quiet \(3136\)/i.test(s))) {
+          this.noteAction("hungry tools-ban tcs-quiet (3136)");
+          host.log("AUTO: hungry tools-ban tcs-quiet (3136) \u2014 insta no TCS");
+        }
       }
       const doorThrash = this.doorOscStreak >= 2;
       const sellTrimThrash = /sell trim|bag sell trim/i.test(stNow) && this.sellTrimNoSellStreak >= 2 && metersFlat;
@@ -11550,8 +11565,13 @@
       const thrashNow = (metersFlat && repeatedAction && walkOsc || doorThrash || sellTrimThrash || findPondThrash) && !combatBusy && !gatherBusy && !striveBusy;
       const clashNow = (metersFlat && uniqueStatuses >= 2 && this.stuckRecentStatus.length >= 4 || metersFlat && /sell trim/i.test(stNow) && this.statusFamilyHits(/sell trim/) >= 2 && this.statusFamilyHits(/(?:^|\s)fish(?:\s|$)|gear score|explore|round-trip/) >= 2) && !combatBusy && !gatherBusy && !striveBusy;
       if (realProg || gatherBusy) this.findPondMonoStreak = 0;
-      if (thrashNow) this.latchThrash();
-      if (clashNow) this.latchClash();
+      if (!this.postBreakHungryScrubLatched) {
+        if (thrashNow) this.latchThrash();
+        if (clashNow) this.latchClash();
+      } else if ((thrashNow || clashNow) && !this.actions.some((s) => /hungry tools-ban tcs-quiet \(3136\)/i.test(s))) {
+        this.noteAction("hungry tools-ban tcs-quiet (3136)");
+        host.log("AUTO: hungry tools-ban tcs-quiet (3136) \u2014 flat-mark skip");
+      }
       if (metersFlat && this.stuckTicks >= Math.floor(IDLE_STUCK_TICKS / 2) && !combatBusy && !gatherBusy && !striveBusy) {
         this.latchStuck();
         if (!this.wdFirstClassDiverted) {
@@ -11569,8 +11589,13 @@
         const statusMono = topStatusHits >= 5 && this.stuckRecentStatus.length >= 5;
         const statusOscPersist = uniqueStatuses >= 2 && this.stuckRecentStatus.length >= 6 && topStatusHits >= 2;
         if (actMono || shopWalkSpam || statusMono || statusOscPersist && (walkOsc || doorThrash)) {
-          this.latchThrash();
-          if (statusOscPersist || uniqueStatuses >= 2) this.latchClash();
+          if (!this.postBreakHungryScrubLatched) {
+            this.latchThrash();
+            if (statusOscPersist || uniqueStatuses >= 2) this.latchClash();
+          } else if (!this.actions.some((s) => /hungry tools-ban tcs-quiet \(3136\)/i.test(s))) {
+            this.noteAction("hungry tools-ban tcs-quiet (3136)");
+            host.log("AUTO: hungry tools-ban tcs-quiet (3136) \u2014 persist no TCS");
+          }
         }
       }
       const thrashing = this.markThrash || this.lifeThrash || walkOsc;
