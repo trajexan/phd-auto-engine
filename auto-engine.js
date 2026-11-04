@@ -1,4 +1,4 @@
-/* phd auto-engine 3138 — pull via GET /api/auto-engine */
+/* phd auto-engine 3139 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3138";
+  var AUTO_ENGINE_VERSION = "3139";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -6655,7 +6655,6 @@
      * immediately (don't wait for clash/thrash life-stain to paint the whole life).
      */
     forceWdFirstClassDivert(host, w, stance, why) {
-      this.latchStuck();
       {
         const hungryEmpty = w.food <= 0 && w.healReserve <= 0;
         if (this.postBreakHungryScrubLatched) {
@@ -6663,12 +6662,21 @@
             this.noteAction("hungry tools-ban wd-quiet (3137)");
             host.log(`AUTO: hungry tools-ban wd-quiet (3137) \u2014 ${why}`);
           }
+          if (!this.actions.some((s) => /hungry tools-ban wd-stuck-quiet \(3139\)/i.test(s))) {
+            this.noteAction("hungry tools-ban wd-stuck-quiet (3139)");
+            host.log(`AUTO: hungry tools-ban wd-stuck-quiet (3139) \u2014 ${why}`);
+          }
         } else if (hungryEmpty) {
           if (!this.actions.some((s) => /hungry tools-ban wd-prequiet \(3138\)/i.test(s))) {
             this.noteAction("hungry tools-ban wd-prequiet (3138)");
             host.log(`AUTO: hungry tools-ban wd-prequiet (3138) \u2014 ${why}`);
           }
+          if (!this.actions.some((s) => /hungry tools-ban wd-stuck-quiet \(3139\)/i.test(s))) {
+            this.noteAction("hungry tools-ban wd-stuck-quiet (3139)");
+            host.log(`AUTO: hungry tools-ban wd-stuck-quiet (3139) \u2014 ${why}`);
+          }
         } else {
+          this.latchStuck();
           this.latchThrash();
           this.latchClash();
         }
@@ -11603,7 +11611,10 @@
         host.log("AUTO: hungry tools-ban tcs-quiet (3136) \u2014 flat-mark skip");
       }
       if (metersFlat && this.stuckTicks >= Math.floor(IDLE_STUCK_TICKS / 2) && !combatBusy && !gatherBusy && !striveBusy) {
-        this.latchStuck();
+        {
+          const hungryEmptyHalf = w.food <= 0 && w.healReserve <= 0;
+          if (!(this.postBreakHungryScrubLatched || hungryEmptyHalf)) this.latchStuck();
+        }
         if (!this.wdFirstClassDiverted) {
           this.wdFirstClassDiverted = true;
           this.forceWdFirstClassDivert(host, w, stance, "near-stuck");
@@ -11657,7 +11668,15 @@
       this.stuckTile = tile;
       this.stuckTicks += thrashing ? 2 : 1;
       if (metersFlat && this.stuckTicks >= Math.floor(IDLE_STUCK_TICKS / 2)) {
-        this.latchStuck();
+        const hungryEmptyClimb = w.food <= 0 && w.healReserve <= 0;
+        if (this.postBreakHungryScrubLatched || hungryEmptyClimb) {
+          if (!this.actions.some((s) => /hungry tools-ban wd-stuck-quiet \(3139\)/i.test(s))) {
+            this.noteAction("hungry tools-ban wd-stuck-quiet (3139)");
+            host.log("AUTO: hungry tools-ban wd-stuck-quiet (3139) \u2014 climb skip");
+          }
+        } else {
+          this.latchStuck();
+        }
       }
       if (this.stuckTicks < IDLE_STUCK_TICKS) return;
       const keepStairs = this.stairsStrive && /ceiling thrash|farm ceiling|food fat/i.test(this.stairsStrive.label) && (w.healReserve > 0 || w.food > 0) && w.kitReady && w.descendSafe;
@@ -11666,8 +11685,20 @@
         this.noteAction("stuck rethink \u2014 keep ceiling stairs");
         return;
       }
-      this.latchStuck();
-      if (thrashing) this.latchThrash();
+      {
+        const hungryEmptyRethink = w.food <= 0 && w.healReserve <= 0;
+        if (this.postBreakHungryScrubLatched || hungryEmptyRethink) {
+          if (!this.actions.some((s) => /hungry tools-ban wd-stuck-quiet \(3139\)/i.test(s))) {
+            this.noteAction("hungry tools-ban wd-stuck-quiet (3139)");
+            host.log("AUTO: hungry tools-ban wd-stuck-quiet (3139) \u2014 rethink skip");
+          }
+        } else {
+          this.latchStuck();
+        }
+      }
+      if (thrashing) {
+        if (!this.postBreakHungryScrubLatched) this.latchThrash();
+      }
       const stuckReason = this.markThrash || this.lifeThrash ? "stuck thrash (no approach / meters flat)" : this.markClash || this.lifeClash ? "stuck clash (status osc / meters flat)" : "stuck (no gear/food/exp/meters/approach)";
       try {
         (_a = host.onStuckProgress) == null ? void 0 : _a.call(host, {
