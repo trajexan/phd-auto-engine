@@ -1,4 +1,4 @@
-/* phd auto-engine 3130 — pull via GET /api/auto-engine */
+/* phd auto-engine 3131 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3130";
+  var AUTO_ENGINE_VERSION = "3131";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2018,6 +2018,45 @@
       host.equipUp();
       if (this.drainEnrouteStop(host, w, stance)) return true;
       if (this.evCalmFoodHighPri(host, w, stance)) return true;
+      if (this.hungryToolsTheaterBanned(w)) {
+        this.noteHungryBanTools(host, "tick-gate");
+        if (!this.actions.some((s) => /hungry ban tools theater \(3131\)/i.test(s))) {
+          this.noteAction("hungry ban tools theater (3131)");
+          host.log("AUTO: hungry ban tools theater (3131) \u2014 tick-gate");
+        }
+        this.clearFundIntent("tool");
+        this.clearPhaseIntent();
+        if (host.hasTool("pickaxe")) {
+          this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
+        } else if (this.h1001.phase === "TOOLS") {
+          this.h1001.phase = "FOOD_BUFFER";
+        }
+        if (this.postBreakFreeBrain(host, w, stance, "hungry-ban-tick-gate")) return true;
+        if (w.stairs && (this.stairsUsable(w) || !w.stairsLit)) {
+          this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+          host.walkTo(w.stairs.x, w.stairs.y);
+          this.stuckTicks = 0;
+          return true;
+        }
+        if (w.wander) {
+          host.walkTo(w.wander.x, w.wander.y);
+          this.stuckTicks = 0;
+          return true;
+        }
+        if (w.explore) {
+          this.desireXY = { x: w.explore.x, y: w.explore.y };
+          host.walkTo(w.explore.x, w.explore.y);
+          this.stuckTicks = 0;
+          return true;
+        }
+        if (w.hub) {
+          host.walkTo(w.hub.x, w.hub.y);
+          this.stuckTicks = 0;
+          return true;
+        }
+        this.stuckTicks = 0;
+        return true;
+      }
       if (this.runPhase1001(host, w, stance)) return true;
       if (this.runCalm1001(host, w, stance)) return true;
       if (this.kiteExploreCoolActive()) {
@@ -2194,6 +2233,13 @@
       return true;
     }
     setStatus1001(host, w, stance, desire) {
+      if (this.hungryToolsTheaterBanned(w) && /tools mine|tools find rock|tools explore|tools wander|tools fund|quiet hold — tools|tools-rock/i.test(desire)) {
+        if (!this.actions.some((s) => /hungry ban tools theater \(3131\)/i.test(s))) {
+          this.noteAction("hungry ban tools theater (3131)");
+          host.log(`AUTO: hungry ban tools theater (3131) \u2014 status:${desire}`);
+        }
+        desire = "hungry ban tools theater (3131)";
+      }
       const tag = statusTag(this.h1001);
       this.setStatus(host, w, stance, `${desire} | ${tag}`);
     }
@@ -4533,8 +4579,14 @@
       const tree = this.mem(w, "tree");
       if (this.tryScoreSmithEquip(host, w, stance, "first wep")) return true;
       if ((anvil || w.anvilNearby) && this.wantSmithKit(w) && host.smithKitOnce()) return true;
-      if (rock && host.hasTool("pickaxe") && this.postBreakAllowNormal() && w.food <= 0 && w.healReserve <= 0) {
-        if (!this.actions.some((s) => /hungry ban mine/i.test(s))) {
+      if (rock && host.hasTool("pickaxe") && (this.hungryToolsTheaterBanned(w) || this.postBreakAllowNormal() && w.food <= 0 && w.healReserve <= 0)) {
+        if (this.hungryToolsTheaterBanned(w)) {
+          this.noteHungryBanTools(host, "first-wep-mine");
+          if (!this.actions.some((s) => /hungry ban tools theater \(3131\)/i.test(s))) {
+            this.noteAction("hungry ban tools theater (3131)");
+            host.log("AUTO: hungry ban tools theater (3131) \u2014 first-wep-mine");
+          }
+        } else if (!this.actions.some((s) => /hungry ban mine/i.test(s))) {
           this.noteAction("hungry ban mine (3114)");
           host.log("AUTO: hungry ban mine (3114)");
         }
@@ -4997,6 +5049,7 @@
         if (o.id === "mine" || o.id === "chop" || o.id === "fish") {
           if (toolsBootstrap || this.beginnerToolsIncomplete(host)) return false;
         }
+        if ((o.id === "mine" || o.id === "chop") && this.hungryToolsTheaterBanned(w)) return false;
         if (o.id === "mine" && (this.rockFindBreakActive() || this.campChainBreakActive())) return false;
         if (o.id === "chop" && (this.chopBreakActive() || this.campChainBreakActive())) return false;
         if ((o.id === "mine" || o.id === "chop") && this.firstWepCampGatherBanActive()) return false;
@@ -10260,9 +10313,9 @@
       return w.food <= 0 && w.healReserve <= 0;
     }
     noteHungryBanTools(host, where) {
-      if (!this.actions.some((s) => /hungry ban tools sticky \(3129\)|hungry ban tools \(3128\)|hungry ban tools-latch/i.test(s))) {
-        this.noteAction("hungry ban tools sticky (3129)");
-        host.log(`AUTO: hungry ban tools sticky (3129) \u2014 ${where}`);
+      if (!this.actions.some((s) => /hungry ban tools theater \(3131\)|hungry ban tools sticky \(3129\)|hungry ban tools \(3128\)|hungry ban tools-latch/i.test(s))) {
+        this.noteAction("hungry ban tools theater (3131)");
+        host.log(`AUTO: hungry ban tools theater (3131) \u2014 ${where}`);
       }
     }
     /**
