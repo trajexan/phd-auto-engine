@@ -1,4 +1,4 @@
-/* phd auto-engine 3140 — pull via GET /api/auto-engine */
+/* phd auto-engine 3141 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3140";
+  var AUTO_ENGINE_VERSION = "3141";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -7755,8 +7755,14 @@
      */
     applyInstaOscPairCool(fams) {
       const joined = fams.join(" ");
-      this.latchThrash();
-      if (fams.length >= 2) this.latchClash();
+      if (this.postBreakHungryScrubLatched) {
+        if (!this.actions.some((s) => /hungry tools-ban divert-scrub-quiet \(3141\)/i.test(s))) {
+          this.noteAction("hungry tools-ban divert-scrub-quiet (3141)");
+        }
+      } else {
+        this.latchThrash();
+        if (fams.length >= 2) this.latchClash();
+      }
       this.armBreakerExploreCool(1024);
       if (/pond|fish|sell|food mine|food sell|enroute pond|find pond|find shop|sell ore|sell trim|pond-cap|food find shop/i.test(joined)) {
         this.armPondBreakSticky(1024, true);
@@ -7939,8 +7945,14 @@
         }
         return this.earlyOscDurableDivert(host, w, stance, hit.kind, pairKey);
       }
-      this.latchThrash();
-      if (hit.fams.length >= 2) this.latchClash();
+      if (this.postBreakHungryScrubLatched) {
+        if (!this.actions.some((s) => /hungry tools-ban divert-scrub-quiet \(3141\)/i.test(s))) {
+          this.noteAction("hungry tools-ban divert-scrub-quiet (3141)");
+        }
+      } else {
+        this.latchThrash();
+        if (hit.fams.length >= 2) this.latchClash();
+      }
       this.instaOscPairKey = pairKey;
       this.instaOscLeaveArmed = true;
       this.instaOscLeaveHits++;
