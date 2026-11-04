@@ -1,4 +1,4 @@
-/* phd auto-engine 3114 — pull via GET /api/auto-engine */
+/* phd auto-engine 3115 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3114";
+  var AUTO_ENGINE_VERSION = "3115";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -4011,6 +4011,13 @@
         if (this.aleFwTheaterBanned() && !this.postBreakAllowNormal()) {
           return this.aleSpentToolsMineDivert(host, w, stance, "tools-mine-live");
         }
+        if (this.postBreakAllowNormal() && w.food <= 0 && w.healReserve <= 0) {
+          if (!this.actions.some((s) => /hungry ban mine/i.test(s))) {
+            this.noteAction("hungry ban mine (3115)");
+            host.log("AUTO: hungry ban mine (3115) \u2014 tools");
+          }
+          return this.postBreakFreeBrain(host, w, stance, "hungry-ban-mine-tools");
+        }
         if (this.oscCoolDivertActive() && this.statusFamilyHits(/tools mine|tools find rock/) >= 3) {
           return this.coolHoldOscDivert(host, w, stance, "tools-mine-cool-hold");
         }
@@ -6309,7 +6316,7 @@
       this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 512);
       if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
         this.noteAction(`postBreak free brain \u2014 ${why}`);
-        host.log(`AUTO: postBreak free brain (3114) ${why}`);
+        host.log(`AUTO: postBreak free brain (3115) ${why}`);
       }
       if (host.hasTool("pickaxe")) {
         this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
@@ -6327,9 +6334,18 @@
                 this.noteAction("postBreak kit pickaxe");
                 host.log("AUTO: postBreak kit pickaxe (3110)");
               }
+              this.stuckTicks = 0;
+              return true;
             }
-            this.stuckTicks = 0;
-            return true;
+            if (this.runTicks < this.kitAcquireBlockUntil) {
+              if (!this.actions.some((s) => /kit cool exhaust/i.test(s))) {
+                this.noteAction("kit cool exhaust (3115)");
+                host.log("AUTO: kit cool exhaust (3115) \u2014 no-pick fallthrough");
+              }
+            } else {
+              this.stuckTicks = 0;
+              return true;
+            }
           }
         }
         if (!this.postBreakFreeMineExhausted) {
