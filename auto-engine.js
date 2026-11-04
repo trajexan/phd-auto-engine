@@ -1,4 +1,4 @@
-/* phd auto-engine 3125 — pull via GET /api/auto-engine */
+/* phd auto-engine 3126 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3125";
+  var AUTO_ENGINE_VERSION = "3126";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -6043,6 +6043,15 @@
         this.cool = 0;
         return false;
       }
+      if (goal === "mine" && this.isPostBreak() && w.food <= 0 && w.healReserve <= 0) {
+        if (!this.actions.some((s) => /hungry ban phase-mine/i.test(s))) {
+          this.noteAction("hungry ban phase-mine (3126)");
+          host.log("AUTO: hungry ban phase-mine (3126) \u2014 free brain");
+        }
+        this.clearPhaseIntent();
+        this.phaseIntentMineMonoHits = 0;
+        return this.postBreakFreeBrain(host, w, stance, "hungry-ban-phase-mine");
+      }
       if (goal === "mine" || goal === "forge") {
         if (!host.hasTool("pickaxe")) {
           this.clearPhaseIntent();
@@ -7602,6 +7611,37 @@
               }
             }
             host.log(`AUTO: scrub TRW clear-seal divert hits=${this.lifeSpentDivertHits} [${pairKey}] (3016)`);
+            const hungryScrub = w.food <= 0 && w.healReserve <= 0;
+            if (hungryScrub) {
+              this.clearPhaseIntent();
+              this.phaseIntentMineMonoHits = 0;
+              this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 320);
+              if (w.stairs && (this.stairsUsable(w) || !w.stairsLit)) {
+                if (!this.actions.some((s) => /hungry scrub stairs/i.test(s))) {
+                  this.noteAction("hungry scrub stairs (3126)");
+                  host.log("AUTO: hungry scrub stairs (3126) \u2014 no mine arm");
+                }
+                this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+                host.walkTo(w.stairs.x, w.stairs.y);
+                this.setStatus(host, w, stance, "productive quiet \u2014 stairs");
+                this.cool = 0;
+                return true;
+              }
+              if (!this.actions.some((s) => /hungry scrub no-mine/i.test(s))) {
+                this.noteAction("hungry scrub no-mine (3126)");
+                host.log("AUTO: hungry scrub no-mine (3126) \u2014 explore");
+              }
+              const shopH = this.mem(w, "shop");
+              if (shopH) host.walkTo(shopH.x, shopH.y);
+              else if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+              else if (w.explore) {
+                this.desireXY = { x: w.explore.x, y: w.explore.y };
+                host.walkTo(w.explore.x, w.explore.y);
+              } else if (w.wander) host.walkTo(w.wander.x, w.wander.y);
+              this.setStatus(host, w, stance, "explore \u2014 after life escape");
+              this.cool = 0;
+              return true;
+            }
             if (host.hasTool("pickaxe") && (w.hasMetalWeapon || w.hasStyleWeapon)) {
               this.armPhaseIntent("GEAR_FARM", "hunt");
             } else if (host.hasTool("pickaxe") && !this.trwReenterBanned() && !this.aleFwTheaterBanned() && !this.lifeEscapeSpent) {
