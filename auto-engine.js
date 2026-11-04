@@ -1,4 +1,4 @@
-/* phd auto-engine 3119 — pull via GET /api/auto-engine */
+/* phd auto-engine 3120 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3119";
+  var AUTO_ENGINE_VERSION = "3120";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -3059,6 +3059,13 @@
         this.bagFindShopTile = "";
         return false;
       }
+      if (this.isPostBreak() && w.food <= 0 && w.healReserve <= 0 && w.stairs) {
+        if (!this.actions.some((s) => /hungry stairs bag-yield/i.test(s))) {
+          this.noteAction("hungry stairs bag-yield (3120)");
+          host.log("AUTO: hungry stairs bag-yield (3120) \u2014 bag_full");
+        }
+        return this.postBreakFreeBrain(host, w, stance, "hungry-stairs-bag-yield");
+      }
       this.h1001.topEvent = "bag_full";
       this.bagFullUntil = this.runTicks + 600;
       if (this.runTicks < this.bagFindShopUntil) {
@@ -3200,6 +3207,13 @@
       if (w.bagFree <= 0) return false;
       if (this.runTicks < this.rawSellBlockUntil) return false;
       if (!this.needsRawNoCookSell(host, w, stance)) return false;
+      if (this.isPostBreak() && w.food <= 0 && w.healReserve <= 0 && w.stairs) {
+        if (!this.actions.some((s) => /hungry stairs bag-yield/i.test(s))) {
+          this.noteAction("hungry stairs bag-yield (3120)");
+          host.log("AUTO: hungry stairs bag-yield (3120) \u2014 raw sell");
+        }
+        return this.postBreakFreeBrain(host, w, stance, "hungry-stairs-raw-yield");
+      }
       this.h1001.topEvent = "bag_full";
       this.setStatus1001(host, w, stance, "raw sell fund");
       this.claimFundIntent("food", 16);
@@ -4049,10 +4063,10 @@
         if (this.aleFwTheaterBanned() && !this.postBreakAllowNormal()) {
           return this.aleSpentToolsMineDivert(host, w, stance, "tools-mine-live");
         }
-        if (this.postBreakAllowNormal() && w.food <= 0 && w.healReserve <= 0) {
+        if (this.isPostBreak() && w.food <= 0 && w.healReserve <= 0) {
           if (!this.actions.some((s) => /hungry ban mine/i.test(s))) {
-            this.noteAction("hungry ban mine (3115)");
-            host.log("AUTO: hungry ban mine (3115) \u2014 tools");
+            this.noteAction("hungry ban mine (3120)");
+            host.log("AUTO: hungry ban mine (3120) \u2014 tools any-postBreak");
           }
           return this.postBreakFreeBrain(host, w, stance, "hungry-ban-mine-tools");
         }
@@ -9875,6 +9889,13 @@
      */
     tryToolsFindRockOrBreak(host, w, stance) {
       var _a, _b;
+      if (this.isPostBreak() && w.food <= 0 && w.healReserve <= 0) {
+        if (!this.actions.some((s) => /hungry ban mine/i.test(s))) {
+          this.noteAction("hungry ban mine (3120)");
+          host.log("AUTO: hungry ban mine (3120) \u2014 find-rock");
+        }
+        return this.postBreakFreeBrain(host, w, stance, "hungry-ban-find-rock");
+      }
       if (this.trwReenterBanned()) {
         return this.durableTrwBanWalk(host, w, stance, "trw-reenter-ban");
       }
