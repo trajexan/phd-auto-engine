@@ -1,4 +1,4 @@
-/* phd auto-engine 3131 — pull via GET /api/auto-engine */
+/* phd auto-engine 3132 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3131";
+  var AUTO_ENGINE_VERSION = "3132";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1773,36 +1773,10 @@
         this.instaOscPairKey = "";
         this.instaOscLeaveHits = 0;
         this.pondBreakCapHits = 0;
-        this.postReleaseCoolExhausted = false;
-        this.postReleaseCoolWalkHits = 0;
-        this.lifeEscapeSpent = false;
-        this.postBreak = false;
-        this.earlyOscDivertHits = 0;
         this.phaseIntentGoal = "";
         this.phaseIntentPhase = "";
-        this.postReleaseQuietDone = false;
-        this.postBreakFreeMineKey = "";
-        this.postBreakFreeMineHits = 0;
-        this.postBreakFreeMineExhausted = false;
-        this.postBreakHungryPondSeekHits = 0;
-        this.postBreakFreeFishKey = "";
-        this.postBreakFreeFishHits = 0;
-        this.postBreakFreeFishExhausted = false;
-        this.postBreakFreeFishLifeHits = 0;
-        this.postBreakHungryQuietSellHits = 0;
-        this.postBreakHungryScrubLatched = false;
-        this.postBreakFreeWalkKey = "";
-        this.postBreakFreeWalkHits = 0;
-        this.postBreakFreeWalkOsc = 0;
-        this.wdFirstClassDiverted = false;
-        this.lifeSpentDivertHits = 0;
-        this.trwPrisonClearHits = 0;
-        this.trwReenterBan = false;
         this.phaseIntentMineMonoHits = 0;
-        this.afterLifeEscapeMonoHits = 0;
-        this.afterLifeEscapeCapped = false;
         this.phaseIntentHuntMonoHits = 0;
-        this.afterLifeEscapeFwMonoHits = 0;
         this.stickyLeaveRethinks = 0;
         this.stickyExploreBlockUntil = 0;
         this.stickyPhaseLeaveArmed = false;
@@ -1875,10 +1849,39 @@
           this.lastThrashHitTick = -1;
           this.lastClashHitTick = -1;
           this.lastStuckHitTick = -1;
+          this.postReleaseCoolExhausted = false;
+          this.postReleaseCoolWalkHits = 0;
+          this.lifeEscapeSpent = false;
+          this.postBreak = false;
+          this.earlyOscDivertHits = 0;
+          this.postReleaseQuietDone = false;
+          this.postBreakFreeMineKey = "";
+          this.postBreakFreeMineHits = 0;
+          this.postBreakFreeMineExhausted = false;
+          this.postBreakHungryPondSeekHits = 0;
+          this.postBreakFreeFishKey = "";
+          this.postBreakFreeFishHits = 0;
+          this.postBreakFreeFishExhausted = false;
+          this.postBreakFreeFishLifeHits = 0;
+          this.postBreakHungryQuietSellHits = 0;
+          this.postBreakHungryScrubLatched = false;
+          this.postBreakFreeWalkKey = "";
+          this.postBreakFreeWalkHits = 0;
+          this.postBreakFreeWalkOsc = 0;
+          this.wdFirstClassDiverted = false;
+          this.lifeSpentDivertHits = 0;
+          this.trwPrisonClearHits = 0;
+          this.trwReenterBan = false;
+          this.afterLifeEscapeMonoHits = 0;
+          this.afterLifeEscapeCapped = false;
+          this.afterLifeEscapeFwMonoHits = 0;
         } else {
           if (this.lifeThrash) this.markThrash = true;
           if (this.lifeClash) this.markClash = true;
           if (this.lifeStuck) this.markStuck = true;
+          if (this.postBreakHungryScrubLatched && !this.actions.some((s) => /hungry tools-ban floor-keep \(3132\)/i.test(s))) {
+            this.noteAction("hungry tools-ban floor-keep (3132)");
+          }
         }
         this.eliteThrash = 0;
         this.eliteThrashKey = "";
