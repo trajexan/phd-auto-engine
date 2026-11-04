@@ -1,4 +1,4 @@
-/* phd auto-engine 3145 — pull via GET /api/auto-engine */
+/* phd auto-engine 3146 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3145";
+  var AUTO_ENGINE_VERSION = "3146";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1540,6 +1540,11 @@
       __publicField(this, "postBreakFreeFishHits", 0);
       /** Eng 3121: after free-fish flap this life — never re-enter hungry fish (not a timer). */
       __publicField(this, "postBreakFreeFishExhausted", false);
+      /**
+       * Eng 3146 / R137: life-latch after armour-chest thrash soft-block under
+       * hungryEmpty+!hasArmour — 3145 bypassSoft must not re-enter → F1 WD.
+       */
+      __publicField(this, "postBreakArmourChestExhausted", false);
       /** Eng 3124: free-fish attempts this life across any tile (not a timer). */
       __publicField(this, "postBreakFreeFishLifeHits", 0);
       /** Eng 3125: quiet sell/hub-shop under hungry+stairs this life (not a timer). */
@@ -1871,6 +1876,7 @@
           this.postBreakFreeFishKey = "";
           this.postBreakFreeFishHits = 0;
           this.postBreakFreeFishExhausted = false;
+          this.postBreakArmourChestExhausted = false;
           this.postBreakFreeFishLifeHits = 0;
           this.postBreakHungryQuietSellHits = 0;
           this.postBreakHungryScrubLatched = false;
@@ -7070,20 +7076,28 @@
       }
       {
         const hungryEmptyArm = w.food <= 0 && w.healReserve <= 0;
-        if (hungryEmptyArm && !w.hasArmour) {
+        if (hungryEmptyArm && !w.hasArmour && !this.postBreakArmourChestExhausted) {
           const chArm = (_g = (_f = w.seen) == null ? void 0 : _f.chest) != null ? _g : this.mem(w, "chest");
           if (chArm && !this.isGatherTileBlocked(chArm.x, chArm.y)) {
-            if (!this.actions.some((s) => /hungry stairs armour-chest \(3145\)/i.test(s))) {
-              this.noteAction("hungry stairs armour-chest (3145)");
-              host.log("AUTO: hungry stairs armour-chest (3145)");
-            }
-            if (this.walkToTile(host, chArm.x, chArm.y)) {
-              this.stuckTicks = 0;
-              return true;
-            }
-            if (this.tryOpenChestOnce(host, w, stance, { needBag: false, cool: 2, bypassSoft: true })) {
-              this.stuckTicks = 0;
-              return true;
+            if (this.runTicks < this.chestBlockUntil) {
+              this.postBreakArmourChestExhausted = true;
+              if (!this.actions.some((s) => /hungry ban armour-chest \(3146\)/i.test(s))) {
+                this.noteAction("hungry ban armour-chest (3146)");
+                host.log("AUTO: hungry ban armour-chest (3146) \u2014 softActive \u2192 stairs");
+              }
+            } else {
+              if (!this.actions.some((s) => /hungry stairs armour-chest \(3145\)/i.test(s))) {
+                this.noteAction("hungry stairs armour-chest (3145)");
+                host.log("AUTO: hungry stairs armour-chest (3145)");
+              }
+              if (this.walkToTile(host, chArm.x, chArm.y)) {
+                this.stuckTicks = 0;
+                return true;
+              }
+              if (this.tryOpenChestOnce(host, w, stance, { needBag: false, cool: 2, bypassSoft: true })) {
+                this.stuckTicks = 0;
+                return true;
+              }
             }
           }
         }
@@ -7366,7 +7380,7 @@
       if (walkTarget && this.postBreakFreeMineExhausted) {
         const hungryWalk = w.food <= 0 && w.healReserve <= 0;
         const chWalk = (_p = (_o = w.seen) == null ? void 0 : _o.chest) != null ? _p : this.mem(w, "chest");
-        if (hungryWalk && chWalk && walkTarget.x === chWalk.x && walkTarget.y === chWalk.y && w.hasArmour) {
+        if (hungryWalk && chWalk && walkTarget.x === chWalk.x && walkTarget.y === chWalk.y && (w.hasArmour || this.postBreakArmourChestExhausted)) {
           const alt = w.hub && (w.hub.x !== chWalk.x || w.hub.y !== chWalk.y) ? w.hub : w.wander && (w.wander.x !== chWalk.x || w.wander.y !== chWalk.y) ? w.wander : w.explore && (w.explore.x !== chWalk.x || w.explore.y !== chWalk.y) ? w.explore : null;
           if (alt) walkTarget = alt;
           else walkTarget = null;
@@ -12688,12 +12702,12 @@
      * Soft-block falls through (false) — do NOT keep status open chest.
      */
     tryOpenChestOnce(host, w, stance, opts) {
-      const armourChestOk = w.food <= 0 && w.healReserve <= 0 && !w.hasArmour;
+      const armourChestOk = w.food <= 0 && w.healReserve <= 0 && !w.hasArmour && !this.postBreakArmourChestExhausted;
       if (this.postBreakFreeMineExhausted && !armourChestOk) return false;
-      if (this.runTicks < this.chestBlockUntil && !opts.bypassSoft) return false;
+      if (this.runTicks < this.chestBlockUntil && (!opts.bypassSoft || this.postBreakArmourChestExhausted)) return false;
       if (opts.needBag && w.bagFree <= 0) return false;
       if (!host.openChestOnce()) return false;
-      const fp = `c${w.coins}|bf${w.bagFree}|f${w.food}|h${w.healReserve}`;
+      const fp = `c${w.coins}|bf${w.bagFree}|f${w.food}|h${w.healReserve}|a${w.hasArmour ? 1 : 0}`;
       if (this.chestProgKey !== "" && fp === this.chestProgKey) {
         this.chestFailStreak++;
         if (this.chestFailStreak >= 4) {
@@ -12701,6 +12715,13 @@
           this.chestBlockUntil = this.runTicks + 160;
           this.noteAction("chest thrash soft-block");
           host.log("AUTO: chest thrash soft-block \u2014 skip open");
+          if (w.food <= 0 && w.healReserve <= 0 && !w.hasArmour) {
+            this.postBreakArmourChestExhausted = true;
+            if (!this.actions.some((s) => /hungry ban armour-chest \(3146\)/i.test(s))) {
+              this.noteAction("hungry ban armour-chest (3146)");
+              host.log("AUTO: hungry ban armour-chest (3146) \u2014 thrash soft-block \u2192 stairs");
+            }
+          }
           return false;
         }
       } else {
