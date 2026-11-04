@@ -1,4 +1,4 @@
-/* phd auto-engine 3122 — pull via GET /api/auto-engine */
+/* phd auto-engine 3123 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3122";
+  var AUTO_ENGINE_VERSION = "3123";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2495,6 +2495,14 @@
           this.dropEnroutePonds();
           return false;
         }
+        if (this.isPostBreak() && w.food <= 0 && w.healReserve <= 0 && this.postBreakFreeFishExhausted) {
+          this.dropEnroutePonds();
+          if (!this.actions.some((s) => /hungry ban enroute/i.test(s))) {
+            this.noteAction("hungry ban enroute (3123)");
+            host.log("AUTO: hungry ban enroute (3123) \u2014 fish exhausted");
+          }
+          return false;
+        }
         if (this.pondBreakActive()) {
           this.scan.enrouteStops.shift();
           return false;
@@ -2644,6 +2652,14 @@
       if (w.food > 0 && w.hp < w.maxHp * 0.85) host.eat();
       if (w.food <= 0 && w.coins > 0) host.buyFoodIfCritical();
       if (this.tryCookBagCookables(host, w, stance, `${labelPrefix} cook`)) return true;
+      if (this.isPostBreak() && w.food <= 0 && w.healReserve <= 0 && (this.postBreakFreeFishExhausted || !!w.stairs)) {
+        const mark = this.postBreakFreeFishExhausted ? "hungry ban fish (3122)" : "hungry ban rod (3122)";
+        if (!this.actions.some((s) => /hungry ban rod|hungry ban fish \(3122\)/i.test(s))) {
+          this.noteAction(mark);
+          host.log(`AUTO: ${mark} \u2014 food-seek yield before sell-raw`);
+        }
+        return this.postBreakFreeBrain(host, w, stance, "hungry-ban-food-seek");
+      }
       if (this.hasBagCookables(w) && !this.canCookBagCookables(host, w)) {
         if (this.trySellUnusedOnce(host, w)) {
           this.setStatus1001(host, w, stance, `${labelPrefix} sell raw`);
@@ -6178,7 +6194,18 @@
               }
             }
           }
-          if (!didNs && !this.postBreakFreeFishExhausted) {
+          if (!didNs && (this.postBreakFreeFishExhausted || !!w.stairs)) {
+            if (w.stairs && (this.stairsUsable(w) || !w.stairsLit)) {
+              this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+              host.walkTo(w.stairs.x, w.stairs.y);
+              didNs = "stairs";
+              if (!this.actions.some((s) => /near-stuck stairs/i.test(s))) {
+                this.noteAction("near-stuck stairs (3123)");
+                host.log("AUTO: near-stuck stairs (3123) \u2014 exhaust/stairs");
+              }
+            }
+          }
+          if (!didNs && !this.postBreakFreeFishExhausted && !w.stairs) {
             const pondNs = (_c = (_b = this.resolvePond(w)) != null ? _b : (_a = w.seen) == null ? void 0 : _a.pond) != null ? _c : this.mem(w, "pond");
             if (pondNs && host.hasTool("rod") && !this.isGatherTileBlocked(pondNs.x, pondNs.y)) {
               this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
@@ -6208,7 +6235,7 @@
               }
             }
           }
-          if (!didNs && this.postBreakHungryPondSeekHits < 6) {
+          if (!didNs && !this.postBreakFreeFishExhausted && !w.stairs && this.postBreakHungryPondSeekHits < 6) {
             this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
             this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
             const spotNs = this.pickFindPondSpot(w);
@@ -6701,7 +6728,7 @@
               }
             }
           }
-          if (!pondPre && this.postBreakHungryPondSeekHits < 6) {
+          if (!this.postBreakFreeFishExhausted && !pondPre && this.postBreakHungryPondSeekHits < 6) {
             this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
             this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
             const spot = this.pickFindPondSpot(w);
@@ -6715,6 +6742,11 @@
                 host.log("AUTO: hungry pond seek (3117)");
               }
               return true;
+            }
+          } else if (this.postBreakFreeFishExhausted && !pondPre) {
+            if (!this.actions.some((s) => /hungry ban pond-seek/i.test(s))) {
+              this.noteAction("hungry ban pond-seek (3123)");
+              host.log("AUTO: hungry ban pond-seek (3123) \u2014 free-brain");
             }
           }
           if (!this.postBreakFreeMineExhausted) {
@@ -6736,7 +6768,7 @@
         const hungryEmpty = w.food <= 0 && w.healReserve <= 0;
         const foodBufferAllows = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(hungryEmpty && hpPctDeep < 0.4);
         const pickReady = host.hasTool("pickaxe");
-        if (pickReady && w.stairs && (foodBufferAllows || hungryEmpty)) {
+        if ((pickReady || hungryEmpty) && w.stairs && (foodBufferAllows || hungryEmpty)) {
           if (this.stairsUsable(w)) {
             this.desireXY = { x: w.stairs.x, y: w.stairs.y };
             host.walkTo(w.stairs.x, w.stairs.y);
@@ -6831,9 +6863,13 @@
               }
               return true;
             }
-            this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
-            this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
             const pond = (_j = (_i = this.resolvePond(w)) != null ? _i : (_h = w.seen) == null ? void 0 : _h.pond) != null ? _j : this.mem(w, "pond");
+            if (!this.postBreakFreeFishExhausted) {
+              this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
+              this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
+            } else {
+              this.dropEnroutePonds();
+            }
             if (!host.hasTool("rod") && this.canFundRodNow(w)) {
               if (!this.actions.some((s) => /hungry food first/i.test(s))) {
                 this.noteAction("hungry food first (3116)");
@@ -6892,7 +6928,12 @@
                 }
               }
             }
-            if (!pond && this.postBreakHungryPondSeekHits < 6) {
+            if (this.postBreakFreeFishExhausted || !!w.stairs) {
+              if (!this.actions.some((s) => /hungry ban pond-seek/i.test(s))) {
+                this.noteAction("hungry ban pond-seek (3123)");
+                host.log("AUTO: hungry ban pond-seek (3123) \u2014 post-ex");
+              }
+            } else if (!pond && this.postBreakHungryPondSeekHits < 6) {
               const spotEx = this.pickFindPondSpot(w);
               if (spotEx) {
                 this.postBreakHungryPondSeekHits++;
@@ -6922,7 +6963,7 @@
           const hpPctEx = w.maxHp > 0 ? w.hp / w.maxHp : 1;
           const hungryEmptyEx = w.food <= 0 && w.healReserve <= 0;
           const foodBufferEx = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(hungryEmptyEx && hpPctEx < 0.4);
-          if (host.hasTool("pickaxe") && (foodBufferEx || hungryEmptyEx) && w.stairs) {
+          if ((host.hasTool("pickaxe") || hungryEmptyEx) && (foodBufferEx || hungryEmptyEx) && w.stairs) {
             if (this.stairsUsable(w) || !w.stairsLit) {
               this.desireXY = { x: w.stairs.x, y: w.stairs.y };
               host.walkTo(w.stairs.x, w.stairs.y);
