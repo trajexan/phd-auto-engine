@@ -1,4 +1,4 @@
-/* phd auto-engine 3110 — pull via GET /api/auto-engine */
+/* phd auto-engine 3111 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3110";
+  var AUTO_ENGINE_VERSION = "3111";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -6282,7 +6282,7 @@
       this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 512);
       if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
         this.noteAction(`postBreak free brain \u2014 ${why}`);
-        host.log(`AUTO: postBreak free brain (3110) ${why}`);
+        host.log(`AUTO: postBreak free brain (3111) ${why}`);
       }
       if (host.hasTool("pickaxe")) {
         this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
@@ -6326,6 +6326,37 @@
           }
         }
       }
+      {
+        const hpPctDeep = w.maxHp > 0 ? w.hp / w.maxHp : 1;
+        const foodBufferAllows = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(w.food <= 0 && w.healReserve <= 0 && hpPctDeep < 0.4);
+        const pickReady = host.hasTool("pickaxe");
+        if (pickReady && foodBufferAllows && w.stairs) {
+          if (this.stairsUsable(w)) {
+            this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+            host.walkTo(w.stairs.x, w.stairs.y);
+            this.stuckTicks = 0;
+            if (!this.postBreakFreeMineExhausted) {
+              this.postBreakFreeMineExhausted = true;
+              this.sealPostExhaustChestSell(host, w);
+            }
+            if (!this.actions.some((s) => /postBreak free stairs deep/i.test(s))) {
+              this.noteAction("postBreak free stairs deep");
+              host.log("AUTO: postBreak free stairs deep (3111)");
+            }
+            return true;
+          }
+          if (!w.stairsLit) {
+            this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+            host.walkTo(w.stairs.x, w.stairs.y);
+            this.stuckTicks = 0;
+            if (!this.actions.some((s) => /postBreak free stairs light/i.test(s))) {
+              this.noteAction("postBreak free stairs light");
+              host.log("AUTO: postBreak free stairs light (3111)");
+            }
+            return true;
+          }
+        }
+      }
       const rockFb = (_d = (_c = w.seen) == null ? void 0 : _c.rock) != null ? _d : this.mem(w, "rock");
       if (!this.postBreakFreeMineExhausted && rockFb && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rockFb.x, rockFb.y)) {
         const mk = `${rockFb.x},${rockFb.y}`;
@@ -6362,6 +6393,22 @@
       }
       if (this.postBreakFreeMineExhausted) {
         this.sealPostExhaustChestSell(host, w);
+        {
+          const hpPctEx = w.maxHp > 0 ? w.hp / w.maxHp : 1;
+          const foodBufferEx = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(w.food <= 0 && w.healReserve <= 0 && hpPctEx < 0.4);
+          if (host.hasTool("pickaxe") && foodBufferEx && w.stairs) {
+            if (this.stairsUsable(w) || !w.stairsLit) {
+              this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+              host.walkTo(w.stairs.x, w.stairs.y);
+              this.stuckTicks = 0;
+              if (!this.actions.some((s) => /postBreak free stairs deep/i.test(s))) {
+                this.noteAction("postBreak free stairs deep");
+                host.log("AUTO: postBreak free stairs deep (3111)");
+              }
+              return true;
+            }
+          }
+        }
         const foe = w.foes.find((f) => f.alive && f.lit) || w.foes.find((f) => f.alive);
         if (foe) {
           this.desireXY = { x: foe.x, y: foe.y };
