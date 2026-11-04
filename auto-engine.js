@@ -1,4 +1,4 @@
-/* phd auto-engine 3141 — pull via GET /api/auto-engine */
+/* phd auto-engine 3142 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3141";
+  var AUTO_ENGINE_VERSION = "3142";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2035,11 +2035,14 @@
           this.h1001.phase = "FOOD_BUFFER";
         }
         if (this.postBreakFreeBrain(host, w, stance, "hungry-ban-tick-gate")) return true;
-        if (w.stairs && (this.stairsUsable(w) || !w.stairsLit)) {
+        if (w.stairs && this.hungryStairsWalkOk(w)) {
           this.desireXY = { x: w.stairs.x, y: w.stairs.y };
           host.walkTo(w.stairs.x, w.stairs.y);
           this.stuckTicks = 0;
           return true;
+        }
+        if (w.stairs && w.food <= 0 && w.healReserve <= 0 && !w.stairsOpen) {
+          this.noteHungryBanClosedStairs(host);
         }
         if (w.wander) {
           host.walkTo(w.wander.x, w.wander.y);
@@ -6393,7 +6396,7 @@
             }
           }
           if (!didNs && (this.postBreakFreeFishExhausted || !!w.stairs)) {
-            if (w.stairs && (this.stairsUsable(w) || !w.stairsLit)) {
+            if (w.stairs && this.hungryStairsWalkOk(w)) {
               this.desireXY = { x: w.stairs.x, y: w.stairs.y };
               host.walkTo(w.stairs.x, w.stairs.y);
               didNs = "stairs";
@@ -6447,7 +6450,7 @@
               didNs = "pond-seek";
             }
           }
-          if (!didNs && w.stairs && (this.stairsUsable(w) || !w.stairsLit)) {
+          if (!didNs && w.stairs && this.hungryStairsWalkOk(w)) {
             this.desireXY = { x: w.stairs.x, y: w.stairs.y };
             host.walkTo(w.stairs.x, w.stairs.y);
             didNs = "stairs";
@@ -6609,7 +6612,7 @@
         if (hungryStairsQ && (did === "sell" || did === "walk-shop" || did === "hub-shop")) {
           this.postBreakHungryQuietSellHits++;
         }
-        if (!did && hungryStairsQ && (this.stairsUsable(w) || !w.stairsLit)) {
+        if (!did && hungryStairsQ && this.hungryStairsWalkOk(w)) {
           if (this.postBreakHungryQuietSellHits >= 3) {
             if (!this.actions.some((s) => /hungry ban quiet-sell/i.test(s))) {
               this.noteAction("hungry ban quiet-sell (3125)");
@@ -6623,7 +6626,7 @@
             this.noteAction("hungry quiet stairs (3125)");
             host.log("AUTO: hungry quiet stairs (3125) \u2014 food miss");
           }
-        } else if (did === "sell" && hungryStairsQ && this.postBreakHungryQuietSellHits >= 3 && (this.stairsUsable(w) || !w.stairsLit)) {
+        } else if (did === "sell" && hungryStairsQ && this.postBreakHungryQuietSellHits >= 3 && this.hungryStairsWalkOk(w)) {
           if (!this.actions.some((s) => /hungry ban quiet-sell/i.test(s))) {
             this.noteAction("hungry ban quiet-sell (3125)");
             host.log("AUTO: hungry ban quiet-sell (3125) \u2014 after sell");
@@ -6658,7 +6661,7 @@
             this.noteAction("hungry food first (3114)");
             host.log("AUTO: hungry food first (3114) \u2014 quiet buy");
           }
-        } else if (w.stairs && (this.stairsUsable(w) || !w.stairsLit)) {
+        } else if (w.stairs && this.hungryStairsWalkOk(w)) {
           this.postBreakHungryQuietSellHits++;
           if (this.postBreakHungryQuietSellHits >= 2) {
             if (!this.actions.some((s) => /hungry quiet stairs/i.test(s))) {
@@ -7049,7 +7052,9 @@
         const foodBufferAllows = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(hungryEmpty && hpPctDeep < 0.4);
         const pickReady = host.hasTool("pickaxe");
         if ((pickReady || hungryEmpty) && w.stairs && (foodBufferAllows || hungryEmpty)) {
-          if (this.stairsUsable(w)) {
+          if (hungryEmpty && !w.stairsOpen) {
+            this.noteHungryBanClosedStairs(host);
+          } else if (this.stairsUsable(w)) {
             this.desireXY = { x: w.stairs.x, y: w.stairs.y };
             host.walkTo(w.stairs.x, w.stairs.y);
             this.stuckTicks = 0;
@@ -7068,8 +7073,7 @@
               host.log("AUTO: postBreak free stairs deep (3111)");
             }
             return true;
-          }
-          if (!w.stairsLit) {
+          } else if (!w.stairsLit && !(hungryEmpty && !w.stairsOpen)) {
             this.desireXY = { x: w.stairs.x, y: w.stairs.y };
             host.walkTo(w.stairs.x, w.stairs.y);
             this.stuckTicks = 0;
@@ -7229,7 +7233,7 @@
                 return true;
               }
             }
-            if (w.stairs && (this.stairsUsable(w) || !w.stairsLit)) {
+            if (w.stairs && this.hungryStairsWalkOk(w)) {
               this.desireXY = { x: w.stairs.x, y: w.stairs.y };
               host.walkTo(w.stairs.x, w.stairs.y);
               this.stuckTicks = 0;
@@ -7247,7 +7251,7 @@
           const hungryEmptyEx = w.food <= 0 && w.healReserve <= 0;
           const foodBufferEx = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(hungryEmptyEx && hpPctEx < 0.4);
           if ((host.hasTool("pickaxe") || hungryEmptyEx) && (foodBufferEx || hungryEmptyEx) && w.stairs) {
-            if (this.stairsUsable(w) || !w.stairsLit) {
+            if (this.hungryStairsWalkOk(w)) {
               this.desireXY = { x: w.stairs.x, y: w.stairs.y };
               host.walkTo(w.stairs.x, w.stairs.y);
               this.stuckTicks = 0;
@@ -7844,7 +7848,7 @@
               this.clearPhaseIntent();
               this.phaseIntentMineMonoHits = 0;
               this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 320);
-              if (w.stairs && (this.stairsUsable(w) || !w.stairsLit)) {
+              if (w.stairs && this.hungryStairsWalkOk(w)) {
                 if (!this.actions.some((s) => /hungry scrub stairs/i.test(s))) {
                   this.noteAction("hungry scrub stairs (3126)");
                   host.log("AUTO: hungry scrub stairs (3126) \u2014 no mine arm");
@@ -12175,6 +12179,23 @@
     /** Lit open down-stairs not soft-blocked (e24). */
     stairsUsable(w) {
       return !!w.stairs && w.stairsOpen && w.stairsLit && !this.isGatherTileBlocked(w.stairs.x, w.stairs.y);
+    }
+    /**
+     * Eng 3142 / R133: under hungryEmpty, closed/boss stairs are never walk targets —
+     * including walk-to-light. FOV unlit↔closed flaps walk_stairs↔walk until WD/starve
+     * (7e45um F5 boss_door retreat; 210/233 boss_door lives).
+     */
+    hungryStairsWalkOk(w) {
+      if (w.food <= 0 && w.healReserve <= 0 && w.stairs && !w.stairsOpen) {
+        return false;
+      }
+      return this.stairsUsable(w) || !!w.stairs && !w.stairsLit;
+    }
+    noteHungryBanClosedStairs(host) {
+      if (!this.actions.some((s) => /hungry ban closed-stairs \(3142\)/i.test(s))) {
+        this.noteAction("hungry ban closed-stairs (3142)");
+        host.log("AUTO: hungry ban closed-stairs (3142) \u2014 boss/closed");
+      }
     }
     /** e24: clear mid-path stairs advance persist. */
     clearStairsStrive() {
