@@ -1,4 +1,4 @@
-/* phd auto-engine 3137 — pull via GET /api/auto-engine */
+/* phd auto-engine 3138 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3137";
+  var AUTO_ENGINE_VERSION = "3138";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -6306,12 +6306,22 @@
         return false;
       }
       this.postReleaseQuietDone = true;
-      if (!this.postBreakHungryScrubLatched) {
-        this.latchThrash();
-        this.latchClash();
-      } else if (!this.actions.some((s) => /hungry tools-ban quiet-productive \(3137\)/i.test(s))) {
-        this.noteAction("hungry tools-ban quiet-productive (3137)");
-        host.log("AUTO: hungry tools-ban quiet-productive (3137) \u2014 productive no TCS");
+      {
+        const hungryEmpty = w.food <= 0 && w.healReserve <= 0;
+        if (this.postBreakHungryScrubLatched) {
+          if (!this.actions.some((s) => /hungry tools-ban quiet-productive \(3137\)/i.test(s))) {
+            this.noteAction("hungry tools-ban quiet-productive (3137)");
+            host.log("AUTO: hungry tools-ban quiet-productive (3137) \u2014 productive no TCS");
+          }
+        } else if (hungryEmpty) {
+          if (!this.actions.some((s) => /hungry tools-ban pre-productive \(3138\)/i.test(s))) {
+            this.noteAction("hungry tools-ban pre-productive (3138)");
+            host.log("AUTO: hungry tools-ban pre-productive (3138) \u2014 food0 productive no TCS");
+          }
+        } else {
+          this.latchThrash();
+          this.latchClash();
+        }
       }
       this.clearFundIntent("tool");
       this.stickyPhaseLeaveArmed = false;
@@ -6646,12 +6656,22 @@
      */
     forceWdFirstClassDivert(host, w, stance, why) {
       this.latchStuck();
-      if (!this.postBreakHungryScrubLatched) {
-        this.latchThrash();
-        this.latchClash();
-      } else if (!this.actions.some((s) => /hungry tools-ban wd-quiet \(3137\)/i.test(s))) {
-        this.noteAction("hungry tools-ban wd-quiet (3137)");
-        host.log(`AUTO: hungry tools-ban wd-quiet (3137) \u2014 ${why}`);
+      {
+        const hungryEmpty = w.food <= 0 && w.healReserve <= 0;
+        if (this.postBreakHungryScrubLatched) {
+          if (!this.actions.some((s) => /hungry tools-ban wd-quiet \(3137\)/i.test(s))) {
+            this.noteAction("hungry tools-ban wd-quiet (3137)");
+            host.log(`AUTO: hungry tools-ban wd-quiet (3137) \u2014 ${why}`);
+          }
+        } else if (hungryEmpty) {
+          if (!this.actions.some((s) => /hungry tools-ban wd-prequiet \(3138\)/i.test(s))) {
+            this.noteAction("hungry tools-ban wd-prequiet (3138)");
+            host.log(`AUTO: hungry tools-ban wd-prequiet (3138) \u2014 ${why}`);
+          }
+        } else {
+          this.latchThrash();
+          this.latchClash();
+        }
       }
       if (this.isPostBreak() || this.wdFirstClassDiverted) {
         if (!this.wdFirstClassDiverted) {
