@@ -1,4 +1,4 @@
-/* phd auto-engine 3116 — pull via GET /api/auto-engine */
+/* phd auto-engine 3117 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3116";
+  var AUTO_ENGINE_VERSION = "3117";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -3926,6 +3926,13 @@
       const tool = bootstrapTool(host, w, this.h1001.nodes);
       const shop = this.mem(w, "shop");
       if (this.beginnerToolsIncomplete(host) && (shop || anvil || w.anvilNearby) && tool && !host.hasTool(tool) && this.canFundToolNow(tool, w, anvil) && !(tool === "hatchet" && this.hatchetChestBreakActive())) {
+        if (tool === "hatchet" && this.postBreakAllowNormal() && w.food <= 0 && w.healReserve <= 0) {
+          if (!this.actions.some((s) => /hungry ban kit/i.test(s))) {
+            this.noteAction("hungry ban kit (3117)");
+            host.log("AUTO: hungry ban kit (3117) \u2014 tools");
+          }
+          return this.postBreakFreeBrain(host, w, stance, "hungry-ban-kit-hatchet");
+        }
         if (host.hasTool("pickaxe") && tool !== "pickaxe") {
           if (this.tryKitAcquireWalk(host, w, stance, tool, anvil)) return true;
         } else {
@@ -6050,6 +6057,7 @@
      * Honor life-spent: no coolHold* re-arm after spent.
      */
     oneProductiveQuietAfterRelease(host, w, stance, why) {
+      var _a, _b, _c;
       this.enterPostBreak(host, `productive-quiet:${why}`);
       if (this.postReleaseQuietDone) {
         this.cool = 0;
@@ -6070,12 +6078,80 @@
       );
       if (/wd:near-stuck/i.test(why)) {
         let didNs = "";
+        const hungryNs = w.food <= 0 && w.healReserve <= 0;
         if (w.hp < w.maxHp * 0.7 && w.food > 0) {
           try {
             host.eat();
             didNs = "eat";
           } catch {
           }
+        }
+        if (!didNs && hungryNs) {
+          if (this.hasSellableMats(w) || this.oreLiquidateBeforeFish(w) || this.hasBagCookables(w)) {
+            if (this.trySellUnusedOnce(host, w) || host.sellMatsForCoins(1)) didNs = "sell-food";
+          }
+          if (!didNs && w.coins > 0) {
+            host.buyFoodIfCritical();
+            if (w.food > 0 || w.healReserve > 0) didNs = "buy-food";
+          }
+          if (!didNs && !host.hasTool("rod") && this.canFundRodNow(w)) {
+            if (host.acquireTool("rod")) didNs = "fund-rod";
+            else {
+              const shopRod = this.mem(w, "shop");
+              const destRod = shopRod || w.hub;
+              if (destRod) {
+                this.desireXY = { x: destRod.x, y: destRod.y };
+                host.walkTo(destRod.x, destRod.y);
+                didNs = "fund-rod";
+              }
+            }
+          }
+          if (!didNs) {
+            const pondNs = (_c = (_b = this.resolvePond(w)) != null ? _b : (_a = w.seen) == null ? void 0 : _a.pond) != null ? _c : this.mem(w, "pond");
+            if (pondNs && host.hasTool("rod") && !this.isGatherTileBlocked(pondNs.x, pondNs.y)) {
+              this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
+              this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
+              if (this.walkToTile(host, pondNs.x, pondNs.y)) didNs = "fish";
+              else if (this.tryGather(host, w, stance, "near-stuck fish hungry")) didNs = "fish";
+            }
+          }
+          if (!didNs && this.postBreakHungryPondSeekHits < 6) {
+            this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
+            this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
+            const spotNs = this.pickFindPondSpot(w);
+            if (spotNs) {
+              this.postBreakHungryPondSeekHits++;
+              this.desireXY = { x: spotNs.x, y: spotNs.y };
+              host.walkTo(spotNs.x, spotNs.y);
+              didNs = "pond-seek";
+            }
+          }
+          if (!didNs && w.stairs && (this.stairsUsable(w) || !w.stairsLit)) {
+            this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+            host.walkTo(w.stairs.x, w.stairs.y);
+            didNs = "stairs";
+          }
+          if (!didNs && w.explore) {
+            this.desireXY = { x: w.explore.x, y: w.explore.y };
+            host.walkTo(w.explore.x, w.explore.y);
+            didNs = "explore";
+          } else if (!didNs && w.wander) {
+            host.walkTo(w.wander.x, w.wander.y);
+            didNs = "wander";
+          } else if (!didNs && w.hub) {
+            host.walkTo(w.hub.x, w.hub.y);
+            didNs = "hub";
+          }
+          this.stuckTicks = 0;
+          if (!this.actions.some((s) => /near-stuck food/i.test(s))) {
+            this.noteAction(`near-stuck food (3117) ${didNs || "none"}`);
+            host.log(`AUTO: near-stuck food (3117) ${didNs || "none"} ${why}`);
+          }
+          this.noteAction(`productive quiet \u2014 near-stuck harden (3109) ${didNs || "none"} (${why})`);
+          host.log(`AUTO: near-stuck harden (3109) ${didNs || "none"} ${why}`);
+          this.setStatus(host, w, stance, "productive quiet \u2014 near-stuck harden");
+          this.cool = 0;
+          return true;
         }
         if (!didNs && (this.hasSellableMats(w) || this.oreLiquidateBeforeFish(w) || this.hasBagCookables(w))) {
           if (this.trySellUnusedOnce(host, w)) didNs = "sell";
@@ -6319,7 +6395,7 @@
       this.sellOreBreakUntil = Math.max(this.sellOreBreakUntil, this.runTicks + 512);
       if (!this.actions.some((s) => /postBreak free brain/i.test(s))) {
         this.noteAction(`postBreak free brain \u2014 ${why}`);
-        host.log(`AUTO: postBreak free brain (3116) ${why}`);
+        host.log(`AUTO: postBreak free brain (3117) ${why}`);
       }
       if (host.hasTool("pickaxe")) {
         this.h1001.phase = w.hasMetalWeapon || w.hasStyleWeapon ? "GEAR_FARM" : "FIRST_WEP";
@@ -6429,7 +6505,7 @@
               return true;
             }
           }
-          if (host.hasTool("rod") && !pondPre && this.postBreakHungryPondSeekHits < 6) {
+          if (!pondPre && this.postBreakHungryPondSeekHits < 6) {
             this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
             this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
             const spot = this.pickFindPondSpot(w);
@@ -6439,8 +6515,8 @@
               host.walkTo(spot.x, spot.y);
               this.stuckTicks = 0;
               if (!this.actions.some((s) => /hungry pond seek/i.test(s))) {
-                this.noteAction("hungry pond seek (3116)");
-                host.log("AUTO: hungry pond seek (3116)");
+                this.noteAction("hungry pond seek (3117)");
+                host.log("AUTO: hungry pond seek (3117)");
               }
               return true;
             }
@@ -6590,7 +6666,7 @@
                 return true;
               }
             }
-            if (host.hasTool("rod") && !pond && this.postBreakHungryPondSeekHits < 6) {
+            if (!pond && this.postBreakHungryPondSeekHits < 6) {
               const spotEx = this.pickFindPondSpot(w);
               if (spotEx) {
                 this.postBreakHungryPondSeekHits++;
@@ -6598,8 +6674,8 @@
                 host.walkTo(spotEx.x, spotEx.y);
                 this.stuckTicks = 0;
                 if (!this.actions.some((s) => /hungry pond seek/i.test(s))) {
-                  this.noteAction("hungry pond seek (3116)");
-                  host.log("AUTO: hungry pond seek (3116) \u2014 post-ex");
+                  this.noteAction("hungry pond seek (3117)");
+                  host.log("AUTO: hungry pond seek (3117) \u2014 post-ex");
                 }
                 return true;
               }
@@ -6645,7 +6721,7 @@
           this.stuckTicks = 0;
           return true;
         }
-        if (host.hasTool("pickaxe") && !host.hasTool("hatchet")) {
+        if (host.hasTool("pickaxe") && !host.hasTool("hatchet") && !(w.food <= 0 && w.healReserve <= 0)) {
           if (host.acquireTool("hatchet")) {
             if (!this.actions.some((s) => /postBreak kit hatchet/i.test(s))) {
               this.noteAction("postBreak kit hatchet");
@@ -6664,6 +6740,11 @@
               this.stuckTicks = 0;
               return true;
             }
+          }
+        } else if (host.hasTool("pickaxe") && !host.hasTool("hatchet") && w.food <= 0 && w.healReserve <= 0) {
+          if (!this.actions.some((s) => /hungry ban kit/i.test(s))) {
+            this.noteAction("hungry ban kit (3117)");
+            host.log("AUTO: hungry ban kit (3117) \u2014 skip hatchet");
           }
         }
         const treeFb = (_l = (_k = w.seen) == null ? void 0 : _k.tree) != null ? _l : this.mem(w, "tree");
