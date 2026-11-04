@@ -1,4 +1,4 @@
-/* phd auto-engine 3146 — pull via GET /api/auto-engine */
+/* phd auto-engine 3147 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3146";
+  var AUTO_ENGINE_VERSION = "3147";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -7091,11 +7091,10 @@
                 host.log("AUTO: hungry stairs armour-chest (3145)");
               }
               if (this.walkToTile(host, chArm.x, chArm.y)) {
-                this.stuckTicks = 0;
                 return true;
               }
               if (this.tryOpenChestOnce(host, w, stance, { needBag: false, cool: 2, bypassSoft: true })) {
-                this.stuckTicks = 0;
+                if (w.hasArmour) this.stuckTicks = 0;
                 return true;
               }
             }
@@ -12707,7 +12706,7 @@
       if (this.runTicks < this.chestBlockUntil && (!opts.bypassSoft || this.postBreakArmourChestExhausted)) return false;
       if (opts.needBag && w.bagFree <= 0) return false;
       if (!host.openChestOnce()) return false;
-      const fp = `c${w.coins}|bf${w.bagFree}|f${w.food}|h${w.healReserve}|a${w.hasArmour ? 1 : 0}`;
+      const fp = armourChestOk ? `arm${w.hasArmour ? 1 : 0}` : `c${w.coins}|bf${w.bagFree}|f${w.food}|h${w.healReserve}|a${w.hasArmour ? 1 : 0}`;
       if (this.chestProgKey !== "" && fp === this.chestProgKey) {
         this.chestFailStreak++;
         if (this.chestFailStreak >= 4) {
@@ -12720,6 +12719,10 @@
             if (!this.actions.some((s) => /hungry ban armour-chest \(3146\)/i.test(s))) {
               this.noteAction("hungry ban armour-chest (3146)");
               host.log("AUTO: hungry ban armour-chest (3146) \u2014 thrash soft-block \u2192 stairs");
+            }
+            if (!this.actions.some((s) => /hungry ban armour-chest \(3147\)/i.test(s))) {
+              this.noteAction("hungry ban armour-chest (3147)");
+              host.log("AUTO: hungry ban armour-chest (3147) \u2014 arm-only fp soft-block \u2192 stairs");
             }
           }
           return false;
