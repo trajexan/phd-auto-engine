@@ -1,4 +1,4 @@
-/* phd auto-engine 3154 — pull via GET /api/auto-engine */
+/* phd auto-engine 3155 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3154";
+  var AUTO_ENGINE_VERSION = "3155";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2103,24 +2103,17 @@
       if (this.evMobSudden(host, w, stance)) return true;
       if (this.evMobApproach(host, w, stance)) return true;
       if (this.evEmergFood(host, w, stance)) return true;
-      if (this.evScanChestSafe(host, w, stance)) return true;
-      if (this.evScanLootHv(host, w, stance)) return true;
-      if (this.drainWantLootQueue(host, w, stance)) return true;
-      if (this.evBagFull(host, w, stance)) return true;
-      if (this.evRawNoCookFund(host, w, stance)) return true;
-      if (this.evHighCeiling(host, w, stance)) return true;
-      if (this.evFloorLoot(host, w, stance)) return true;
-      if (this.evForgeMiss(host, w, stance)) return true;
-      if (this.evAltar(host, w, stance)) return true;
-      if (this.tryCookBagCookables(host, w, stance, "cook")) return true;
-      host.equipUp();
-      if (this.drainEnrouteStop(host, w, stance)) return true;
-      if (this.evCalmFoodHighPri(host, w, stance)) return true;
       if (this.hungryToolsTheaterBanned(w)) {
         this.noteHungryBanTools(host, "tick-gate");
         if (!this.actions.some((s) => /hungry ban tools theater \(3131\)/i.test(s))) {
           this.noteAction("hungry ban tools theater (3131)");
           host.log("AUTO: hungry ban tools theater (3131) \u2014 tick-gate");
+        }
+        if (w.food <= 0 && w.healReserve <= 0) {
+          if (!this.actions.some((s) => /hungry ban loot-chase \(3155\)/i.test(s))) {
+            this.noteAction("hungry ban loot-chase (3155)");
+            host.log("AUTO: hungry ban loot-chase (3155) \u2014 skip Layer2/3 before free brain");
+          }
         }
         this.clearFundIntent("tool");
         this.clearPhaseIntent();
@@ -2129,6 +2122,7 @@
         } else if (this.h1001.phase === "TOOLS") {
           this.h1001.phase = "FOOD_BUFFER";
         }
+        host.equipUp();
         if (this.postBreakFreeBrain(host, w, stance, "hungry-ban-tick-gate")) return true;
         if (w.stairs && this.hungryStairsWalkOk(w)) {
           if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
@@ -2159,6 +2153,19 @@
         this.stuckTicks = 0;
         return true;
       }
+      if (this.evScanChestSafe(host, w, stance)) return true;
+      if (this.evScanLootHv(host, w, stance)) return true;
+      if (this.drainWantLootQueue(host, w, stance)) return true;
+      if (this.evBagFull(host, w, stance)) return true;
+      if (this.evRawNoCookFund(host, w, stance)) return true;
+      if (this.evHighCeiling(host, w, stance)) return true;
+      if (this.evFloorLoot(host, w, stance)) return true;
+      if (this.evForgeMiss(host, w, stance)) return true;
+      if (this.evAltar(host, w, stance)) return true;
+      if (this.tryCookBagCookables(host, w, stance, "cook")) return true;
+      host.equipUp();
+      if (this.drainEnrouteStop(host, w, stance)) return true;
+      if (this.evCalmFoodHighPri(host, w, stance)) return true;
       if (this.runPhase1001(host, w, stance)) return true;
       if (this.runCalm1001(host, w, stance)) return true;
       if (this.kiteExploreCoolActive()) {
