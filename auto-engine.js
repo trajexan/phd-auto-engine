@@ -1,4 +1,4 @@
-/* phd auto-engine 3161 — pull via GET /api/auto-engine */
+/* phd auto-engine 3162 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3161";
+  var AUTO_ENGINE_VERSION = "3162";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1564,6 +1564,11 @@
        */
       __publicField(this, "postBreakThrashLeaveDeepBanned", false);
       /**
+       * Eng 3162 / R153: deep-ban wander walks this life while latched (hit-cap →
+       * release ban so stairs can resume — R153 WD prison at F3).
+       */
+      __publicField(this, "postBreakDeepBanWanderHits", 0);
+      /**
        * Eng 3148 / R139: runTicks when armourChestOk openChestOnce first succeeded
        * still naked — grace then latch (soft-block needs re-opens that never come).
        */
@@ -1926,6 +1931,7 @@
           this.postBreakArmourThrashLeaveStairsIssued = false;
           this.postBreakThrashLeaveFoodSeekHits = 0;
           this.postBreakThrashLeaveDeepBanned = false;
+          this.postBreakDeepBanWanderHits = 0;
           this.armourChestOpenedAt = -1;
           this.postBreakArmourChestFails = 0;
           this.postBreakUnlitStairsHits = 0;
@@ -12606,6 +12612,7 @@
     hungryThrashLeaveDeepBanned(w) {
       if (!(w.food <= 0 && w.healReserve <= 0)) {
         this.postBreakThrashLeaveDeepBanned = false;
+        this.postBreakDeepBanWanderHits = 0;
         return false;
       }
       if (!this.postBreakThrashLeaveDeepBanned) return false;
@@ -12613,17 +12620,42 @@
       return depth >= 3;
     }
     /**
-     * Eng 3161 / R152: when deep-ban skips stairs (depth≥3 food0), force a single
-     * wander/explore/hub walk so free brain fingerprint moves (F1 WD prison after
-     * 3160 absolute ban). No tick-monopolizing loop — one walk + stuck clear.
+     * Eng 3161 / R152: when deep-ban skips stairs (depth≥3 food0), force a
+     * wander/explore/hub walk so free brain fingerprint moves.
+     * Eng 3162 / R153: hit-cap (≥6) releases deep-ban (mark hungry deep-ban
+     * release) and walks usable stairs once — R153 F3 WD both died looping
+     * wander forever. No new timer.
      */
     tryHungryDeepBanWander(host, w, stance) {
       if (!(w.food <= 0 && w.healReserve <= 0)) return false;
       if (!this.postBreakThrashLeaveDeepBanned) return false;
+      if (this.postBreakDeepBanWanderHits >= 6) {
+        this.postBreakThrashLeaveDeepBanned = false;
+        this.postBreakDeepBanWanderHits = 0;
+        if (!this.actions.some((s) => /hungry deep-ban release \(3162\)/i.test(s))) {
+          this.noteAction("hungry deep-ban release (3162)");
+          host.log("AUTO: hungry deep-ban release (3162) \u2014 wander hit-cap \u2192 stairs ok");
+        }
+        this.stuckFireTicks = [];
+        this.stuckTicks = 0;
+        if (w.stairs && this.hungryStairsWalkOk(w) && this.stairsUsable(w)) {
+          this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+          host.walkTo(w.stairs.x, w.stairs.y);
+          this.latchHungryToolsBan(host, "hungry-deep-ban-release");
+          if (!this.actions.some((s) => /free stairs hungry|hungry stairs after food/i.test(s))) {
+            this.noteAction("hungry stairs after food (3114)");
+            host.log("AUTO: hungry stairs after food (3114)");
+          }
+          this.setStatus(host, w, stance, "hungry deep-ban release stairs");
+          return true;
+        }
+        return false;
+      }
       if (!this.actions.some((s) => /hungry deep-ban wander \(3161\)/i.test(s))) {
         this.noteAction("hungry deep-ban wander (3161)");
         host.log("AUTO: hungry deep-ban wander (3161) \u2014 depth\u22653 stairs ban \u2192 explore progress");
       }
+      this.postBreakDeepBanWanderHits++;
       this.stuckFireTicks = [];
       const leave = w.wander || w.explore || w.hub;
       if (leave) {
