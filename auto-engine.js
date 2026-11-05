@@ -1,4 +1,4 @@
-/* phd auto-engine 3162 — pull via GET /api/auto-engine */
+/* phd auto-engine 3163 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3162";
+  var AUTO_ENGINE_VERSION = "3163";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1569,6 +1569,11 @@
        */
       __publicField(this, "postBreakDeepBanWanderHits", 0);
       /**
+       * Eng 3163 / R154: after deep-ban release once this life, never re-latch
+       * (foodSeekHits≥3 was immediately re-banning → wander↔release osc / WD).
+       */
+      __publicField(this, "postBreakDeepBanReleased", false);
+      /**
        * Eng 3148 / R139: runTicks when armourChestOk openChestOnce first succeeded
        * still naked — grace then latch (soft-block needs re-opens that never come).
        */
@@ -1932,6 +1937,7 @@
           this.postBreakThrashLeaveFoodSeekHits = 0;
           this.postBreakThrashLeaveDeepBanned = false;
           this.postBreakDeepBanWanderHits = 0;
+          this.postBreakDeepBanReleased = false;
           this.armourChestOpenedAt = -1;
           this.postBreakArmourChestFails = 0;
           this.postBreakUnlitStairsHits = 0;
@@ -12528,6 +12534,7 @@
       var _a, _b, _c;
       if (!(w.food <= 0 && w.healReserve <= 0)) {
         this.postBreakThrashLeaveDeepBanned = false;
+        this.postBreakDeepBanReleased = false;
         return false;
       }
       const leaveStairs = this.postBreakArmourThrashLeaveStairsIssued && this.actions.some((s) => /hungry armour-thrash leave \(3158\)/i.test(s));
@@ -12596,6 +12603,7 @@
      * Caller must skip hungry stairs walks while latched (no tick monopolize).
      */
     latchHungryThrashLeaveDeepBan(host, reason) {
+      if (this.postBreakDeepBanReleased) return;
       if (reason === "thrash-leave") this.postBreakThrashLeaveDeepBanned = true;
       if (!this.actions.some((s) => /hungry thrash-leave floor-keep \(3160\)/i.test(s))) {
         this.noteAction("hungry thrash-leave floor-keep (3160)");
@@ -12613,6 +12621,7 @@
       if (!(w.food <= 0 && w.healReserve <= 0)) {
         this.postBreakThrashLeaveDeepBanned = false;
         this.postBreakDeepBanWanderHits = 0;
+        this.postBreakDeepBanReleased = false;
         return false;
       }
       if (!this.postBreakThrashLeaveDeepBanned) return false;
@@ -12625,6 +12634,9 @@
      * Eng 3162 / R153: hit-cap (≥6) releases deep-ban (mark hungry deep-ban
      * release) and walks usable stairs once — R153 F3 WD both died looping
      * wander forever. No new timer.
+     * Eng 3163 / R154: sticky release (postBreakDeepBanReleased) + reset
+     * foodSeekHits — 3162 re-latched next tick (foodSeekHits≥3) → wander↔release
+     * divert scrub / WD. No new timer.
      */
     tryHungryDeepBanWander(host, w, stance) {
       if (!(w.food <= 0 && w.healReserve <= 0)) return false;
@@ -12632,9 +12644,15 @@
       if (this.postBreakDeepBanWanderHits >= 6) {
         this.postBreakThrashLeaveDeepBanned = false;
         this.postBreakDeepBanWanderHits = 0;
+        this.postBreakDeepBanReleased = true;
+        this.postBreakThrashLeaveFoodSeekHits = 0;
         if (!this.actions.some((s) => /hungry deep-ban release \(3162\)/i.test(s))) {
           this.noteAction("hungry deep-ban release (3162)");
           host.log("AUTO: hungry deep-ban release (3162) \u2014 wander hit-cap \u2192 stairs ok");
+        }
+        if (!this.actions.some((s) => /hungry deep-ban sticky \(3163\)/i.test(s))) {
+          this.noteAction("hungry deep-ban sticky (3163)");
+          host.log("AUTO: hungry deep-ban sticky (3163) \u2014 no re-latch after release");
         }
         this.stuckFireTicks = [];
         this.stuckTicks = 0;
