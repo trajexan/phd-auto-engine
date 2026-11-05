@@ -1,4 +1,4 @@
-/* phd auto-engine 3164 — pull via GET /api/auto-engine */
+/* phd auto-engine 3165 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3164";
+  var AUTO_ENGINE_VERSION = "3165";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -12612,8 +12612,11 @@
      * Eng 3164 / R155: after closed-stairs food-seek exhaust, force wander/explore/hub
      * so fingerprint moves (R155 WD: floor-keep mark alone → adjacent thrash / hang).
      * Hit-cap≥10 yields (no forever monopolize like pre-3162 deep-ban wander).
+     * Eng 3165 / R156: escalate — clear unlit + soft-block chest; prefer stairs then
+     * hub/explore before wander (R156 WD wander-first → adjacent kite/engage).
      */
     tryHungryClosedStairsLeave(host, w, stance) {
+      var _a, _b;
       if (!(w.food <= 0 && w.healReserve <= 0)) {
         this.postBreakClosedStairsLeaveHits = 0;
         return false;
@@ -12627,9 +12630,29 @@
         this.noteAction("hungry closed-stairs leave (3164)");
         host.log("AUTO: hungry closed-stairs leave (3164) \u2014 food-seek exhaust \u2192 wander progress");
       }
+      if (!this.actions.some((s) => /hungry closed-stairs leave escalate \(3165\)/i.test(s))) {
+        this.noteAction("hungry closed-stairs leave escalate (3165)");
+        host.log("AUTO: hungry closed-stairs leave escalate (3165) \u2014 unlit refresh + stairs/hub");
+        this.postBreakUnlitStairsExhausted = false;
+        this.postBreakUnlitStairsHits = 0;
+        this.postBreakArmourChestExhausted = true;
+        const ch = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
+        if (ch) {
+          this.blockGatherTile(ch.x, ch.y);
+          this.softBlockChest(host, w, ch.x, ch.y, "closed-stairs leave escalate");
+        }
+      }
       this.postBreakClosedStairsLeaveHits++;
       this.stuckFireTicks = [];
-      const leave = w.wander || w.explore || w.hub;
+      if (w.stairs && this.hungryStairsWalkOk(w)) {
+        if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
+        this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+        host.walkTo(w.stairs.x, w.stairs.y);
+        this.stuckTicks = 0;
+        this.setStatus(host, w, stance, "hungry closed-stairs leave");
+        return true;
+      }
+      const leave = w.hub || w.explore || w.wander;
       if (leave) {
         this.desireXY = { x: leave.x, y: leave.y };
         host.walkTo(leave.x, leave.y);
