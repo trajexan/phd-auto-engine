@@ -1,4 +1,4 @@
-/* phd auto-engine 3158 — pull via GET /api/auto-engine */
+/* phd auto-engine 3159 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3158";
+  var AUTO_ENGINE_VERSION = "3159";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1552,6 +1552,13 @@
        */
       __publicField(this, "postBreakArmourThrashLatched", false);
       /**
+       * Eng 3159 / R150: thrash-leave already walked stairs once this life — further
+       * hungry stairs under food0 dive to F5 closed-boss starve; food-seek first.
+       */
+      __publicField(this, "postBreakArmourThrashLeaveStairsIssued", false);
+      /** Eng 3159: food-seek walks this life after thrash-leave/closed (hit-cap → yield stairs). */
+      __publicField(this, "postBreakThrashLeaveFoodSeekHits", 0);
+      /**
        * Eng 3148 / R139: runTicks when armourChestOk openChestOnce first succeeded
        * still naked — grace then latch (soft-block needs re-opens that never come).
        */
@@ -1911,6 +1918,8 @@
           this.postBreakFreeFishExhausted = false;
           this.postBreakArmourChestExhausted = false;
           this.postBreakArmourThrashLatched = false;
+          this.postBreakArmourThrashLeaveStairsIssued = false;
+          this.postBreakThrashLeaveFoodSeekHits = 0;
           this.armourChestOpenedAt = -1;
           this.postBreakArmourChestFails = 0;
           this.postBreakUnlitStairsHits = 0;
@@ -7230,8 +7239,14 @@
         if ((pickReady || hungryEmpty) && w.stairs && (foodBufferAllows || hungryEmpty)) {
           if (hungryEmpty && !w.stairsOpen) {
             this.noteHungryBanClosedStairs(host);
+            if (this.tryHungryThrashLeaveFoodBeforeDeep(host, w, stance, "closed-stairs")) {
+              return true;
+            }
           } else if (this.stairsUsable(w)) {
             if (hungryEmpty && this.tryHungryArmourSeekBeforeStairs(host, w)) {
+              return true;
+            }
+            if (hungryEmpty && this.tryHungryThrashLeaveFoodBeforeDeep(host, w, stance, "thrash-leave")) {
               return true;
             }
             this.desireXY = { x: w.stairs.x, y: w.stairs.y };
@@ -7425,12 +7440,21 @@
                 return true;
               }
             }
+            if (w.stairs && !this.hungryStairsWalkOk(w)) {
+              if (this.tryHungryThrashLeaveFoodBeforeDeep(host, w, stance, "closed-stairs")) {
+                return true;
+              }
+            }
             if (w.stairs && this.hungryStairsWalkOk(w)) {
               if (this.stairsUsable(w) && this.tryHungryArmourSeekBeforeStairs(host, w)) {
                 return true;
               }
+              if (this.tryHungryThrashLeaveFoodBeforeDeep(host, w, stance, "thrash-leave")) {
+                return true;
+              }
               if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
               if (!this.hungryStairsWalkOk(w)) {
+                if (this.tryHungryThrashLeaveFoodBeforeDeep(host, w, stance, "closed-stairs")) return true;
                 if (this.tryHungryArmourSeekBeforeStairs(host, w)) return true;
               } else {
                 this.desireXY = { x: w.stairs.x, y: w.stairs.y };
@@ -7451,12 +7475,19 @@
           const hungryEmptyEx = w.food <= 0 && w.healReserve <= 0;
           const foodBufferEx = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(hungryEmptyEx && hpPctEx < 0.4);
           if ((host.hasTool("pickaxe") || hungryEmptyEx) && (foodBufferEx || hungryEmptyEx) && w.stairs) {
+            if (hungryEmptyEx && !this.hungryStairsWalkOk(w)) {
+              if (this.tryHungryThrashLeaveFoodBeforeDeep(host, w, stance, "closed-stairs")) return true;
+            }
             if (this.hungryStairsWalkOk(w)) {
               if (hungryEmptyEx && this.stairsUsable(w) && this.tryHungryArmourSeekBeforeStairs(host, w)) {
                 return true;
               }
+              if (hungryEmptyEx && this.tryHungryThrashLeaveFoodBeforeDeep(host, w, stance, "thrash-leave")) {
+                return true;
+              }
               if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
               if (!this.hungryStairsWalkOk(w)) {
+                if (hungryEmptyEx && this.tryHungryThrashLeaveFoodBeforeDeep(host, w, stance, "closed-stairs")) return true;
                 if (hungryEmptyEx && this.tryHungryArmourSeekBeforeStairs(host, w)) return true;
               } else {
                 this.desireXY = { x: w.stairs.x, y: w.stairs.y };
@@ -12446,6 +12477,7 @@
         if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
         this.desireXY = { x: w.stairs.x, y: w.stairs.y };
         host.walkTo(w.stairs.x, w.stairs.y);
+        this.postBreakArmourThrashLeaveStairsIssued = true;
         this.stuckTicks = 0;
         return true;
       }
@@ -12458,6 +12490,71 @@
       }
       this.stuckTicks = 0;
       return true;
+    }
+    /**
+     * Eng 3159 / R150: after armour-thrash leave stairs once under food0, prefer
+     * food/pond/shop before further deep stairs (F5 closed-boss starve class).
+     * Also used when stairs known but !hungryStairsWalkOk (closed boss).
+     * Returns true when a food walk/gather was issued.
+     */
+    tryHungryThrashLeaveFoodBeforeDeep(host, w, stance, reason) {
+      var _a, _b, _c;
+      if (!(w.food <= 0 && w.healReserve <= 0)) return false;
+      const leaveStairs = this.postBreakArmourThrashLeaveStairsIssued && this.actions.some((s) => /hungry armour-thrash leave \(3158\)/i.test(s));
+      const closedUnusable = !!w.stairs && !this.hungryStairsWalkOk(w);
+      if (reason === "thrash-leave" && !leaveStairs) return false;
+      if (reason === "closed-stairs" && !closedUnusable) return false;
+      if (this.postBreakThrashLeaveFoodSeekHits >= 3) return false;
+      const mark = reason === "closed-stairs" ? "hungry closed-stairs food-seek (3159)" : "hungry thrash-leave food-seek (3159)";
+      if (!this.actions.some((s) => /hungry (?:thrash-leave|closed-stairs) food-seek \(3159\)/i.test(s))) {
+        this.noteAction(mark);
+        host.log(`AUTO: ${mark} \u2014 food before deep / closed-stairs`);
+        this.postBreakFreeFishExhausted = false;
+        if (this.postBreakHungryPondSeekHits > 2) this.postBreakHungryPondSeekHits = 2;
+      }
+      const pond = (_c = (_b = this.resolvePond(w)) != null ? _b : (_a = w.seen) == null ? void 0 : _a.pond) != null ? _c : this.mem(w, "pond");
+      if (pond && !this.isGatherTileBlocked(pond.x, pond.y)) {
+        const atPond = w.tile.x === pond.x && w.tile.y === pond.y;
+        if (!atPond && this.walkToTile(host, pond.x, pond.y)) {
+          this.postBreakThrashLeaveFoodSeekHits++;
+          this.setStatus(host, w, stance, "3159 food-seek walk");
+          this.stuckTicks = 0;
+          return true;
+        }
+        if (atPond && host.hasTool("rod") && this.tryGather(host, w, stance, "3159 food-seek")) {
+          this.postBreakThrashLeaveFoodSeekHits++;
+          this.setStatus(host, w, stance, "3159 food-seek fish");
+          this.stuckTicks = 0;
+          return true;
+        }
+        if (atPond) {
+          this.postBreakThrashLeaveFoodSeekHits++;
+          return false;
+        }
+      }
+      if (this.postBreakHungryPondSeekHits < 8) {
+        const spot = this.pickFindPondSpot(w);
+        if (spot) {
+          this.postBreakHungryPondSeekHits++;
+          this.postBreakThrashLeaveFoodSeekHits++;
+          this.desireXY = { x: spot.x, y: spot.y };
+          host.walkTo(spot.x, spot.y);
+          this.setStatus(host, w, stance, "3159 food-seek spot");
+          this.stuckTicks = 0;
+          return true;
+        }
+      }
+      const shop = this.mem(w, "shop");
+      if (shop && w.coins > 0) {
+        this.postBreakThrashLeaveFoodSeekHits++;
+        this.desireXY = { x: shop.x, y: shop.y };
+        host.walkTo(shop.x, shop.y);
+        this.setStatus(host, w, stance, "3159 food-seek shop");
+        this.stuckTicks = 0;
+        return true;
+      }
+      this.postBreakThrashLeaveFoodSeekHits = 3;
+      return false;
     }
     /** Lit open down-stairs not soft-blocked (e24). */
     stairsUsable(w) {
