@@ -1,4 +1,4 @@
-/* phd auto-engine 3153 — pull via GET /api/auto-engine */
+/* phd auto-engine 3154 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3153";
+  var AUTO_ENGINE_VERSION = "3154";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1546,6 +1546,12 @@
        */
       __publicField(this, "postBreakArmourChestExhausted", false);
       /**
+       * Eng 3154 / R145: 3146 thrash soft-block / softActive origin — life-sticky.
+       * 3153 floor-refresh must NOT clear this (or exhausted while set); seek/junk
+       * latches still refresh per floor so F2–F4 can hunt.
+       */
+      __publicField(this, "postBreakArmourThrashLatched", false);
+      /**
        * Eng 3148 / R139: runTicks when armourChestOk openChestOnce first succeeded
        * still naked — grace then latch (soft-block needs re-opens that never come).
        */
@@ -1904,6 +1910,7 @@
           this.postBreakFreeFishHits = 0;
           this.postBreakFreeFishExhausted = false;
           this.postBreakArmourChestExhausted = false;
+          this.postBreakArmourThrashLatched = false;
           this.armourChestOpenedAt = -1;
           this.postBreakArmourChestFails = 0;
           this.postBreakUnlitStairsHits = 0;
@@ -1932,16 +1939,29 @@
             this.noteAction("hungry tools-ban floor-keep (3132)");
           }
           if (!w.hasArmour && prev >= 0 && w.depth > prev && (this.postBreakArmourChestExhausted || this.postBreakArmourSeekHits > 0 || this.postBreakArmourChestFails > 0)) {
-            this.postBreakArmourChestExhausted = false;
-            this.armourChestOpenedAt = -1;
-            this.postBreakArmourChestFails = 0;
-            this.postBreakArmourSeekHits = 0;
-            this._armourSeekArmTick = -1;
-            if (!this.actions.some((s) => /hungry armour-floor-refresh \(3153\)/i.test(s))) {
-              this.noteAction("hungry armour-floor-refresh (3153)");
-              host.log("AUTO: hungry armour-floor-refresh (3153) \u2014 new floor armour budget");
+            if (this.postBreakArmourThrashLatched) {
+              this.armourChestOpenedAt = -1;
+              this.postBreakArmourChestFails = 0;
+              this.postBreakArmourSeekHits = 0;
+              this._armourSeekArmTick = -1;
+              if (!this.actions.some((s) => /hungry ban armour-thrash-sticky \(3154\)/i.test(s))) {
+                this.noteAction("hungry ban armour-thrash-sticky (3154)");
+                host.log("AUTO: hungry ban armour-thrash-sticky (3154) \u2014 keep thrash latch across floors");
+              } else {
+                host.log(`AUTO: hungry ban armour-thrash-sticky (3154) \u2014 F${w.depth} thrash latch held`);
+              }
             } else {
-              host.log(`AUTO: hungry armour-floor-refresh (3153) \u2014 F${w.depth} armour budget`);
+              this.postBreakArmourChestExhausted = false;
+              this.armourChestOpenedAt = -1;
+              this.postBreakArmourChestFails = 0;
+              this.postBreakArmourSeekHits = 0;
+              this._armourSeekArmTick = -1;
+              if (!this.actions.some((s) => /hungry armour-floor-refresh \(3153\)/i.test(s))) {
+                this.noteAction("hungry armour-floor-refresh (3153)");
+                host.log("AUTO: hungry armour-floor-refresh (3153) \u2014 new floor armour budget");
+              } else {
+                host.log(`AUTO: hungry armour-floor-refresh (3153) \u2014 F${w.depth} armour budget`);
+              }
             }
           }
         }
@@ -7172,6 +7192,7 @@
             if (chArm && !this.isGatherTileBlocked(chArm.x, chArm.y)) {
               if (this.runTicks < this.chestBlockUntil) {
                 this.postBreakArmourChestExhausted = true;
+                this.postBreakArmourThrashLatched = true;
                 if (!this.actions.some((s) => /hungry ban armour-chest \(3146\)/i.test(s))) {
                   this.noteAction("hungry ban armour-chest (3146)");
                   host.log("AUTO: hungry ban armour-chest (3146) \u2014 softActive \u2192 stairs");
@@ -12919,6 +12940,7 @@
           host.log("AUTO: chest thrash soft-block \u2014 skip open");
           if (w.food <= 0 && w.healReserve <= 0 && !w.hasArmour) {
             this.postBreakArmourChestExhausted = true;
+            this.postBreakArmourThrashLatched = true;
             if (!this.actions.some((s) => /hungry ban armour-chest \(3146\)/i.test(s))) {
               this.noteAction("hungry ban armour-chest (3146)");
               host.log("AUTO: hungry ban armour-chest (3146) \u2014 thrash soft-block \u2192 stairs");
