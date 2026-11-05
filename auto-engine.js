@@ -1,4 +1,4 @@
-/* phd auto-engine 3160 — pull via GET /api/auto-engine */
+/* phd auto-engine 3161 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3160";
+  var AUTO_ENGINE_VERSION = "3161";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -7256,6 +7256,7 @@
               return true;
             }
             if (hungryEmpty && this.hungryThrashLeaveDeepBanned(w)) {
+              if (this.tryHungryDeepBanWander(host, w, stance)) return true;
             } else {
               this.desireXY = { x: w.stairs.x, y: w.stairs.y };
               host.walkTo(w.stairs.x, w.stairs.y);
@@ -7462,6 +7463,7 @@
                 return true;
               }
               if (this.hungryThrashLeaveDeepBanned(w)) {
+                if (this.tryHungryDeepBanWander(host, w, stance)) return true;
               } else {
                 if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
                 if (!this.hungryStairsWalkOk(w)) {
@@ -7498,6 +7500,7 @@
                 return true;
               }
               if (hungryEmptyEx && this.hungryThrashLeaveDeepBanned(w)) {
+                if (this.tryHungryDeepBanWander(host, w, stance)) return true;
               } else {
                 if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
                 if (!this.hungryStairsWalkOk(w)) {
@@ -12595,13 +12598,44 @@
         );
       }
     }
-    /** Eng 3160: thrash-leave deep-ban still active under food0. */
+    /**
+     * Eng 3160/3161: thrash-leave deep-ban still active under food0.
+     * Eng 3161 / R152: only enforce from depth≥3 so F1/F2 can still descend
+     * (medianFloor recovery); F3+ keep the leave→F5 dive ban.
+     */
     hungryThrashLeaveDeepBanned(w) {
       if (!(w.food <= 0 && w.healReserve <= 0)) {
         this.postBreakThrashLeaveDeepBanned = false;
         return false;
       }
-      return this.postBreakThrashLeaveDeepBanned;
+      if (!this.postBreakThrashLeaveDeepBanned) return false;
+      const depth = typeof w.depth === "number" ? w.depth : 1;
+      return depth >= 3;
+    }
+    /**
+     * Eng 3161 / R152: when deep-ban skips stairs (depth≥3 food0), force a single
+     * wander/explore/hub walk so free brain fingerprint moves (F1 WD prison after
+     * 3160 absolute ban). No tick-monopolizing loop — one walk + stuck clear.
+     */
+    tryHungryDeepBanWander(host, w, stance) {
+      if (!(w.food <= 0 && w.healReserve <= 0)) return false;
+      if (!this.postBreakThrashLeaveDeepBanned) return false;
+      if (!this.actions.some((s) => /hungry deep-ban wander \(3161\)/i.test(s))) {
+        this.noteAction("hungry deep-ban wander (3161)");
+        host.log("AUTO: hungry deep-ban wander (3161) \u2014 depth\u22653 stairs ban \u2192 explore progress");
+      }
+      this.stuckFireTicks = [];
+      const leave = w.wander || w.explore || w.hub;
+      if (leave) {
+        this.desireXY = { x: leave.x, y: leave.y };
+        host.walkTo(leave.x, leave.y);
+        this.stuckTicks = 0;
+        this.setStatus(host, w, stance, "hungry deep-ban wander");
+        return true;
+      }
+      this.stuckTicks = 0;
+      this.setStatus(host, w, stance, "hungry deep-ban wander");
+      return true;
     }
     /** Lit open down-stairs not soft-blocked (e24). */
     stairsUsable(w) {
