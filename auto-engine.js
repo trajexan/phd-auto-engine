@@ -1,4 +1,4 @@
-/* phd auto-engine 3168 — pull via GET /api/auto-engine */
+/* phd auto-engine 3169 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3168";
+  var AUTO_ENGINE_VERSION = "3169";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -7287,6 +7287,7 @@
             if (hungryEmpty && this.hungryThrashLeaveDeepBanned(w)) {
               if (this.tryHungryDeepBanWander(host, w, stance)) return true;
             } else {
+              if (hungryEmpty && this.tryHungryF5AscendHold(host, w, stance)) return true;
               this.desireXY = { x: w.stairs.x, y: w.stairs.y };
               host.walkTo(w.stairs.x, w.stairs.y);
               this.stuckTicks = 0;
@@ -7314,6 +7315,7 @@
                   return true;
                 }
               } else {
+                if (this.tryHungryF5AscendHold(host, w, stance)) return true;
                 this.desireXY = { x: w.stairs.x, y: w.stairs.y };
                 host.walkTo(w.stairs.x, w.stairs.y);
                 this.stuckTicks = 0;
@@ -7499,6 +7501,7 @@
                   if (this.tryHungryThrashLeaveFoodBeforeDeep(host, w, stance, "closed-stairs")) return true;
                   if (this.tryHungryArmourSeekBeforeStairs(host, w)) return true;
                 } else {
+                  if (this.tryHungryF5AscendHold(host, w, stance)) return true;
                   this.desireXY = { x: w.stairs.x, y: w.stairs.y };
                   host.walkTo(w.stairs.x, w.stairs.y);
                   this.stuckTicks = 0;
@@ -7536,6 +7539,7 @@
                   if (hungryEmptyEx && this.tryHungryThrashLeaveFoodBeforeDeep(host, w, stance, "closed-stairs")) return true;
                   if (hungryEmptyEx && this.tryHungryArmourSeekBeforeStairs(host, w)) return true;
                 } else {
+                  if (hungryEmptyEx && this.tryHungryF5AscendHold(host, w, stance)) return true;
                   this.desireXY = { x: w.stairs.x, y: w.stairs.y };
                   host.walkTo(w.stairs.x, w.stairs.y);
                   this.stuckTicks = 0;
@@ -8137,18 +8141,10 @@
               const depthScrub = typeof w.depth === "number" ? w.depth : 1;
               const ascendScrub = depthScrub >= 5 && !!w.upStairs && (this.postBreakClosedStairsAscendHits > 0 || /ascend sticky|ascend hold|leave ascend/i.test(pairKey));
               if (ascendScrub && w.upStairs) {
-                if (!this.actions.some((s) => /hungry closed-stairs leave ascend hold \(3168\)/i.test(s))) {
-                  this.noteAction("hungry closed-stairs leave ascend hold (3168)");
-                  host.log(
-                    "AUTO: hungry closed-stairs leave ascend hold (3168) \u2014 scrub\u2192upStairs"
-                  );
+                if (this.tryHungryF5AscendHold(host, w, stance)) {
+                  this.cool = 0;
+                  return true;
                 }
-                this.postBreakClosedStairsAscendHits++;
-                this.desireXY = { x: w.upStairs.x, y: w.upStairs.y };
-                host.walkTo(w.upStairs.x, w.upStairs.y);
-                this.setStatus(host, w, stance, "hungry closed-stairs leave ascend hold");
-                this.cool = 0;
-                return true;
               }
               if (w.stairs && this.hungryStairsWalkOk(w)) {
                 if (!this.actions.some((s) => /hungry scrub stairs/i.test(s))) {
@@ -12650,6 +12646,57 @@
      * Eng 3168 / R159: hold ascend — budget 256 + re-arm; never leave while
      * depth≥5+upStairs (R159 64-budget burned mid-walk → leave stole adjacent).
      */
+    /**
+     * Eng 3169 / R160: F5 hungryEmpty + upStairs → commit ascend over down-stairs walks.
+     * R160 WD: hold (3168) only ran inside closed-stairs leave; when stairsOpen,
+     * hungry stairs after food walked DOWN (boss) — SIT ascend@up then desire=down.
+     * Shared with closed-stairs leave ascend hold (3168) budget/re-arm.
+     */
+    tryHungryF5AscendHold(host, w, stance) {
+      if (!(w.food <= 0 && w.healReserve <= 0)) return false;
+      const depth = typeof w.depth === "number" ? w.depth : 1;
+      if (depth < 5 || !w.upStairs) return false;
+      if (this.postBreakClosedStairsAscendHits >= 256) {
+        if (!this.postBreakClosedStairsAscendHoldRearmed) {
+          this.postBreakClosedStairsAscendHoldRearmed = true;
+          this.postBreakClosedStairsAscendHits = 128;
+        }
+      }
+      if (!this.actions.some((s) => /hungry closed-stairs leave ascend \(3166\)/i.test(s))) {
+        this.noteAction("hungry closed-stairs leave ascend (3166)");
+        host.log("AUTO: hungry closed-stairs leave ascend (3166) \u2014 F5 \u2192 upStairs farm");
+      }
+      if (!this.actions.some((s) => /hungry closed-stairs leave ascend sticky \(3167\)/i.test(s))) {
+        this.noteAction("hungry closed-stairs leave ascend sticky (3167)");
+        host.log(
+          "AUTO: hungry closed-stairs leave ascend sticky (3167) \u2014 bypass leave-cap; armour ok"
+        );
+      }
+      if (!this.actions.some((s) => /hungry closed-stairs leave ascend hold \(3168\)/i.test(s))) {
+        this.noteAction("hungry closed-stairs leave ascend hold (3168)");
+        host.log(
+          "AUTO: hungry closed-stairs leave ascend hold (3168) \u2014 re-arm; no leave while upStairs"
+        );
+      }
+      if (!this.actions.some((s) => /hungry F5 ascend over down-stairs \(3169\)/i.test(s))) {
+        this.noteAction("hungry F5 ascend over down-stairs (3169)");
+        host.log(
+          "AUTO: hungry F5 ascend over down-stairs (3169) \u2014 commit upStairs over open/closed down"
+        );
+      }
+      this.postBreakClosedStairsAscendHits++;
+      this.stuckFireTicks = [];
+      this.desireXY = { x: w.upStairs.x, y: w.upStairs.y };
+      host.walkTo(w.upStairs.x, w.upStairs.y);
+      this.stuckTicks = 0;
+      this.setStatus(
+        host,
+        w,
+        stance,
+        this.postBreakClosedStairsAscendHoldRearmed ? "hungry closed-stairs leave ascend hold" : "hungry F5 ascend over down-stairs"
+      );
+      return true;
+    }
     tryHungryClosedStairsLeave(host, w, stance) {
       var _a, _b;
       if (!(w.food <= 0 && w.healReserve <= 0)) {
@@ -12658,56 +12705,7 @@
         this.postBreakClosedStairsAscendHoldRearmed = false;
         return false;
       }
-      const depthEarly = typeof w.depth === "number" ? w.depth : 1;
-      if (depthEarly >= 5 && w.upStairs) {
-        if (this.postBreakClosedStairsAscendHits >= 256) {
-          if (!this.postBreakClosedStairsAscendHoldRearmed) {
-            this.postBreakClosedStairsAscendHoldRearmed = true;
-            this.postBreakClosedStairsAscendHits = 128;
-            if (!this.actions.some((s) => /hungry closed-stairs leave ascend hold \(3168\)/i.test(s))) {
-              this.noteAction("hungry closed-stairs leave ascend hold (3168)");
-              host.log(
-                "AUTO: hungry closed-stairs leave ascend hold (3168) \u2014 re-arm; no leave while upStairs"
-              );
-            }
-          } else {
-            if (!this.actions.some((s) => /hungry closed-stairs leave ascend hold \(3168\)/i.test(s))) {
-              this.noteAction("hungry closed-stairs leave ascend hold (3168)");
-              host.log(
-                "AUTO: hungry closed-stairs leave ascend hold (3168) \u2014 keep upStairs; skip leave"
-              );
-            }
-          }
-        }
-        if (!this.actions.some((s) => /hungry closed-stairs leave ascend \(3166\)/i.test(s))) {
-          this.noteAction("hungry closed-stairs leave ascend (3166)");
-          host.log("AUTO: hungry closed-stairs leave ascend (3166) \u2014 F5 \u2192 upStairs farm");
-        }
-        if (!this.actions.some((s) => /hungry closed-stairs leave ascend sticky \(3167\)/i.test(s))) {
-          this.noteAction("hungry closed-stairs leave ascend sticky (3167)");
-          host.log(
-            "AUTO: hungry closed-stairs leave ascend sticky (3167) \u2014 bypass leave-cap; armour ok"
-          );
-        }
-        if (this.postBreakClosedStairsAscendHoldRearmed && !this.actions.some((s) => /hungry closed-stairs leave ascend hold \(3168\)/i.test(s))) {
-          this.noteAction("hungry closed-stairs leave ascend hold (3168)");
-          host.log(
-            "AUTO: hungry closed-stairs leave ascend hold (3168) \u2014 re-arm; no leave while upStairs"
-          );
-        }
-        this.postBreakClosedStairsAscendHits++;
-        this.stuckFireTicks = [];
-        this.desireXY = { x: w.upStairs.x, y: w.upStairs.y };
-        host.walkTo(w.upStairs.x, w.upStairs.y);
-        this.stuckTicks = 0;
-        this.setStatus(
-          host,
-          w,
-          stance,
-          this.postBreakClosedStairsAscendHoldRearmed ? "hungry closed-stairs leave ascend hold" : "hungry closed-stairs leave ascend sticky"
-        );
-        return true;
-      }
+      if (this.tryHungryF5AscendHold(host, w, stance)) return true;
       if (this.postBreakClosedStairsLeaveHits >= 10) {
         this.stuckTicks = 0;
         this.stuckFireTicks = [];
