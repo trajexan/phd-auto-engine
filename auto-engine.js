@@ -1,4 +1,4 @@
-/* phd auto-engine 3157 — pull via GET /api/auto-engine */
+/* phd auto-engine 3158 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3157";
+  var AUTO_ENGINE_VERSION = "3158";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -7204,6 +7204,7 @@
                   this.noteAction("hungry ban armour-chest (3146)");
                   host.log("AUTO: hungry ban armour-chest (3146) \u2014 softActive \u2192 stairs");
                 }
+                if (this.forceHungryArmourThrashLeave(host, w, stance)) return true;
               } else {
                 if (!this.actions.some((s) => /hungry stairs armour-chest \(3145\)/i.test(s))) {
                   this.noteAction("hungry stairs armour-chest (3145)");
@@ -12424,6 +12425,40 @@
       }
       this.setStatus(host, w, stance, "stuck rethink");
     }
+    /**
+     * Eng 3158 / R149: after armour-chest thrash latch under hungryEmpty, do not
+     * wait for stuck rethink (sa7kpn never fired leave → 1800t WD). One-shot clear
+     * unlit exhaust so stairs walk-to-light can finish, then force leave walk.
+     * Returns true when a walk was issued.
+     */
+    forceHungryArmourThrashLeave(host, w, stance) {
+      if (!(w.food <= 0 && w.healReserve <= 0)) return false;
+      if (!this.postBreakArmourThrashLatched) return false;
+      if (!this.actions.some((s) => /hungry armour-thrash leave \(3158\)/i.test(s))) {
+        this.noteAction("hungry armour-thrash leave (3158)");
+        host.log("AUTO: hungry armour-thrash leave (3158) \u2014 thrash latch \u2192 unlit refresh + stairs/leave");
+        this.postBreakUnlitStairsExhausted = false;
+        this.postBreakUnlitStairsHits = 0;
+      }
+      this.stuckFireTicks = [];
+      this.setStatus(host, w, stance, "hungry armour-thrash leave");
+      if (w.stairs && this.hungryStairsWalkOk(w)) {
+        if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
+        this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+        host.walkTo(w.stairs.x, w.stairs.y);
+        this.stuckTicks = 0;
+        return true;
+      }
+      const leave = w.wander || w.explore || w.hub;
+      if (leave) {
+        this.desireXY = { x: leave.x, y: leave.y };
+        host.walkTo(leave.x, leave.y);
+        this.stuckTicks = 0;
+        return true;
+      }
+      this.stuckTicks = 0;
+      return true;
+    }
     /** Lit open down-stairs not soft-blocked (e24). */
     stairsUsable(w) {
       return !!w.stairs && w.stairsOpen && w.stairsLit && !this.isGatherTileBlocked(w.stairs.x, w.stairs.y);
@@ -12997,6 +13032,7 @@
               this.noteAction("hungry ban armour-chest (3147)");
               host.log("AUTO: hungry ban armour-chest (3147) \u2014 arm-only fp soft-block \u2192 stairs");
             }
+            if (this.forceHungryArmourThrashLeave(host, w, stance)) return true;
           }
           return false;
         }
