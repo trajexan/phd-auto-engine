@@ -1,4 +1,4 @@
-/* phd auto-engine 3165 — pull via GET /api/auto-engine */
+/* phd auto-engine 3166 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3165";
+  var AUTO_ENGINE_VERSION = "3166";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -12614,6 +12614,8 @@
      * Hit-cap≥10 yields (no forever monopolize like pre-3162 deep-ban wander).
      * Eng 3165 / R156: escalate — clear unlit + soft-block chest; prefer stairs then
      * hub/explore before wander (R156 WD wander-first → adjacent kite/engage).
+     * Eng 3166 / R157: F5+ naked + upStairs → prefer ascend farm before hub/wander
+     * (t1861 farm-before-boss; R157 115 F5 naked starve after leave-same-floor).
      */
     tryHungryClosedStairsLeave(host, w, stance) {
       var _a, _b;
@@ -12644,6 +12646,18 @@
       }
       this.postBreakClosedStairsLeaveHits++;
       this.stuckFireTicks = [];
+      const depth = typeof w.depth === "number" ? w.depth : 1;
+      if (depth >= 5 && !w.hasArmour && w.upStairs) {
+        if (!this.actions.some((s) => /hungry closed-stairs leave ascend \(3166\)/i.test(s))) {
+          this.noteAction("hungry closed-stairs leave ascend (3166)");
+          host.log("AUTO: hungry closed-stairs leave ascend (3166) \u2014 F5 naked \u2192 upStairs farm");
+        }
+        this.desireXY = { x: w.upStairs.x, y: w.upStairs.y };
+        host.walkTo(w.upStairs.x, w.upStairs.y);
+        this.stuckTicks = 0;
+        this.setStatus(host, w, stance, "hungry closed-stairs leave ascend");
+        return true;
+      }
       if (w.stairs && this.hungryStairsWalkOk(w)) {
         if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
         this.desireXY = { x: w.stairs.x, y: w.stairs.y };
