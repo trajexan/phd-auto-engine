@@ -1,4 +1,4 @@
-/* phd auto-engine 3172 — pull via GET /api/auto-engine */
+/* phd auto-engine 3173 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3172";
+  var AUTO_ENGINE_VERSION = "3173";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1594,6 +1594,13 @@
        */
       __publicField(this, "postBreakHungryF5FarmUpLatched", false);
       /**
+       * Eng 3173 / R166: farm-up leave hits this life while latched (not a timer).
+       * ≥6 → release latch so surface leave does not WD with down banned.
+       */
+      __publicField(this, "postBreakHungryF5FarmUpLeaveHits", 0);
+      /** Eng 3173: sticky release — no re-latch this life after leave hit-cap. */
+      __publicField(this, "postBreakHungryF5FarmUpReleased", false);
+      /**
        * Eng 3148 / R139: runTicks when armourChestOk openChestOnce first succeeded
        * still naked — grace then latch (soft-block needs re-opens that never come).
        */
@@ -1962,6 +1969,8 @@
           this.postBreakClosedStairsAscendHits = 0;
           this.postBreakClosedStairsAscendHoldRearmed = false;
           this.postBreakHungryF5FarmUpLatched = false;
+          this.postBreakHungryF5FarmUpLeaveHits = 0;
+          this.postBreakHungryF5FarmUpReleased = false;
           this.armourChestOpenedAt = -1;
           this.postBreakArmourChestFails = 0;
           this.postBreakUnlitStairsHits = 0;
@@ -12713,7 +12722,9 @@
         );
       }
       this.postBreakClosedStairsAscendHits++;
-      this.postBreakHungryF5FarmUpLatched = true;
+      if (!this.postBreakHungryF5FarmUpReleased) {
+        this.postBreakHungryF5FarmUpLatched = true;
+      }
       if (!this.actions.some((s) => /hungry F5 farm-up latch \(3170\)/i.test(s))) {
         this.noteAction("hungry F5 farm-up latch (3170)");
         host.log(
@@ -12738,6 +12749,12 @@
      */
     hungryF5FarmUpActive(w) {
       if (!(w.food <= 0 && w.healReserve <= 0)) {
+        this.postBreakHungryF5FarmUpLatched = false;
+        this.postBreakHungryF5FarmUpLeaveHits = 0;
+        this.postBreakHungryF5FarmUpReleased = false;
+        return false;
+      }
+      if (this.postBreakHungryF5FarmUpReleased) {
         this.postBreakHungryF5FarmUpLatched = false;
         return false;
       }
@@ -12768,6 +12785,7 @@
         if (this.tryHungryF5AscendHold(host, w, stance)) return true;
       }
       if (depth < 5 && w.upStairs) {
+        this.postBreakHungryF5FarmUpLeaveHits = 0;
         this.desireXY = { x: w.upStairs.x, y: w.upStairs.y };
         host.walkTo(w.upStairs.x, w.upStairs.y);
         this.stuckTicks = 0;
@@ -12778,12 +12796,29 @@
       const pond = (_b = (_a = w.seen) == null ? void 0 : _a.pond) != null ? _b : this.mem(w, "pond");
       const pondOk = !!pond && !this.postBreakFreeFishExhausted && !this.isGatherTileBlocked(pond.x, pond.y);
       if (pondOk && pond) {
+        this.postBreakHungryF5FarmUpLeaveHits = 0;
         this.desireXY = { x: pond.x, y: pond.y };
         host.walkTo(pond.x, pond.y);
         this.stuckTicks = 0;
         this.stuckFireTicks = [];
         this.setStatus(host, w, stance, "hungry F5 farm-up pond");
         return true;
+      }
+      this.postBreakHungryF5FarmUpLeaveHits++;
+      if (this.postBreakHungryF5FarmUpLeaveHits >= 6) {
+        this.postBreakHungryF5FarmUpLatched = false;
+        this.postBreakHungryF5FarmUpReleased = true;
+        this.postBreakHungryF5FarmUpLeaveHits = 0;
+        this.stuckFireTicks = [];
+        this.stuckTicks = 0;
+        if (!this.actions.some((s) => /hungry F5 farm-up release \(3173\)/i.test(s))) {
+          this.noteAction("hungry F5 farm-up release (3173)");
+          host.log(
+            "AUTO: hungry F5 farm-up release (3173) \u2014 leave hit-cap \u2192 down ok; no re-latch"
+          );
+        }
+        this.setStatus(host, w, stance, "hungry F5 farm-up release");
+        return false;
       }
       const leave = w.wander || w.explore || w.hub;
       if (leave) {
@@ -12806,6 +12841,8 @@
         this.postBreakClosedStairsAscendHits = 0;
         this.postBreakClosedStairsAscendHoldRearmed = false;
         this.postBreakHungryF5FarmUpLatched = false;
+        this.postBreakHungryF5FarmUpLeaveHits = 0;
+        this.postBreakHungryF5FarmUpReleased = false;
         return false;
       }
       if (this.tryHungryF5AscendHold(host, w, stance)) return true;
