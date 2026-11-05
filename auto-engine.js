@@ -1,4 +1,4 @@
-/* phd auto-engine 3151 — pull via GET /api/auto-engine */
+/* phd auto-engine 3152 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3151";
+  var AUTO_ENGINE_VERSION = "3152";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1551,8 +1551,9 @@
        */
       __publicField(this, "armourChestOpenedAt", -1);
       /**
-       * Eng 3151 / R142: junk armour-chest opens this life (not a timer). Open-grace
-       * still-naked → block tile + retry; ≥3 → latch postBreakArmourChestExhausted.
+       * Eng 3151 / R142 + eng 3152 / R143: junk armour-chest opens this life (not a
+       * timer). Open-grace still-naked → block tile; 3152 latches at fail≥2 or when
+       * no unblocked next chest (3151 was ≥3 + full seek reset → WD).
        */
       __publicField(this, "postBreakArmourChestFails", 0);
       /**
@@ -6890,7 +6891,7 @@
      * Returns true only while issuing the one productive action.
      */
     postBreakFreeBrain(host, w, stance, why) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t;
       this.enterPostBreak(host, `free:${why}`);
       this.quietBootstrapEmitHits = 0;
       this.quietBootstrapBreakUntil = Math.min(this.quietBootstrapBreakUntil, this.runTicks);
@@ -7118,10 +7119,17 @@
             if (chFail) this.blockGatherTile(chFail.x, chFail.y);
             this.armourChestOpenedAt = -1;
             this.postBreakArmourChestFails++;
-            this.postBreakArmourSeekHits = 0;
-            this._armourSeekArmTick = -1;
-            if (this.postBreakArmourChestFails >= 3) {
+            const chNext = (_i = (_h = w.seen) == null ? void 0 : _h.chest) != null ? _i : this.mem(w, "chest");
+            const hasNext = !!(chNext && !this.isGatherTileBlocked(chNext.x, chNext.y));
+            const latchNow = this.postBreakArmourChestFails >= 2 || !hasNext;
+            if (latchNow) {
               this.postBreakArmourChestExhausted = true;
+              if (!this.actions.some((s) => /hungry ban armour-chest \(3152\)/i.test(s))) {
+                this.noteAction("hungry ban armour-chest (3152)");
+                host.log(
+                  hasNext ? "AUTO: hungry ban armour-chest (3152) \u2014 fail\u22652 \u2192 stairs" : "AUTO: hungry ban armour-chest (3152) \u2014 no next chest \u2192 stairs"
+                );
+              }
               if (!this.actions.some((s) => /hungry ban armour-chest \(3151\)/i.test(s))) {
                 this.noteAction("hungry ban armour-chest (3151)");
                 host.log("AUTO: hungry ban armour-chest (3151) \u2014 retry budget \u2192 stairs");
@@ -7131,6 +7139,14 @@
                 host.log("AUTO: hungry ban armour-chest (3148) \u2014 open-grace \u2192 stairs");
               }
             } else {
+              this.postBreakArmourSeekHits = Math.max(this.postBreakArmourSeekHits, 72);
+              this._armourSeekArmTick = -1;
+              if (!this.actions.some((s) => /hungry armour-chest-retry \(3152\)/i.test(s))) {
+                this.noteAction("hungry armour-chest-retry (3152)");
+                host.log(
+                  `AUTO: hungry armour-chest-retry (3152) \u2014 next chest ${this.postBreakArmourChestFails}/2`
+                );
+              }
               if (!this.actions.some((s) => /hungry armour-chest-retry \(3151\)/i.test(s))) {
                 this.noteAction("hungry armour-chest-retry (3151)");
                 host.log(
@@ -7139,7 +7155,7 @@
               }
             }
           } else {
-            const chArm = (_i = (_h = w.seen) == null ? void 0 : _h.chest) != null ? _i : this.mem(w, "chest");
+            const chArm = (_k = (_j = w.seen) == null ? void 0 : _j.chest) != null ? _k : this.mem(w, "chest");
             if (chArm && !this.isGatherTileBlocked(chArm.x, chArm.y)) {
               if (this.runTicks < this.chestBlockUntil) {
                 this.postBreakArmourChestExhausted = true;
@@ -7225,7 +7241,7 @@
           }
         }
       }
-      const rockFb = (_k = (_j = w.seen) == null ? void 0 : _j.rock) != null ? _k : this.mem(w, "rock");
+      const rockFb = (_m = (_l = w.seen) == null ? void 0 : _l.rock) != null ? _m : this.mem(w, "rock");
       if (!this.postBreakFreeMineExhausted && rockFb && host.hasTool("pickaxe") && !this.isGatherTileBlocked(rockFb.x, rockFb.y)) {
         const mk = `${rockFb.x},${rockFb.y}`;
         if (mk === this.postBreakFreeMineKey) this.postBreakFreeMineHits++;
@@ -7283,7 +7299,7 @@
               }
               return true;
             }
-            const pond = (_n = (_m = this.resolvePond(w)) != null ? _m : (_l = w.seen) == null ? void 0 : _l.pond) != null ? _n : this.mem(w, "pond");
+            const pond = (_p = (_o = this.resolvePond(w)) != null ? _o : (_n = w.seen) == null ? void 0 : _n.pond) != null ? _p : this.mem(w, "pond");
             if (!this.postBreakFreeFishExhausted) {
               this.pondBreakUntil = Math.min(this.pondBreakUntil, this.runTicks);
               this.foodMineBreakUntil = Math.min(this.foodMineBreakUntil, this.runTicks);
@@ -7452,7 +7468,7 @@
             host.log("AUTO: hungry ban kit (3118) \u2014 skip hatchet");
           }
         }
-        const treeFb = (_p = (_o = w.seen) == null ? void 0 : _o.tree) != null ? _p : this.mem(w, "tree");
+        const treeFb = (_r = (_q = w.seen) == null ? void 0 : _q.tree) != null ? _r : this.mem(w, "tree");
         if (treeFb && host.hasTool("hatchet") && !this.isGatherTileBlocked(treeFb.x, treeFb.y)) {
           if (this.walkToTile(host, treeFb.x, treeFb.y)) {
             this.stuckTicks = 0;
@@ -7473,7 +7489,7 @@
       let walkTarget = w.explore ? w.explore : w.wander ? w.wander : w.hub ? w.hub : null;
       if (walkTarget && this.postBreakFreeMineExhausted) {
         const hungryWalk = w.food <= 0 && w.healReserve <= 0;
-        const chWalk = (_r = (_q = w.seen) == null ? void 0 : _q.chest) != null ? _r : this.mem(w, "chest");
+        const chWalk = (_t = (_s = w.seen) == null ? void 0 : _s.chest) != null ? _t : this.mem(w, "chest");
         if (hungryWalk && chWalk && walkTarget.x === chWalk.x && walkTarget.y === chWalk.y && (w.hasArmour || this.postBreakArmourChestExhausted)) {
           const alt = w.hub && (w.hub.x !== chWalk.x || w.hub.y !== chWalk.y) ? w.hub : w.wander && (w.wander.x !== chWalk.x || w.wander.y !== chWalk.y) ? w.wander : w.explore && (w.explore.x !== chWalk.x || w.explore.y !== chWalk.y) ? w.explore : null;
           if (alt) walkTarget = alt;
