@@ -1,4 +1,4 @@
-/* phd auto-engine 3163 — pull via GET /api/auto-engine */
+/* phd auto-engine 3164 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3163";
+  var AUTO_ENGINE_VERSION = "3164";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1574,6 +1574,11 @@
        */
       __publicField(this, "postBreakDeepBanReleased", false);
       /**
+       * Eng 3164 / R155: closed-stairs food-seek exhaust leave walks this life
+       * (hit-cap → yield so free brain can try other progress — not forever monopolize).
+       */
+      __publicField(this, "postBreakClosedStairsLeaveHits", 0);
+      /**
        * Eng 3148 / R139: runTicks when armourChestOk openChestOnce first succeeded
        * still naked — grace then latch (soft-block needs re-opens that never come).
        */
@@ -1938,6 +1943,7 @@
           this.postBreakThrashLeaveDeepBanned = false;
           this.postBreakDeepBanWanderHits = 0;
           this.postBreakDeepBanReleased = false;
+          this.postBreakClosedStairsLeaveHits = 0;
           this.armourChestOpenedAt = -1;
           this.postBreakArmourChestFails = 0;
           this.postBreakUnlitStairsHits = 0;
@@ -12535,6 +12541,7 @@
       if (!(w.food <= 0 && w.healReserve <= 0)) {
         this.postBreakThrashLeaveDeepBanned = false;
         this.postBreakDeepBanReleased = false;
+        this.postBreakClosedStairsLeaveHits = 0;
         return false;
       }
       const leaveStairs = this.postBreakArmourThrashLeaveStairsIssued && this.actions.some((s) => /hungry armour-thrash leave \(3158\)/i.test(s));
@@ -12543,6 +12550,7 @@
       if (reason === "closed-stairs" && !closedUnusable) return false;
       if (this.postBreakThrashLeaveFoodSeekHits >= 3) {
         this.latchHungryThrashLeaveDeepBan(host, reason);
+        if (reason === "closed-stairs") return this.tryHungryClosedStairsLeave(host, w, stance);
         return false;
       }
       const mark = reason === "closed-stairs" ? "hungry closed-stairs food-seek (3159)" : "hungry thrash-leave food-seek (3159)";
@@ -12570,6 +12578,7 @@
         if (atPond) {
           this.postBreakThrashLeaveFoodSeekHits++;
           this.latchHungryThrashLeaveDeepBan(host, reason);
+          if (reason === "closed-stairs") return this.tryHungryClosedStairsLeave(host, w, stance);
           return false;
         }
       }
@@ -12596,7 +12605,41 @@
       }
       this.postBreakThrashLeaveFoodSeekHits = 3;
       this.latchHungryThrashLeaveDeepBan(host, reason);
+      if (reason === "closed-stairs") return this.tryHungryClosedStairsLeave(host, w, stance);
       return false;
+    }
+    /**
+     * Eng 3164 / R155: after closed-stairs food-seek exhaust, force wander/explore/hub
+     * so fingerprint moves (R155 WD: floor-keep mark alone → adjacent thrash / hang).
+     * Hit-cap≥10 yields (no forever monopolize like pre-3162 deep-ban wander).
+     */
+    tryHungryClosedStairsLeave(host, w, stance) {
+      if (!(w.food <= 0 && w.healReserve <= 0)) {
+        this.postBreakClosedStairsLeaveHits = 0;
+        return false;
+      }
+      if (this.postBreakClosedStairsLeaveHits >= 10) {
+        this.stuckTicks = 0;
+        this.stuckFireTicks = [];
+        return false;
+      }
+      if (!this.actions.some((s) => /hungry closed-stairs leave \(3164\)/i.test(s))) {
+        this.noteAction("hungry closed-stairs leave (3164)");
+        host.log("AUTO: hungry closed-stairs leave (3164) \u2014 food-seek exhaust \u2192 wander progress");
+      }
+      this.postBreakClosedStairsLeaveHits++;
+      this.stuckFireTicks = [];
+      const leave = w.wander || w.explore || w.hub;
+      if (leave) {
+        this.desireXY = { x: leave.x, y: leave.y };
+        host.walkTo(leave.x, leave.y);
+        this.stuckTicks = 0;
+        this.setStatus(host, w, stance, "hungry closed-stairs leave");
+        return true;
+      }
+      this.stuckTicks = 0;
+      this.setStatus(host, w, stance, "hungry closed-stairs leave");
+      return true;
     }
     /**
      * Eng 3160 / R151: mark thrash-leave floor-keep + latch deep-stairs ban under food0.
