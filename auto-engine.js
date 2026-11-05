@@ -1,4 +1,4 @@
-/* phd auto-engine 3170 — pull via GET /api/auto-engine */
+/* phd auto-engine 3171 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3170";
+  var AUTO_ENGINE_VERSION = "3171";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -7281,6 +7281,7 @@
         if ((pickReady || hungryEmpty) && w.stairs && (foodBufferAllows || hungryEmpty)) {
           if (hungryEmpty && !w.stairsOpen) {
             this.noteHungryBanClosedStairs(host);
+            if (this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
             if (this.tryHungryThrashLeaveFoodBeforeDeep(host, w, stance, "closed-stairs")) {
               return true;
             }
@@ -7491,6 +7492,7 @@
               }
             }
             if (w.stairs && !this.hungryStairsWalkOk(w)) {
+              if (this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
               if (this.tryHungryThrashLeaveFoodBeforeDeep(host, w, stance, "closed-stairs")) {
                 return true;
               }
@@ -7532,6 +7534,7 @@
           const foodBufferEx = stance.stocked || w.food >= 1 || w.healReserve > 0 || !(hungryEmptyEx && hpPctEx < 0.4);
           if ((host.hasTool("pickaxe") || hungryEmptyEx) && (foodBufferEx || hungryEmptyEx) && w.stairs) {
             if (hungryEmptyEx && !this.hungryStairsWalkOk(w)) {
+              if (this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
               if (this.tryHungryThrashLeaveFoodBeforeDeep(host, w, stance, "closed-stairs")) return true;
             }
             if (this.hungryStairsWalkOk(w)) {
@@ -12590,7 +12593,10 @@
       if (reason === "closed-stairs" && !closedUnusable) return false;
       if (this.postBreakThrashLeaveFoodSeekHits >= 3) {
         this.latchHungryThrashLeaveDeepBan(host, reason);
-        if (reason === "closed-stairs") return this.tryHungryClosedStairsLeave(host, w, stance);
+        if (reason === "closed-stairs") {
+          if (this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
+          return this.tryHungryClosedStairsLeave(host, w, stance);
+        }
         return false;
       }
       const mark = reason === "closed-stairs" ? "hungry closed-stairs food-seek (3159)" : "hungry thrash-leave food-seek (3159)";
@@ -12618,7 +12624,10 @@
         if (atPond) {
           this.postBreakThrashLeaveFoodSeekHits++;
           this.latchHungryThrashLeaveDeepBan(host, reason);
-          if (reason === "closed-stairs") return this.tryHungryClosedStairsLeave(host, w, stance);
+          if (reason === "closed-stairs") {
+            if (this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
+            return this.tryHungryClosedStairsLeave(host, w, stance);
+          }
           return false;
         }
       }
@@ -12645,7 +12654,10 @@
       }
       this.postBreakThrashLeaveFoodSeekHits = 3;
       this.latchHungryThrashLeaveDeepBan(host, reason);
-      if (reason === "closed-stairs") return this.tryHungryClosedStairsLeave(host, w, stance);
+      if (reason === "closed-stairs") {
+        if (this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
+        return this.tryHungryClosedStairsLeave(host, w, stance);
+      }
       return false;
     }
     /**
@@ -12737,12 +12749,20 @@
     tryHungryF5FarmUpSeek(host, w, stance) {
       var _a, _b;
       if (!this.hungryF5FarmUpActive(w)) return false;
+      this.postBreakArmourChestExhausted = true;
+      if (!this.actions.some((s) => /hungry F5 farm-up leave \(3171\)/i.test(s))) {
+        this.noteAction("hungry F5 farm-up leave (3171)");
+        host.log(
+          "AUTO: hungry F5 farm-up leave (3171) \u2014 seek before leave escalate; ban chest; skip exhausted pond"
+        );
+      }
       const depth = typeof w.depth === "number" ? w.depth : 1;
       if (depth >= 5 && w.upStairs) {
         if (this.tryHungryF5AscendHold(host, w, stance)) return true;
       }
       const pond = (_b = (_a = w.seen) == null ? void 0 : _a.pond) != null ? _b : this.mem(w, "pond");
-      if (pond && !this.isGatherTileBlocked(pond.x, pond.y)) {
+      const pondOk = !!pond && !this.postBreakFreeFishExhausted && !this.isGatherTileBlocked(pond.x, pond.y);
+      if (pondOk && pond) {
         this.desireXY = { x: pond.x, y: pond.y };
         host.walkTo(pond.x, pond.y);
         this.stuckTicks = 0;
@@ -12756,12 +12776,12 @@
         host.walkTo(leave.x, leave.y);
         this.stuckTicks = 0;
         this.stuckFireTicks = [];
-        this.setStatus(host, w, stance, "hungry F5 farm-up seek");
+        this.setStatus(host, w, stance, "hungry F5 farm-up leave");
         return true;
       }
       this.stuckTicks = 0;
       this.stuckFireTicks = [];
-      this.setStatus(host, w, stance, "hungry F5 farm-up seek");
+      this.setStatus(host, w, stance, "hungry F5 farm-up leave");
       return true;
     }
     tryHungryClosedStairsLeave(host, w, stance) {
@@ -12774,6 +12794,7 @@
         return false;
       }
       if (this.tryHungryF5AscendHold(host, w, stance)) return true;
+      if (this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
       if (this.postBreakClosedStairsLeaveHits >= 10) {
         this.stuckTicks = 0;
         this.stuckFireTicks = [];
