@@ -1,4 +1,4 @@
-/* phd auto-engine 3171 — pull via GET /api/auto-engine */
+/* phd auto-engine 3172 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3171";
+  var AUTO_ENGINE_VERSION = "3172";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -6642,7 +6642,7 @@
             this.desireXY = { x: foeNs.x, y: foeNs.y };
             host.walkTo(foeNs.x, foeNs.y);
             didNs = "foe";
-          } else if (this.stairsUsable(w) && w.stairs) {
+          } else if (this.stairsUsable(w) && w.stairs && !this.hungryF5FarmUpActive(w)) {
             this.desireXY = { x: w.stairs.x, y: w.stairs.y };
             host.walkTo(w.stairs.x, w.stairs.y);
             didNs = "stairs";
@@ -7292,6 +7292,7 @@
             if (hungryEmpty && this.tryHungryThrashLeaveFoodBeforeDeep(host, w, stance, "thrash-leave")) {
               return true;
             }
+            if (hungryEmpty && this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
             if (hungryEmpty && this.hungryThrashLeaveDeepBanned(w)) {
               if (this.tryHungryDeepBanWander(host, w, stance)) return true;
             } else {
@@ -7617,7 +7618,7 @@
             return true;
           }
         }
-        if (this.stairsUsable(w) && w.descendSafe && w.stairs) {
+        if (this.stairsUsable(w) && w.descendSafe && w.stairs && !this.hungryF5FarmUpActive(w)) {
           this.desireXY = { x: w.stairs.x, y: w.stairs.y };
           host.walkTo(w.stairs.x, w.stairs.y);
           this.stuckTicks = 0;
@@ -7651,7 +7652,7 @@
             this.noteAction("postBreak free walk osc");
             host.log("AUTO: postBreak free walk osc (3110)");
           }
-          if (this.stairsUsable(w) && w.stairs) {
+          if (this.stairsUsable(w) && w.stairs && !this.hungryF5FarmUpActive(w)) {
             this.desireXY = { x: w.stairs.x, y: w.stairs.y };
             host.walkTo(w.stairs.x, w.stairs.y);
             this.stuckTicks = 0;
@@ -12750,6 +12751,12 @@
       var _a, _b;
       if (!this.hungryF5FarmUpActive(w)) return false;
       this.postBreakArmourChestExhausted = true;
+      if (!this.actions.some((s) => /hungry F5 farm-up stairs-ban \(3172\)/i.test(s))) {
+        this.noteAction("hungry F5 farm-up stairs-ban (3172)");
+        host.log(
+          "AUTO: hungry F5 farm-up stairs-ban (3172) \u2014 hard ban down; farm-up before deep-ban; keep-ascend"
+        );
+      }
       if (!this.actions.some((s) => /hungry F5 farm-up leave \(3171\)/i.test(s))) {
         this.noteAction("hungry F5 farm-up leave (3171)");
         host.log(
@@ -12759,6 +12766,14 @@
       const depth = typeof w.depth === "number" ? w.depth : 1;
       if (depth >= 5 && w.upStairs) {
         if (this.tryHungryF5AscendHold(host, w, stance)) return true;
+      }
+      if (depth < 5 && w.upStairs) {
+        this.desireXY = { x: w.upStairs.x, y: w.upStairs.y };
+        host.walkTo(w.upStairs.x, w.upStairs.y);
+        this.stuckTicks = 0;
+        this.stuckFireTicks = [];
+        this.setStatus(host, w, stance, "hungry F5 farm-up keep-ascend");
+        return true;
       }
       const pond = (_b = (_a = w.seen) == null ? void 0 : _a.pond) != null ? _b : this.mem(w, "pond");
       const pondOk = !!pond && !this.postBreakFreeFishExhausted && !this.isGatherTileBlocked(pond.x, pond.y);
@@ -12898,6 +12913,10 @@
         this.stuckFireTicks = [];
         this.stuckTicks = 0;
         if (this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
+        if (this.hungryF5FarmUpActive(w)) {
+          if (this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
+          return false;
+        }
         if (w.stairs && this.hungryStairsWalkOk(w) && this.stairsUsable(w)) {
           this.desireXY = { x: w.stairs.x, y: w.stairs.y };
           host.walkTo(w.stairs.x, w.stairs.y);
@@ -12940,6 +12959,7 @@
      * Eng 3149 / R140: after unlit walk-to-light exhaust, only lit usable stairs.
      */
     hungryStairsWalkOk(w) {
+      if (this.hungryF5FarmUpActive(w)) return false;
       if (w.food <= 0 && w.healReserve <= 0 && w.stairs && !w.stairsOpen) {
         return false;
       }
