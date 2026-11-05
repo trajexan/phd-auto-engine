@@ -1,4 +1,4 @@
-/* phd auto-engine 3156 — pull via GET /api/auto-engine */
+/* phd auto-engine 3157 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3156";
+  var AUTO_ENGINE_VERSION = "3157";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -11752,7 +11752,7 @@
       return null;
     }
     maybeRethinkIdle(host, w, stance) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
       const combatBusy = w.foes.some((f) => f.alive && f.lit && f.dist <= 2);
       const gatherBusy = this.sameTargetHits > 0 && this.cool > 0 && !!w.gather;
       const striveBusy = !!this.mineStrive || !!this.anvilStrive;
@@ -12381,13 +12381,30 @@
       }
       this.noteAction(thrashing ? "stuck rethink (thrash)" : "stuck rethink (gear+food+exp+approach flat)");
       host.log(thrashing ? "AUTO: stuck thrash (no approach) \u2014 rethink" : "AUTO: stuck (no gear/food/exp/approach) \u2014 rethink");
-      this.setStatus(host, w, stance, "stuck rethink");
       if (w.food <= 0 && w.healReserve <= 0) {
-        if (!this.actions.some((s) => /hungry stuck-leave \(3156\)/i.test(s))) {
+        const leaveAlready = this.actions.some((s) => /hungry stuck-leave \(3156\)/i.test(s));
+        if (!leaveAlready) {
           this.noteAction("hungry stuck-leave (3156)");
           host.log("AUTO: hungry stuck-leave (3156) \u2014 flat rethink \u2192 stairs/leave");
+        } else if (!this.actions.some((s) => /hungry stuck-leave escalate \(3157\)/i.test(s))) {
+          this.noteAction("hungry stuck-leave escalate (3157)");
+          host.log("AUTO: hungry stuck-leave escalate (3157) \u2014 unlit refresh + chest ban \u2192 stairs");
+          this.postBreakUnlitStairsExhausted = false;
+          this.postBreakUnlitStairsHits = 0;
+          this.postBreakArmourChestExhausted = true;
+          const ch = (_l = (_k = w.seen) == null ? void 0 : _k.chest) != null ? _l : this.mem(w, "chest");
+          if (ch) {
+            this.blockGatherTile(ch.x, ch.y);
+            this.softBlockChest(host, w, ch.x, ch.y, "stuck-leave escalate");
+          }
         }
         this.stuckFireTicks = [];
+        this.setStatus(
+          host,
+          w,
+          stance,
+          leaveAlready ? "hungry leave escalate" : "hungry stuck-leave"
+        );
         if (w.stairs && this.hungryStairsWalkOk(w)) {
           if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
           this.desireXY = { x: w.stairs.x, y: w.stairs.y };
@@ -12405,6 +12422,7 @@
         this.stuckTicks = 0;
         return;
       }
+      this.setStatus(host, w, stance, "stuck rethink");
     }
     /** Lit open down-stairs not soft-blocked (e24). */
     stairsUsable(w) {
