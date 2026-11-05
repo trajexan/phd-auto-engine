@@ -1,4 +1,4 @@
-/* phd auto-engine 3173 — pull via GET /api/auto-engine */
+/* phd auto-engine 3174 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3173";
+  var AUTO_ENGINE_VERSION = "3174";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1552,6 +1552,12 @@
        */
       __publicField(this, "postBreakArmourThrashLatched", false);
       /**
+       * Eng 3174 / R167: leave escalate (3157/3165/3158) under hungryEmpty — life-sticky.
+       * 3153 floor-refresh must NOT clear armour-chest exhausted while set (leave→descend
+       * was re-arming 3145 → WD). Mirror 3154 thrash-sticky.
+       */
+      __publicField(this, "postBreakArmourLeaveLatched", false);
+      /**
        * Eng 3159 / R150: thrash-leave already walked stairs once this life — further
        * hungry stairs under food0 dive to F5 closed-boss starve; food-seek first.
        */
@@ -1960,6 +1966,7 @@
           this.postBreakFreeFishExhausted = false;
           this.postBreakArmourChestExhausted = false;
           this.postBreakArmourThrashLatched = false;
+          this.postBreakArmourLeaveLatched = false;
           this.postBreakArmourThrashLeaveStairsIssued = false;
           this.postBreakThrashLeaveFoodSeekHits = 0;
           this.postBreakThrashLeaveDeepBanned = false;
@@ -1999,12 +2006,19 @@
             this.noteAction("hungry tools-ban floor-keep (3132)");
           }
           if (!w.hasArmour && prev >= 0 && w.depth > prev && (this.postBreakArmourChestExhausted || this.postBreakArmourSeekHits > 0 || this.postBreakArmourChestFails > 0)) {
-            if (this.postBreakArmourThrashLatched) {
+            if (this.postBreakArmourThrashLatched || this.postBreakArmourLeaveLatched) {
               this.armourChestOpenedAt = -1;
               this.postBreakArmourChestFails = 0;
               this.postBreakArmourSeekHits = 0;
               this._armourSeekArmTick = -1;
-              if (!this.actions.some((s) => /hungry ban armour-thrash-sticky \(3154\)/i.test(s))) {
+              if (this.postBreakArmourLeaveLatched && !this.postBreakArmourThrashLatched) {
+                if (!this.actions.some((s) => /hungry ban armour-leave-sticky \(3174\)/i.test(s))) {
+                  this.noteAction("hungry ban armour-leave-sticky (3174)");
+                  host.log("AUTO: hungry ban armour-leave-sticky (3174) \u2014 keep leave latch across floors");
+                } else {
+                  host.log(`AUTO: hungry ban armour-leave-sticky (3174) \u2014 F${w.depth} leave latch held`);
+                }
+              } else if (!this.actions.some((s) => /hungry ban armour-thrash-sticky \(3154\)/i.test(s))) {
                 this.noteAction("hungry ban armour-thrash-sticky (3154)");
                 host.log("AUTO: hungry ban armour-thrash-sticky (3154) \u2014 keep thrash latch across floors");
               } else {
@@ -12511,6 +12525,7 @@
           this.postBreakUnlitStairsExhausted = false;
           this.postBreakUnlitStairsHits = 0;
           this.postBreakArmourChestExhausted = true;
+          this.postBreakArmourLeaveLatched = true;
           const ch = (_l = (_k = w.seen) == null ? void 0 : _k.chest) != null ? _l : this.mem(w, "chest");
           if (ch) {
             this.blockGatherTile(ch.x, ch.y);
@@ -12557,6 +12572,8 @@
         host.log("AUTO: hungry armour-thrash leave (3158) \u2014 thrash latch \u2192 unlit refresh + stairs/leave");
         this.postBreakUnlitStairsExhausted = false;
         this.postBreakUnlitStairsHits = 0;
+        this.postBreakArmourLeaveLatched = true;
+        this.postBreakArmourChestExhausted = true;
       }
       this.stuckFireTicks = [];
       this.setStatus(host, w, stance, "hungry armour-thrash leave");
@@ -12862,6 +12879,7 @@
         this.postBreakUnlitStairsExhausted = false;
         this.postBreakUnlitStairsHits = 0;
         this.postBreakArmourChestExhausted = true;
+        this.postBreakArmourLeaveLatched = true;
         const ch = (_b = (_a = w.seen) == null ? void 0 : _a.chest) != null ? _b : this.mem(w, "chest");
         if (ch) {
           this.blockGatherTile(ch.x, ch.y);
