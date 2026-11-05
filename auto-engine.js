@@ -1,4 +1,4 @@
-/* phd auto-engine 3152 — pull via GET /api/auto-engine */
+/* phd auto-engine 3153 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3152";
+  var AUTO_ENGINE_VERSION = "3153";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1930,6 +1930,19 @@
           if (this.lifeStuck) this.markStuck = true;
           if (this.postBreakHungryScrubLatched && !this.actions.some((s) => /hungry tools-ban floor-keep \(3132\)/i.test(s))) {
             this.noteAction("hungry tools-ban floor-keep (3132)");
+          }
+          if (!w.hasArmour && prev >= 0 && w.depth > prev && (this.postBreakArmourChestExhausted || this.postBreakArmourSeekHits > 0 || this.postBreakArmourChestFails > 0)) {
+            this.postBreakArmourChestExhausted = false;
+            this.armourChestOpenedAt = -1;
+            this.postBreakArmourChestFails = 0;
+            this.postBreakArmourSeekHits = 0;
+            this._armourSeekArmTick = -1;
+            if (!this.actions.some((s) => /hungry armour-floor-refresh \(3153\)/i.test(s))) {
+              this.noteAction("hungry armour-floor-refresh (3153)");
+              host.log("AUTO: hungry armour-floor-refresh (3153) \u2014 new floor armour budget");
+            } else {
+              host.log(`AUTO: hungry armour-floor-refresh (3153) \u2014 F${w.depth} armour budget`);
+            }
           }
         }
         this.eliteThrash = 0;
