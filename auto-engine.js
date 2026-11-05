@@ -1,4 +1,4 @@
-/* phd auto-engine 3167 — pull via GET /api/auto-engine */
+/* phd auto-engine 3168 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3167";
+  var AUTO_ENGINE_VERSION = "3168";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1581,8 +1581,12 @@
       /**
        * Eng 3167 / R158: F5 closed-stairs ascend walks this life (separate from leave
        * hit-cap — R158 median |upStairs|≈15 burned the ≥10 leave cap mid-walk).
+       * Eng 3168 / R159: budget raised 64→256; hold re-arms once so leave escalate
+       * cannot steal the walk when adjacent to upStairs after mid-walk burn.
        */
       __publicField(this, "postBreakClosedStairsAscendHits", 0);
+      /** Eng 3168: ascend hold re-armed once this life after budget cap. */
+      __publicField(this, "postBreakClosedStairsAscendHoldRearmed", false);
       /**
        * Eng 3148 / R139: runTicks when armourChestOk openChestOnce first succeeded
        * still naked — grace then latch (soft-block needs re-opens that never come).
@@ -1950,6 +1954,7 @@
           this.postBreakDeepBanReleased = false;
           this.postBreakClosedStairsLeaveHits = 0;
           this.postBreakClosedStairsAscendHits = 0;
+          this.postBreakClosedStairsAscendHoldRearmed = false;
           this.armourChestOpenedAt = -1;
           this.postBreakArmourChestFails = 0;
           this.postBreakUnlitStairsHits = 0;
@@ -8129,6 +8134,22 @@
               this.clearPhaseIntent();
               this.phaseIntentMineMonoHits = 0;
               this.rockFindBreakUntil = Math.max(this.rockFindBreakUntil, this.runTicks + 320);
+              const depthScrub = typeof w.depth === "number" ? w.depth : 1;
+              const ascendScrub = depthScrub >= 5 && !!w.upStairs && (this.postBreakClosedStairsAscendHits > 0 || /ascend sticky|ascend hold|leave ascend/i.test(pairKey));
+              if (ascendScrub && w.upStairs) {
+                if (!this.actions.some((s) => /hungry closed-stairs leave ascend hold \(3168\)/i.test(s))) {
+                  this.noteAction("hungry closed-stairs leave ascend hold (3168)");
+                  host.log(
+                    "AUTO: hungry closed-stairs leave ascend hold (3168) \u2014 scrub\u2192upStairs"
+                  );
+                }
+                this.postBreakClosedStairsAscendHits++;
+                this.desireXY = { x: w.upStairs.x, y: w.upStairs.y };
+                host.walkTo(w.upStairs.x, w.upStairs.y);
+                this.setStatus(host, w, stance, "hungry closed-stairs leave ascend hold");
+                this.cool = 0;
+                return true;
+              }
               if (w.stairs && this.hungryStairsWalkOk(w)) {
                 if (!this.actions.some((s) => /hungry scrub stairs/i.test(s))) {
                   this.noteAction("hungry scrub stairs (3126)");
@@ -12549,6 +12570,7 @@
         this.postBreakDeepBanReleased = false;
         this.postBreakClosedStairsLeaveHits = 0;
         this.postBreakClosedStairsAscendHits = 0;
+        this.postBreakClosedStairsAscendHoldRearmed = false;
         return false;
       }
       const leaveStairs = this.postBreakArmourThrashLeaveStairsIssued && this.actions.some((s) => /hungry armour-thrash leave \(3158\)/i.test(s));
@@ -12625,16 +12647,38 @@
      * (t1861 farm-before-boss; R157 115 F5 naked starve after leave-same-floor).
      * Eng 3167 / R158: sticky ascend — drop !hasArmour; bypass leave hit-cap with
      * ascend budget≥64 (R158 leave-cap aborted mid-walk; armour blocked 14 F5).
+     * Eng 3168 / R159: hold ascend — budget 256 + re-arm; never leave while
+     * depth≥5+upStairs (R159 64-budget burned mid-walk → leave stole adjacent).
      */
     tryHungryClosedStairsLeave(host, w, stance) {
       var _a, _b;
       if (!(w.food <= 0 && w.healReserve <= 0)) {
         this.postBreakClosedStairsLeaveHits = 0;
         this.postBreakClosedStairsAscendHits = 0;
+        this.postBreakClosedStairsAscendHoldRearmed = false;
         return false;
       }
       const depthEarly = typeof w.depth === "number" ? w.depth : 1;
-      if (depthEarly >= 5 && w.upStairs && this.postBreakClosedStairsAscendHits < 64) {
+      if (depthEarly >= 5 && w.upStairs) {
+        if (this.postBreakClosedStairsAscendHits >= 256) {
+          if (!this.postBreakClosedStairsAscendHoldRearmed) {
+            this.postBreakClosedStairsAscendHoldRearmed = true;
+            this.postBreakClosedStairsAscendHits = 128;
+            if (!this.actions.some((s) => /hungry closed-stairs leave ascend hold \(3168\)/i.test(s))) {
+              this.noteAction("hungry closed-stairs leave ascend hold (3168)");
+              host.log(
+                "AUTO: hungry closed-stairs leave ascend hold (3168) \u2014 re-arm; no leave while upStairs"
+              );
+            }
+          } else {
+            if (!this.actions.some((s) => /hungry closed-stairs leave ascend hold \(3168\)/i.test(s))) {
+              this.noteAction("hungry closed-stairs leave ascend hold (3168)");
+              host.log(
+                "AUTO: hungry closed-stairs leave ascend hold (3168) \u2014 keep upStairs; skip leave"
+              );
+            }
+          }
+        }
         if (!this.actions.some((s) => /hungry closed-stairs leave ascend \(3166\)/i.test(s))) {
           this.noteAction("hungry closed-stairs leave ascend (3166)");
           host.log("AUTO: hungry closed-stairs leave ascend (3166) \u2014 F5 \u2192 upStairs farm");
@@ -12645,12 +12689,23 @@
             "AUTO: hungry closed-stairs leave ascend sticky (3167) \u2014 bypass leave-cap; armour ok"
           );
         }
+        if (this.postBreakClosedStairsAscendHoldRearmed && !this.actions.some((s) => /hungry closed-stairs leave ascend hold \(3168\)/i.test(s))) {
+          this.noteAction("hungry closed-stairs leave ascend hold (3168)");
+          host.log(
+            "AUTO: hungry closed-stairs leave ascend hold (3168) \u2014 re-arm; no leave while upStairs"
+          );
+        }
         this.postBreakClosedStairsAscendHits++;
         this.stuckFireTicks = [];
         this.desireXY = { x: w.upStairs.x, y: w.upStairs.y };
         host.walkTo(w.upStairs.x, w.upStairs.y);
         this.stuckTicks = 0;
-        this.setStatus(host, w, stance, "hungry closed-stairs leave ascend sticky");
+        this.setStatus(
+          host,
+          w,
+          stance,
+          this.postBreakClosedStairsAscendHoldRearmed ? "hungry closed-stairs leave ascend hold" : "hungry closed-stairs leave ascend sticky"
+        );
         return true;
       }
       if (this.postBreakClosedStairsLeaveHits >= 10) {
