@@ -1,4 +1,4 @@
-/* phd auto-engine 3155 — pull via GET /api/auto-engine */
+/* phd auto-engine 3156 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3155";
+  var AUTO_ENGINE_VERSION = "3156";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -11985,7 +11985,7 @@
         });
       } catch {
       }
-      if (!this.stuckWatchdogFired) {
+      if (!this.stuckWatchdogFired && !(w.food <= 0 && w.healReserve <= 0 && this.actions.some((s) => /hungry stuck-leave \(3156\)/i.test(s)))) {
         this.stuckFireTicks.push(this.runTicks);
         this.stuckFireTicks = this.stuckFireTicks.filter(
           (t) => this.runTicks - t <= STUCK_WATCHDOG_WINDOW
@@ -12382,6 +12382,29 @@
       this.noteAction(thrashing ? "stuck rethink (thrash)" : "stuck rethink (gear+food+exp+approach flat)");
       host.log(thrashing ? "AUTO: stuck thrash (no approach) \u2014 rethink" : "AUTO: stuck (no gear/food/exp/approach) \u2014 rethink");
       this.setStatus(host, w, stance, "stuck rethink");
+      if (w.food <= 0 && w.healReserve <= 0) {
+        if (!this.actions.some((s) => /hungry stuck-leave \(3156\)/i.test(s))) {
+          this.noteAction("hungry stuck-leave (3156)");
+          host.log("AUTO: hungry stuck-leave (3156) \u2014 flat rethink \u2192 stairs/leave");
+        }
+        this.stuckFireTicks = [];
+        if (w.stairs && this.hungryStairsWalkOk(w)) {
+          if (!w.stairsLit) this.armHungryUnlitStairsWalk(host, w);
+          this.desireXY = { x: w.stairs.x, y: w.stairs.y };
+          host.walkTo(w.stairs.x, w.stairs.y);
+          this.stuckTicks = 0;
+          return;
+        }
+        const leave = w.wander || w.explore || w.hub;
+        if (leave) {
+          this.desireXY = { x: leave.x, y: leave.y };
+          host.walkTo(leave.x, leave.y);
+          this.stuckTicks = 0;
+          return;
+        }
+        this.stuckTicks = 0;
+        return;
+      }
     }
     /** Lit open down-stairs not soft-blocked (e24). */
     stairsUsable(w) {
