@@ -1,4 +1,4 @@
-/* phd auto-engine 3175 — pull via GET /api/auto-engine */
+/* phd auto-engine 3176 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3175";
+  var AUTO_ENGINE_VERSION = "3176";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1606,6 +1606,8 @@
       __publicField(this, "postBreakHungryF5FarmUpLeaveHits", 0);
       /** Eng 3173: sticky release — no re-latch this life after leave hit-cap. */
       __publicField(this, "postBreakHungryF5FarmUpReleased", false);
+      /** Eng 3176: after release+boss retreat, escaped up — ban re-descend while food0. */
+      __publicField(this, "postBreakHungryF5ReleaseEscaped", false);
       /**
        * Eng 3148 / R139: runTicks when armourChestOk openChestOnce first succeeded
        * still naked — grace then latch (soft-block needs re-opens that never come).
@@ -1978,6 +1980,7 @@
           this.postBreakHungryF5FarmUpLatched = false;
           this.postBreakHungryF5FarmUpLeaveHits = 0;
           this.postBreakHungryF5FarmUpReleased = false;
+          this.postBreakHungryF5ReleaseEscaped = false;
           this.armourChestOpenedAt = -1;
           this.postBreakArmourChestFails = 0;
           this.postBreakUnlitStairsHits = 0;
@@ -12778,6 +12781,7 @@
         this.postBreakHungryF5FarmUpLatched = false;
         this.postBreakHungryF5FarmUpLeaveHits = 0;
         this.postBreakHungryF5FarmUpReleased = false;
+        this.postBreakHungryF5ReleaseEscaped = false;
         return false;
       }
       if (this.postBreakHungryF5FarmUpReleased) {
@@ -12869,10 +12873,32 @@
         this.postBreakHungryF5FarmUpLatched = false;
         this.postBreakHungryF5FarmUpLeaveHits = 0;
         this.postBreakHungryF5FarmUpReleased = false;
+        this.postBreakHungryF5ReleaseEscaped = false;
         return false;
       }
       if (this.tryHungryF5AscendHold(host, w, stance)) return true;
       if (this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
+      if (this.postBreakHungryF5FarmUpReleased) {
+        const depthEsc = typeof w.depth === "number" ? w.depth : 1;
+        const bossRetreat = this.actions.some(
+          (s) => /hungry closed-stairs boss-armour \(3144\)|fork boss_door→retreat/i.test(s)
+        );
+        if (bossRetreat && depthEsc >= 5 && w.upStairs) {
+          this.postBreakHungryF5ReleaseEscaped = true;
+          if (!this.actions.some((s) => /hungry F5 farm-up release-escape \(3176\)/i.test(s))) {
+            this.noteAction("hungry F5 farm-up release-escape (3176)");
+            host.log(
+              "AUTO: hungry F5 farm-up release-escape (3176) \u2014 F5 boss after release \u2192 upStairs; ban re-descend"
+            );
+          }
+          this.stuckFireTicks = [];
+          this.desireXY = { x: w.upStairs.x, y: w.upStairs.y };
+          host.walkTo(w.upStairs.x, w.upStairs.y);
+          this.stuckTicks = 0;
+          this.setStatus(host, w, stance, "hungry F5 farm-up release-escape");
+          return true;
+        }
+      }
       if (this.postBreakClosedStairsLeaveHits >= 10) {
         this.stuckTicks = 0;
         this.stuckFireTicks = [];
@@ -13024,6 +13050,9 @@
      */
     hungryStairsWalkOk(w) {
       if (this.hungryF5FarmUpActive(w)) return false;
+      if (w.food <= 0 && w.healReserve <= 0 && this.postBreakHungryF5ReleaseEscaped) {
+        return false;
+      }
       if (w.food <= 0 && w.healReserve <= 0 && w.stairs && !w.stairsOpen) {
         return false;
       }
