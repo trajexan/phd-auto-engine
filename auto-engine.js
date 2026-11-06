@@ -1,4 +1,4 @@
-/* phd auto-engine 3174 — pull via GET /api/auto-engine */
+/* phd auto-engine 3175 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3174";
+  var AUTO_ENGINE_VERSION = "3175";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -12708,6 +12708,15 @@
      */
     tryHungryF5AscendHold(host, w, stance) {
       if (!(w.food <= 0 && w.healReserve <= 0)) return false;
+      if (this.postBreakHungryF5FarmUpReleased) {
+        if (!this.actions.some((s) => /hungry F5 farm-up release-sticky \(3175\)/i.test(s))) {
+          this.noteAction("hungry F5 farm-up release-sticky (3175)");
+          host.log(
+            "AUTO: hungry F5 farm-up release-sticky (3175) \u2014 skip ascend hold after release"
+          );
+        }
+        return false;
+      }
       const depth = typeof w.depth === "number" ? w.depth : 1;
       if (depth < 5 || !w.upStairs) return false;
       if (this.postBreakClosedStairsAscendHits >= 256) {
