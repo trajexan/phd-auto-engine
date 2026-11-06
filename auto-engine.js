@@ -1,4 +1,4 @@
-/* phd auto-engine 3177 — pull via GET /api/auto-engine */
+/* phd auto-engine 3178 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3177";
+  var AUTO_ENGINE_VERSION = "3178";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1609,6 +1609,11 @@
       /** Eng 3176: after release+boss retreat, escaped up — ban re-descend while food0. */
       __publicField(this, "postBreakHungryF5ReleaseEscaped", false);
       /**
+       * Eng 3178 / R171: release-escape surface food-seek hits this life (not a timer).
+       * ≥8 → yield to leave so we do not WD monopolize when no pond.
+       */
+      __publicField(this, "postBreakHungryF5ReleaseEscapeFoodSeekHits", 0);
+      /**
        * Eng 3148 / R139: runTicks when armourChestOk openChestOnce first succeeded
        * still naked — grace then latch (soft-block needs re-opens that never come).
        */
@@ -1981,6 +1986,7 @@
           this.postBreakHungryF5FarmUpLeaveHits = 0;
           this.postBreakHungryF5FarmUpReleased = false;
           this.postBreakHungryF5ReleaseEscaped = false;
+          this.postBreakHungryF5ReleaseEscapeFoodSeekHits = 0;
           this.armourChestOpenedAt = -1;
           this.postBreakArmourChestFails = 0;
           this.postBreakUnlitStairsHits = 0;
@@ -7329,6 +7335,7 @@
                 this.setStatus(host, w, stance, "hungry F5 farm-up release-escape sticky");
                 return true;
               }
+              if (this.tryHungryF5ReleaseEscapeFoodSeek(host, w, stance)) return true;
             } else {
               if (hungryEmpty && this.tryHungryF5AscendHold(host, w, stance)) return true;
               if (hungryEmpty && this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
@@ -7366,6 +7373,7 @@
                   this.setStatus(host, w, stance, "hungry F5 farm-up release-escape sticky");
                   return true;
                 }
+                if (this.tryHungryF5ReleaseEscapeFoodSeek(host, w, stance)) return true;
               } else {
                 if (this.tryHungryF5AscendHold(host, w, stance)) return true;
                 if (this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
@@ -12798,6 +12806,7 @@
         this.postBreakHungryF5FarmUpLeaveHits = 0;
         this.postBreakHungryF5FarmUpReleased = false;
         this.postBreakHungryF5ReleaseEscaped = false;
+        this.postBreakHungryF5ReleaseEscapeFoodSeekHits = 0;
         return false;
       }
       if (this.postBreakHungryF5FarmUpReleased) {
@@ -12888,6 +12897,73 @@
       this.setStatus(host, w, stance, "hungry F5 farm-up leave");
       return true;
     }
+    /**
+     * Eng 3178 / R171: after release-escape sticky keep-ascend reaches surface (!upStairs)
+     * under food0 — seek pond/food before falling into closed-stairs leave starve.
+     * Reopens fish/pond once (mirrors 3159). Hit-cap ≥8 yields (no WD monopolize).
+     */
+    tryHungryF5ReleaseEscapeFoodSeek(host, w, stance) {
+      var _a, _b, _c;
+      if (!(w.food <= 0 && w.healReserve <= 0)) return false;
+      if (!this.postBreakHungryF5ReleaseEscaped) return false;
+      if (w.upStairs) return false;
+      if (this.postBreakHungryF5ReleaseEscapeFoodSeekHits >= 8) return false;
+      if (!this.actions.some((s) => /hungry F5 farm-up release-escape food-seek \(3178\)/i.test(s))) {
+        this.noteAction("hungry F5 farm-up release-escape food-seek (3178)");
+        host.log(
+          "AUTO: hungry F5 farm-up release-escape food-seek (3178) \u2014 surface after escape \u2192 pond/food before leave"
+        );
+        this.postBreakFreeFishExhausted = false;
+        if (this.postBreakHungryPondSeekHits > 2) this.postBreakHungryPondSeekHits = 2;
+      }
+      if (w.stairs) this.blockGatherTile(w.stairs.x, w.stairs.y);
+      const pond = (_c = (_b = this.resolvePond(w)) != null ? _b : (_a = w.seen) == null ? void 0 : _a.pond) != null ? _c : this.mem(w, "pond");
+      if (pond && !this.isGatherTileBlocked(pond.x, pond.y)) {
+        const atPond = w.tile.x === pond.x && w.tile.y === pond.y;
+        if (!atPond && this.walkToTile(host, pond.x, pond.y)) {
+          this.postBreakHungryF5ReleaseEscapeFoodSeekHits++;
+          this.stuckTicks = 0;
+          this.stuckFireTicks = [];
+          this.setStatus(host, w, stance, "hungry F5 farm-up release-escape food-seek");
+          return true;
+        }
+        if (atPond && host.hasTool("rod") && this.tryGather(host, w, stance, "3178 escape food-seek")) {
+          this.postBreakHungryF5ReleaseEscapeFoodSeekHits++;
+          this.stuckTicks = 0;
+          this.stuckFireTicks = [];
+          this.setStatus(host, w, stance, "hungry F5 farm-up release-escape food-seek");
+          return true;
+        }
+        if (atPond) {
+          this.postBreakHungryF5ReleaseEscapeFoodSeekHits++;
+        }
+      }
+      if (this.postBreakHungryPondSeekHits < 8) {
+        const spot = this.pickFindPondSpot(w);
+        if (spot) {
+          this.postBreakHungryPondSeekHits++;
+          this.postBreakHungryF5ReleaseEscapeFoodSeekHits++;
+          this.desireXY = { x: spot.x, y: spot.y };
+          host.walkTo(spot.x, spot.y);
+          this.stuckTicks = 0;
+          this.stuckFireTicks = [];
+          this.setStatus(host, w, stance, "hungry F5 farm-up release-escape food-seek");
+          return true;
+        }
+      }
+      const shop = this.mem(w, "shop");
+      if (shop && w.coins > 0) {
+        this.postBreakHungryF5ReleaseEscapeFoodSeekHits++;
+        this.desireXY = { x: shop.x, y: shop.y };
+        host.walkTo(shop.x, shop.y);
+        this.stuckTicks = 0;
+        this.stuckFireTicks = [];
+        this.setStatus(host, w, stance, "hungry F5 farm-up release-escape food-seek");
+        return true;
+      }
+      this.postBreakHungryF5ReleaseEscapeFoodSeekHits = 8;
+      return false;
+    }
     tryHungryClosedStairsLeave(host, w, stance) {
       var _a, _b;
       if (!(w.food <= 0 && w.healReserve <= 0)) {
@@ -12898,6 +12974,7 @@
         this.postBreakHungryF5FarmUpLeaveHits = 0;
         this.postBreakHungryF5FarmUpReleased = false;
         this.postBreakHungryF5ReleaseEscaped = false;
+        this.postBreakHungryF5ReleaseEscapeFoodSeekHits = 0;
         return false;
       }
       if (this.tryHungryF5AscendHold(host, w, stance)) return true;
@@ -12918,6 +12995,7 @@
           this.setStatus(host, w, stance, "hungry F5 farm-up release-escape sticky");
           return true;
         }
+        if (this.tryHungryF5ReleaseEscapeFoodSeek(host, w, stance)) return true;
       }
       if (this.postBreakHungryF5FarmUpReleased) {
         const depthEsc = typeof w.depth === "number" ? w.depth : 1;
