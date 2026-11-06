@@ -1,4 +1,4 @@
-/* phd auto-engine 3176 — pull via GET /api/auto-engine */
+/* phd auto-engine 3177 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -965,7 +965,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3176";
+  var AUTO_ENGINE_VERSION = "3177";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -6668,7 +6668,7 @@
             this.desireXY = { x: foeNs.x, y: foeNs.y };
             host.walkTo(foeNs.x, foeNs.y);
             didNs = "foe";
-          } else if (this.stairsUsable(w) && w.stairs && !this.hungryF5FarmUpActive(w)) {
+          } else if (this.stairsUsable(w) && w.stairs && !this.hungryF5DownStairsBanned(w)) {
             this.desireXY = { x: w.stairs.x, y: w.stairs.y };
             host.walkTo(w.stairs.x, w.stairs.y);
             didNs = "stairs";
@@ -7321,6 +7321,14 @@
             if (hungryEmpty && this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
             if (hungryEmpty && this.hungryThrashLeaveDeepBanned(w)) {
               if (this.tryHungryDeepBanWander(host, w, stance)) return true;
+            } else if (hungryEmpty && this.hungryF5DownStairsBanned(w)) {
+              if (w.upStairs) {
+                this.desireXY = { x: w.upStairs.x, y: w.upStairs.y };
+                host.walkTo(w.upStairs.x, w.upStairs.y);
+                this.stuckTicks = 0;
+                this.setStatus(host, w, stance, "hungry F5 farm-up release-escape sticky");
+                return true;
+              }
             } else {
               if (hungryEmpty && this.tryHungryF5AscendHold(host, w, stance)) return true;
               if (hungryEmpty && this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
@@ -7348,6 +7356,14 @@
               this.armHungryUnlitStairsWalk(host, w);
               if (this.postBreakUnlitStairsExhausted) {
                 if (this.tryHungryArmourSeekBeforeStairs(host, w)) {
+                  return true;
+                }
+              } else if (this.hungryF5DownStairsBanned(w)) {
+                if (w.upStairs) {
+                  this.desireXY = { x: w.upStairs.x, y: w.upStairs.y };
+                  host.walkTo(w.upStairs.x, w.upStairs.y);
+                  this.stuckTicks = 0;
+                  this.setStatus(host, w, stance, "hungry F5 farm-up release-escape sticky");
                   return true;
                 }
               } else {
@@ -7644,7 +7660,7 @@
             return true;
           }
         }
-        if (this.stairsUsable(w) && w.descendSafe && w.stairs && !this.hungryF5FarmUpActive(w)) {
+        if (this.stairsUsable(w) && w.descendSafe && w.stairs && !this.hungryF5DownStairsBanned(w)) {
           this.desireXY = { x: w.stairs.x, y: w.stairs.y };
           host.walkTo(w.stairs.x, w.stairs.y);
           this.stuckTicks = 0;
@@ -7678,7 +7694,7 @@
             this.noteAction("postBreak free walk osc");
             host.log("AUTO: postBreak free walk osc (3110)");
           }
-          if (this.stairsUsable(w) && w.stairs && !this.hungryF5FarmUpActive(w)) {
+          if (this.stairsUsable(w) && w.stairs && !this.hungryF5DownStairsBanned(w)) {
             this.desireXY = { x: w.stairs.x, y: w.stairs.y };
             host.walkTo(w.stairs.x, w.stairs.y);
             this.stuckTicks = 0;
@@ -12791,6 +12807,14 @@
       return this.postBreakHungryF5FarmUpLatched;
     }
     /**
+     * Eng 3177 / R170: ban down-stairs while farm-up latched OR release-escaped (food0).
+     * 3176 only gated hungryStairsWalkOk; free-brain/near-stuck still descended after escape.
+     */
+    hungryF5DownStairsBanned(w) {
+      if (this.hungryF5FarmUpActive(w)) return true;
+      return w.food <= 0 && w.healReserve <= 0 && this.postBreakHungryF5ReleaseEscaped;
+    }
+    /**
      * Eng 3170 / R162: while farm-up latched under food0 — if bounced back to F5,
      * re-commit ascend; else pond/wander/explore (never down-stairs).
      */
@@ -12878,6 +12902,23 @@
       }
       if (this.tryHungryF5AscendHold(host, w, stance)) return true;
       if (this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
+      if (this.postBreakHungryF5ReleaseEscaped && w.food <= 0 && w.healReserve <= 0) {
+        if (w.stairs) this.blockGatherTile(w.stairs.x, w.stairs.y);
+        if (w.upStairs) {
+          if (!this.actions.some((s) => /hungry F5 farm-up release-escape sticky \(3177\)/i.test(s))) {
+            this.noteAction("hungry F5 farm-up release-escape sticky (3177)");
+            host.log(
+              "AUTO: hungry F5 farm-up release-escape sticky (3177) \u2014 keep-ascend; soft-block down; free-brain ban"
+            );
+          }
+          this.stuckFireTicks = [];
+          this.desireXY = { x: w.upStairs.x, y: w.upStairs.y };
+          host.walkTo(w.upStairs.x, w.upStairs.y);
+          this.stuckTicks = 0;
+          this.setStatus(host, w, stance, "hungry F5 farm-up release-escape sticky");
+          return true;
+        }
+      }
       if (this.postBreakHungryF5FarmUpReleased) {
         const depthEsc = typeof w.depth === "number" ? w.depth : 1;
         const bossRetreat = this.actions.some(
@@ -12885,6 +12926,7 @@
         );
         if (bossRetreat && depthEsc >= 5 && w.upStairs) {
           this.postBreakHungryF5ReleaseEscaped = true;
+          if (w.stairs) this.blockGatherTile(w.stairs.x, w.stairs.y);
           if (!this.actions.some((s) => /hungry F5 farm-up release-escape \(3176\)/i.test(s))) {
             this.noteAction("hungry F5 farm-up release-escape (3176)");
             host.log(
@@ -13003,8 +13045,15 @@
         this.stuckFireTicks = [];
         this.stuckTicks = 0;
         if (this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
-        if (this.hungryF5FarmUpActive(w)) {
+        if (this.hungryF5DownStairsBanned(w)) {
           if (this.tryHungryF5FarmUpSeek(host, w, stance)) return true;
+          if (this.postBreakHungryF5ReleaseEscaped && w.food <= 0 && w.healReserve <= 0 && w.upStairs) {
+            this.desireXY = { x: w.upStairs.x, y: w.upStairs.y };
+            host.walkTo(w.upStairs.x, w.upStairs.y);
+            this.stuckTicks = 0;
+            this.setStatus(host, w, stance, "hungry F5 farm-up release-escape sticky");
+            return true;
+          }
           return false;
         }
         if (w.stairs && this.hungryStairsWalkOk(w) && this.stairsUsable(w)) {
@@ -13049,10 +13098,7 @@
      * Eng 3149 / R140: after unlit walk-to-light exhaust, only lit usable stairs.
      */
     hungryStairsWalkOk(w) {
-      if (this.hungryF5FarmUpActive(w)) return false;
-      if (w.food <= 0 && w.healReserve <= 0 && this.postBreakHungryF5ReleaseEscaped) {
-        return false;
-      }
+      if (this.hungryF5DownStairsBanned(w)) return false;
       if (w.food <= 0 && w.healReserve <= 0 && w.stairs && !w.stairsOpen) {
         return false;
       }
