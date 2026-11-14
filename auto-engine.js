@@ -1,4 +1,4 @@
-/* phd auto-engine 3178 — pull via GET /api/auto-engine */
+/* phd auto-engine d1 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -534,27 +534,6 @@
     if (!kit && !w.descendSafe) return false;
     return !!(w.stairsLit || w.stairs) && (w.descendSafe || kit);
   }
-  function advancePhase(h, w, stance) {
-    const s = w.seen;
-    const has = (kind) => !!h.nodes.get(`${w.depth}:${kind}`);
-    if (h.phase === "BOOT") h.phase = "MAP_HUB";
-    if (h.phase === "PUSH") h.phase = "GEAR_FARM";
-    if (!stance.hungry && h.phaseResume && h.phase === "FOOD_BUFFER") {
-      h.phase = h.phaseResume;
-      h.phaseResume = null;
-    }
-    if (h.phase === "MAP_HUB" && (w.hub || (s == null ? void 0 : s.anvil) || (s == null ? void 0 : s.shop) || (s == null ? void 0 : s.rock) || (s == null ? void 0 : s.pond) || (s == null ? void 0 : s.tree) || has("anvil") || has("shop") || has("rock") || has("pond") || has("tree") || w.anvilNearby)) {
-      const needTools = !!((s == null ? void 0 : s.rock) || has("rock")) || !!((s == null ? void 0 : s.tree) || has("tree")) || !!((s == null ? void 0 : s.pond) || w.pondKnown || has("pond")) || !!((s == null ? void 0 : s.anvil) || has("anvil") || w.anvilNearby) || !!((s == null ? void 0 : s.shop) || has("shop"));
-      if (needTools) h.phase = "TOOLS";
-      else if (!w.hasMetalWeapon && !w.hasStyleWeapon) h.phase = "FIRST_WEP";
-      else h.phase = "GEAR_FARM";
-    }
-    if (h.phase === "TOOLS") {
-    }
-    if ((w.hasMetalWeapon || w.hasStyleWeapon) && h.phase === "FIRST_WEP") {
-      h.phase = "GEAR_FARM";
-    }
-  }
   function calmUtilOptions(w, stance, map) {
     const opts = [];
     const t = w.tile;
@@ -965,7 +944,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "3178";
+  var AUTO_ENGINE_VERSION = "d1";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1008,6 +987,33 @@
       bravery = clamp01(bravery + 0.1);
     }
     return { hungry, stocked, caution, bravery, label, ratio, safetyLevel, minFood, healRich };
+  }
+  var D1_FOOD_KEEP = 3;
+  var D1_AXE_ORE = 4;
+  var D1_PLATE_ORE = 5;
+  var D1_ORE_KEEP = 12;
+  var D1_METALS = ["bronze", "iron", "steel", "mithril", "adamant", "rune"];
+  function d1FloorAge(depth) {
+    const i = Math.floor((Math.max(1, depth) - 1) / 30);
+    return D1_METALS[Math.min(D1_METALS.length - 1, i)];
+  }
+  function d1IsBattleaxe(id) {
+    return /(?:^|_)battleaxe$/.test(id);
+  }
+  function d1IsPlate(id) {
+    return /(?:^|_)plate$/.test(id);
+  }
+  function d1IsStyleOrOffClass(id, style) {
+    if (style === "ranged" || style === "magic") return true;
+    return /(?:^|_)(?:longbow|shortbow|bow|crossbow|wand|staff|robe|leather)$/.test(id);
+  }
+  function d1IsParkedSlot(slot) {
+    return slot === "accessory" || slot === "cape" || slot === "hat" || slot === "offhand";
+  }
+  function d1IsMeleeSlotGear(id, slot, style) {
+    if (d1IsParkedSlot(slot)) return false;
+    if (d1IsStyleOrOffClass(id, style)) return false;
+    return slot === "weapon" || slot === "armour";
   }
   var SAME_TARGET_MAX = 3;
   var TILE_BLOCK_TICKS = 200;
@@ -1245,6 +1251,10 @@
        * failed walkTo / door thrash / F2→F1 bounce.
        */
       __publicField(this, "stairsStrive", null);
+      /** d1 floor latch — reset kit/forge progress when the floor/age changes. */
+      __publicField(this, "d1Floor", -1);
+      __publicField(this, "d1ForgeDone", false);
+      __publicField(this, "d1ForgeFailStreak", 0);
       /**
        * e25: stuck monitor — gear / food / exp / useful approach toward desire.
        * Raw tile thrash (door loop, anvil orbit) does NOT reset. Combat resets.
@@ -2071,7 +2081,6 @@
           this.pendingFoodRetreat = false;
           this.foodRetreatCoolUntil = this.runTicks + 200;
         }
-        host.equipUp();
         host.spendPoints();
       }
       if (this.hoarding && stance.stocked) {
@@ -2153,13 +2162,379 @@
       }
       registerSeenNodes(this.h1001.nodes, w, { lastFoodFarm: this.lastFoodFarm });
       this.trackProgress(w);
-      if (w.progressFp && w.progressFp !== this.progressFp) {
-        this.h1001.progressDelta = 1;
-      } else {
-        this.h1001.progressDelta = 0;
+      if (this.tickD1(host, w, stance)) return;
+    }
+    /**
+     * d1 straight backbone. Priority every tick:
+     * combat → eat/loot (keep a few food) → imbue if it won't block kit →
+     * tools bootstrap → current-age Battleaxe+Plate, forge to cap, melee-only
+     * compares → only then descend. No personas, farm lanes, or class switch.
+     */
+    tickD1(host, w, stance) {
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+      if (w.depth !== this.d1Floor) {
+        this.d1Floor = w.depth;
+        this.d1ForgeDone = false;
+        this.d1ForgeFailStreak = 0;
       }
-      advancePhase(this.h1001, w, stance);
-      if (this.tick1001Hierarchy(host, w, stance)) return;
+      this.maybeScan(host, w);
+      if (this.drainAtTileLoot(host, w, stance)) return true;
+      if (w.hasStyleWeapon && this.d1SwapToMelee(host, w, stance)) return true;
+      this.noteFoeApproach(w);
+      if (this.evLethal(host, w, stance)) return true;
+      if (this.evMobSudden(host, w, stance)) return true;
+      if (this.evMobApproach(host, w, stance)) return true;
+      if (w.unspentPoints > 0) host.spendPoints();
+      if ((w.food > 0 || w.healReserve > 0) && w.hp < w.maxHp * 0.85) {
+        if (!((_a = host.drinkOnce) == null ? void 0 : _a.call(host, "hurt"))) host.eat();
+        this.setStatus(host, w, stance, "d1 eat");
+        return true;
+      }
+      if (w.bagFree > 0 && host.pickupLoot()) {
+        this.setStatus(host, w, stance, "d1 looting");
+        this.cool = 1;
+        return true;
+      }
+      if (w.bagFree <= 0 && this.d1BagRelief(host, w, stance)) return true;
+      if (w.loot && w.bagFree > 0 && this.tryWalkLoot(host, w, stance, "d1 loot")) return true;
+      const foodShort = w.food < D1_FOOD_KEEP && !stance.healRich;
+      if (foodShort) {
+        if (this.tryCookBagCookables(host, w, stance, "d1 cook")) return true;
+        if (w.food <= 0 && w.coins > 0) host.buyFoodIfCritical();
+        if (this.d1FishForHunger(host, w, stance)) return true;
+      }
+      const kit = this.d1KitStatus(host, w);
+      if (kit.ready && this.d1Runecraft(host, w, stance)) return true;
+      if (this.d1BootstrapTools(host, w, stance, kit, foodShort)) return true;
+      if (this.d1EquipMeleeUpgrades(host, w, stance, kit)) return true;
+      if (!kit.ready && this.d1SmithFloorKit(host, w, stance, kit)) return true;
+      if (kit.ready && !this.d1ForgeDone && this.d1ForgeKit(host, w, stance)) return true;
+      if (host.openChestOnce()) {
+        this.setStatus(host, w, stance, "d1 chest");
+        this.cool = 2;
+        return true;
+      }
+      if ((!kit.ready || !this.d1ForgeDone) && this.d1MineOre(host, w, stance)) return true;
+      if (kit.ready && this.d1ForgeDone && w.food >= D1_FOOD_KEEP && this.stairsUsable(w)) {
+        return this.walkStairsStrive(host, w, stance, "d1 descend");
+      }
+      if (kit.ready && this.d1ForgeDone && this.d1PushBoss(host, w, stance)) return true;
+      const anvil = (_d = (_c = this.mem(w, "anvil")) != null ? _c : (_b = w.seen) == null ? void 0 : _b.anvil) != null ? _d : null;
+      const shop = (_g = (_f = this.mem(w, "shop")) != null ? _f : (_e = w.seen) == null ? void 0 : _e.shop) != null ? _g : null;
+      const rock = (_j = (_i = this.mem(w, "rock")) != null ? _i : (_h = w.seen) == null ? void 0 : _h.rock) != null ? _j : null;
+      if (!anvil && w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
+        this.setStatus(host, w, stance, "d1 find anvil");
+        this.cool = 1;
+        return true;
+      }
+      if (!shop && !host.hasTool("pickaxe") && w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
+        this.setStatus(host, w, stance, "d1 find shop");
+        this.cool = 1;
+        return true;
+      }
+      if (!rock && host.hasTool("pickaxe") && (!kit.ready || !this.d1ForgeDone) && w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
+        this.setStatus(host, w, stance, "d1 find ore");
+        this.cool = 1;
+        return true;
+      }
+      if (w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
+        this.setStatus(host, w, stance, "d1 explore");
+        this.cool = 1;
+        return true;
+      }
+      if (w.wander) {
+        host.walkTo(w.wander.x, w.wander.y);
+        this.setStatus(host, w, stance, "d1 wander");
+        this.cool = 1;
+        return true;
+      }
+      if (w.hub && this.walkToTile(host, w.hub.x, w.hub.y, 0)) {
+        this.setStatus(host, w, stance, "d1 hub");
+        this.cool = 1;
+        return true;
+      }
+      this.setStatus(host, w, stance, "d1 idle");
+      return true;
+    }
+    d1KitStatus(host, w) {
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
+      const age = d1FloorAge(w.depth);
+      let axeId = `${age}_battleaxe`;
+      let plateId = `${age}_plate`;
+      let axeOff = (_b = (_a = host.offenseScore) == null ? void 0 : _a.call(host, axeId)) != null ? _b : 0;
+      let plateOff = (_d = (_c = host.offenseScore) == null ? void 0 : _c.call(host, plateId)) != null ? _d : 0;
+      let axeCost = D1_AXE_ORE;
+      let plateCost = D1_PLATE_ORE;
+      let canMakeAxe = false;
+      let canMakePlate = false;
+      const smith = (_f = (_e = host.listSmithable) == null ? void 0 : _e.call(host)) != null ? _f : [];
+      for (const s of smith) {
+        if (s.slot === "weapon" && s.style === "melee" && d1IsBattleaxe(s.id)) {
+          axeId = s.id;
+          axeOff = s.offense;
+          axeCost = (_g = s.oreCost) != null ? _g : D1_AXE_ORE;
+          canMakeAxe = s.canMakeNow;
+        } else if (s.slot === "armour" && d1IsPlate(s.id)) {
+          plateId = s.id;
+          plateOff = s.offense;
+          plateCost = (_h = s.oreCost) != null ? _h : D1_PLATE_ORE;
+          canMakePlate = s.canMakeNow;
+        }
+      }
+      const wornW = (_j = (_i = host.wornOffense) == null ? void 0 : _i.call(host, "weapon")) != null ? _j : 0;
+      const wornA = (_l = (_k = host.wornOffense) == null ? void 0 : _k.call(host, "armour")) != null ? _l : 0;
+      const wepReady = wornW > 0 && (wornW + 1e-4 >= axeOff || w.hasMetalWeapon && wornW >= axeOff * 0.98);
+      const armReady = wornA > 0 && (wornA + 1e-4 >= plateOff || w.hasArmour && wornA >= plateOff * 0.98);
+      return {
+        axeId,
+        plateId,
+        axeOff,
+        plateOff,
+        axeCost,
+        plateCost,
+        canMakeAxe,
+        canMakePlate,
+        wepReady,
+        armReady,
+        ready: wepReady && armReady
+      };
+    }
+    /** Equip a bag melee piece when it is stronger now, or clearly stronger at typical max. */
+    d1EquipMeleeUpgrades(host, w, stance, kit) {
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+      const bag = (_b = (_a = host.listBagCombatGear) == null ? void 0 : _a.call(host)) != null ? _b : [];
+      if (!bag.length) return false;
+      const pick = (slot, worn, floorOff) => {
+        var _a2;
+        let best = null;
+        for (const b of bag) {
+          if (b.slot !== slot) continue;
+          const g2 = (_a2 = host.gearStats) == null ? void 0 : _a2.call(host, b.id);
+          if (!this.d1MeleeCand(b.id, b.slot, g2 == null ? void 0 : g2.style)) continue;
+          const winsNow = b.offense > worn;
+          const winsMax = b.offense >= floorOff && b.offense >= worn;
+          if (!winsNow && !winsMax) continue;
+          if (!best || b.offense > best.offense) best = { id: b.id, slotIndex: b.slotIndex, offense: b.offense };
+        }
+        return best;
+      };
+      const wep = pick("weapon", (_d = (_c = host.wornOffense) == null ? void 0 : _c.call(host, "weapon")) != null ? _d : 0, kit.axeOff);
+      if (wep && (((_e = host.equipIfBetterOffense) == null ? void 0 : _e.call(host, wep.id)) || ((_f = host.equipBagItem) == null ? void 0 : _f.call(host, wep.slotIndex)))) {
+        this.setStatus(host, w, stance, "d1 equip melee");
+        this.cool = 1;
+        return true;
+      }
+      const arm = pick("armour", (_h = (_g = host.wornOffense) == null ? void 0 : _g.call(host, "armour")) != null ? _h : 0, kit.plateOff);
+      if (arm && (((_i = host.equipIfBetterOffense) == null ? void 0 : _i.call(host, arm.id)) || ((_j = host.equipBagItem) == null ? void 0 : _j.call(host, arm.slotIndex)))) {
+        this.setStatus(host, w, stance, "d1 equip plate");
+        this.cool = 1;
+        return true;
+      }
+      return false;
+    }
+    d1MeleeCand(id, slot, style) {
+      return d1IsMeleeSlotGear(id, slot, style);
+    }
+    d1SwapToMelee(host, w, stance) {
+      var _a, _b, _c, _d, _e;
+      const bag = (_b = (_a = host.listBagCombatGear) == null ? void 0 : _a.call(host)) != null ? _b : [];
+      let best = null;
+      for (const b of bag) {
+        if (b.slot !== "weapon") continue;
+        const g2 = (_c = host.gearStats) == null ? void 0 : _c.call(host, b.id);
+        if (!this.d1MeleeCand(b.id, b.slot, g2 == null ? void 0 : g2.style)) continue;
+        if (!best || b.offense > best.offense) best = { id: b.id, slotIndex: b.slotIndex, offense: b.offense };
+      }
+      if (!best) return false;
+      if (((_d = host.equipBagItem) == null ? void 0 : _d.call(host, best.slotIndex)) || ((_e = host.equipIfBetterOffense) == null ? void 0 : _e.call(host, best.id))) {
+        this.setStatus(host, w, stance, "d1 swap melee");
+        this.cool = 1;
+        return true;
+      }
+      return false;
+    }
+    d1SmithFloorKit(host, w, stance, kit) {
+      var _a, _b, _c, _d, _e, _f, _g;
+      const anvil = (_c = (_b = this.mem(w, "anvil")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.anvil) != null ? _c : w.anvilNearby ? w.hub : null;
+      if (!kit.wepReady) {
+        if (kit.canMakeAxe && ((_d = host.smithItemOnce) == null ? void 0 : _d.call(host, kit.axeId))) {
+          (_e = host.equipIfBetterOffense) == null ? void 0 : _e.call(host, kit.axeId);
+          this.d1ForgeDone = false;
+          this.setStatus(host, w, stance, "d1 smith battleaxe");
+          this.cool = 2;
+          return true;
+        }
+        if (w.oreCount >= kit.axeCost && anvil && this.walkToTile(host, anvil.x, anvil.y)) {
+          this.setStatus(host, w, stance, "d1 anvil battleaxe");
+          this.cool = 1;
+          return true;
+        }
+        if (w.oreCount < kit.axeCost && this.d1MineOre(host, w, stance)) return true;
+      }
+      if (!kit.armReady) {
+        if (kit.canMakePlate && ((_f = host.smithItemOnce) == null ? void 0 : _f.call(host, kit.plateId))) {
+          (_g = host.equipIfBetterOffense) == null ? void 0 : _g.call(host, kit.plateId);
+          this.d1ForgeDone = false;
+          this.setStatus(host, w, stance, "d1 smith plate");
+          this.cool = 2;
+          return true;
+        }
+        if (w.oreCount >= kit.plateCost && anvil && this.walkToTile(host, anvil.x, anvil.y)) {
+          this.setStatus(host, w, stance, "d1 anvil plate");
+          this.cool = 1;
+          return true;
+        }
+        if (w.oreCount < kit.plateCost && this.d1MineOre(host, w, stance)) return true;
+      }
+      return false;
+    }
+    d1ForgeKit(host, w, stance) {
+      if (host.forgeWieldedOnce()) {
+        this.d1ForgeFailStreak = 0;
+        this.setStatus(host, w, stance, "d1 forge kit");
+        this.cool = 2;
+        return true;
+      }
+      this.d1ForgeFailStreak++;
+      if (w.oreCount < 2 && this.d1MineOre(host, w, stance)) return true;
+      if (w.coins < 25 && host.sellUnusedOnce()) {
+        this.setStatus(host, w, stance, "d1 sell for forge");
+        this.cool = 2;
+        return true;
+      }
+      if (this.d1ForgeFailStreak >= 3 && (w.oreCount >= 2 || w.coins >= 25)) {
+        this.d1ForgeDone = true;
+        return false;
+      }
+      if (this.d1ForgeFailStreak >= 8) {
+        this.d1ForgeDone = true;
+        return false;
+      }
+      return false;
+    }
+    d1MineOre(host, w, stance) {
+      var _a, _b, _c;
+      if (!host.hasTool("pickaxe")) return false;
+      const rock = (_c = (_b = this.mem(w, "rock")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.rock) != null ? _c : null;
+      if (rock && !this.isGatherTileBlocked(rock.x, rock.y)) {
+        if (this.walkToTile(host, rock.x, rock.y)) {
+          this.setStatus(host, w, stance, "d1 mine");
+          this.cool = 1;
+          return true;
+        }
+        const attempt = host.gatherAt(rock.x, rock.y);
+        if (attempt.ok || /^enroute$/i.test(attempt.ok === false ? attempt.reason : "")) {
+          this.setStatus(host, w, stance, "d1 mine");
+          this.cool = 2;
+          return true;
+        }
+        if (!attempt.ok) {
+          this.noteGatherFail(rock.x, rock.y, attempt.tool);
+          if (attempt.tool === "pickaxe" && host.acquireTool("pickaxe")) {
+            this.setStatus(host, w, stance, "d1 get pickaxe");
+            this.cool = 3;
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+    d1BootstrapTools(host, w, stance, kit, foodShort) {
+      var _a, _b, _c;
+      if (!host.hasTool("pickaxe")) {
+        if (host.acquireTool("pickaxe")) {
+          this.setStatus(host, w, stance, "d1 get pickaxe");
+          this.cool = 3;
+          return true;
+        }
+        const shop = (_c = (_b = this.mem(w, "shop")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.shop) != null ? _c : null;
+        if (shop && this.walkToTile(host, shop.x, shop.y)) {
+          this.setStatus(host, w, stance, "d1 shop pickaxe");
+          this.cool = 1;
+          return true;
+        }
+      }
+      if (foodShort && w.rawFish > 0 && !w.hasFire && !w.hasLogs && !host.hasTool("hatchet")) {
+        if (host.acquireTool("hatchet")) {
+          this.setStatus(host, w, stance, "d1 get hatchet");
+          this.cool = 3;
+          return true;
+        }
+      }
+      if (foodShort && w.food <= 0 && w.rawFish <= 0 && !host.hasTool("rod")) {
+        if (host.acquireTool("rod")) {
+          this.setStatus(host, w, stance, "d1 get rod");
+          this.cool = 3;
+          return true;
+        }
+      }
+      void kit;
+      return false;
+    }
+    d1FishForHunger(host, w, stance) {
+      var _a, _b, _c;
+      if (w.food >= D1_FOOD_KEEP || stance.healRich) return false;
+      if (this.tryCookBagCookables(host, w, stance, "d1 cook")) return true;
+      if (!host.hasTool("rod")) return false;
+      const pond = (_c = (_b = this.mem(w, "pond")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.pond) != null ? _c : null;
+      if (!pond && !w.pondKnown) return false;
+      if (pond && this.walkToTile(host, pond.x, pond.y)) {
+        this.setStatus(host, w, stance, "d1 find pond");
+        this.cool = 1;
+        return true;
+      }
+      if (pond && !this.isGatherTileBlocked(pond.x, pond.y)) {
+        const attempt = host.gatherAt(pond.x, pond.y);
+        if (attempt.ok || attempt.ok === false && /^enroute$/i.test(attempt.reason)) {
+          this.setStatus(host, w, stance, "d1 fish");
+          this.cool = 2;
+          return true;
+        }
+        if (!attempt.ok) this.noteGatherFail(pond.x, pond.y, attempt.tool);
+      }
+      return false;
+    }
+    d1Runecraft(host, w, stance) {
+      var _a, _b;
+      const ess = (_a = w.essenceCount) != null ? _a : 0;
+      const runes = (_b = w.runeCount) != null ? _b : 0;
+      if (ess <= 0 && !w.canImbueWorn && runes <= 0) return false;
+      if (!w.canImbueWorn && ess <= 0) return false;
+      if (host.runecraftOnce()) {
+        this.setStatus(host, w, stance, "d1 runecraft");
+        this.cool = 2;
+        return true;
+      }
+      return false;
+    }
+    d1BagRelief(host, w, stance) {
+      const keep = Math.max(D1_ORE_KEEP, D1_AXE_ORE + D1_PLATE_ORE);
+      if (w.oreCount > keep && this.trySellOreKeep(host, w, keep)) {
+        this.setStatus(host, w, stance, "d1 sell extra ore");
+        this.cool = 2;
+        return true;
+      }
+      if (host.sellUnusedOnce()) {
+        this.setStatus(host, w, stance, "d1 sell unused");
+        this.cool = 2;
+        return true;
+      }
+      return false;
+    }
+    d1PushBoss(host, w, stance) {
+      if (w.stairsOpen) return false;
+      const boss = w.foes.filter((f) => f.alive && f.lit && (f.boss || f.gateBoss || f.alpha)).sort((a, b) => a.dist - b.dist)[0];
+      if (!boss) return false;
+      if (!this.outlookOk(host, w, boss, { allowThreat: true, minWinRate: 0.35 })) {
+        if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        this.setStatus(host, w, stance, "d1 boss kite");
+        this.cool = 1;
+        return true;
+      }
+      host.engage(boss);
+      this.setStatus(host, w, stance, "d1 boss");
+      this.cool = 1;
+      return true;
     }
     /**
      * Eng 1001 main play loop after survival / forks / cool.
