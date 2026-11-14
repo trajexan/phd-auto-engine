@@ -2196,8 +2196,12 @@
         return true;
       }
       if (w.bagFree <= 0 && this.d1BagRelief(host, w, stance)) return true;
-      if (w.loot && w.bagFree > 0 && this.tryWalkLoot(host, w, stance, "d1 loot")) return true;
       const foodShort = w.food < D1_FOOD_KEEP && !stance.healRich;
+      if (foodShort && w.bagFree > 0) {
+        const foodLoot = this.d1FoodLoot(w);
+        if (foodLoot && this.tryWalkLoot(host, { ...w, loot: foodLoot }, stance, "d1 loot food")) return true;
+      }
+      if (w.loot && w.bagFree > 0 && this.tryWalkLoot(host, w, stance, "d1 loot")) return true;
       if (foodShort) {
         if (this.tryCookBagCookables(host, w, stance, "d1 cook")) return true;
         if (w.food <= 0 && w.coins > 0) host.buyFoodIfCritical();
@@ -2256,8 +2260,30 @@
       this.setStatus(host, w, stance, "d1 idle");
       return true;
     }
+    /** Nearest exhibited food pile — live groundLoot, foodLoot, or remembered tile. */
+    d1FoodLoot(w) {
+      var _a, _b, _c;
+      const hx = w.tile.x;
+      const hy = w.tile.y;
+      const cheb2 = (p) => Math.max(Math.abs(p.x - hx), Math.abs(p.y - hy));
+      const isFood = (p) => p.kind === "food";
+      const piles = ((_a = w.groundLoot) != null ? _a : []).filter(isFood);
+      if (w.foodLoot && isFood(w.foodLoot) && !piles.some((p) => p.x === w.foodLoot.x && p.y === w.foodLoot.y)) {
+        piles.push(w.foodLoot);
+      }
+      if (w.loot && isFood(w.loot) && !piles.some((p) => p.x === w.loot.x && p.y === w.loot.y)) {
+        piles.push(w.loot);
+      }
+      if (piles.length) {
+        piles.sort((a, b) => cheb2(a) - cheb2(b));
+        return piles[0];
+      }
+      const mem = (_c = (_b = w.seen) == null ? void 0 : _b.food) != null ? _c : null;
+      if (mem) return { x: mem.x, y: mem.y, id: "food", name: "food", kind: "food", count: 1 };
+      return null;
+    }
     d1KitStatus(host, w) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p;
       const age = d1FloorAge(w.depth);
       let axeId = `${age}_battleaxe`;
       let plateId = `${age}_plate`;
@@ -2283,8 +2309,10 @@
       }
       const wornW = (_j = (_i = host.wornOffense) == null ? void 0 : _i.call(host, "weapon")) != null ? _j : 0;
       const wornA = (_l = (_k = host.wornOffense) == null ? void 0 : _k.call(host, "armour")) != null ? _l : 0;
-      const wepReady = wornW > 0 && (wornW + 1e-4 >= axeOff || w.hasMetalWeapon && wornW >= axeOff * 0.98);
-      const armReady = wornA > 0 && (wornA + 1e-4 >= plateOff || w.hasArmour && wornA >= plateOff * 0.98);
+      const wornWepId = (_n = (_m = w.wornWeapon) == null ? void 0 : _m.id) != null ? _n : "";
+      const wornArmId = (_p = (_o = w.wornArmour) == null ? void 0 : _o.id) != null ? _p : "";
+      const wepReady = d1IsBattleaxe(wornWepId) && (wornWepId === axeId || wornW + 1e-4 >= axeOff) || wornW > 0 && (wornW + 1e-4 >= axeOff || w.hasMetalWeapon && wornW >= axeOff * 0.98);
+      const armReady = d1IsPlate(wornArmId) && (wornArmId === plateId || wornA + 1e-4 >= plateOff) || wornA > 0 && (wornA + 1e-4 >= plateOff || w.hasArmour && wornA >= plateOff * 0.98);
       return {
         axeId,
         plateId,
