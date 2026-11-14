@@ -1,4 +1,4 @@
-/* phd auto-engine d1 — pull via GET /api/auto-engine */
+/* phd auto-engine d2 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -944,7 +944,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d1";
+  var AUTO_ENGINE_VERSION = "d2";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1825,7 +1825,6 @@
         this.bagFullFails = 0;
       }
       this.trackProgress(w);
-      this.maybeRethinkIdle(host, w, stance);
       if (w.depth !== this.lastDepth) {
         const prev = this.lastDepth;
         this.fired.clear();
