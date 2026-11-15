@@ -1,4 +1,4 @@
-/* phd auto-engine d28 — pull via GET /api/auto-engine */
+/* phd auto-engine d29 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d28";
+  var AUTO_ENGINE_VERSION = "d29";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -999,7 +999,7 @@
   var D1_ORE_KEEP = 12;
   var D1_FIND_POND_NO_NEW = 120;
   var D1_FIND_POND_MAX = 80;
-  var D1_MINE_NO_GAIN = 8;
+  var D1_MINE_NO_GAIN = 32;
   var D1_MINE_STALL = 8;
   var D1_REST_BELOW = 0.6;
   var D1_REST_UNTIL = 0.9;
