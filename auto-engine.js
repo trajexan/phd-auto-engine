@@ -1,4 +1,4 @@
-/* phd auto-engine d40 — pull via GET /api/auto-engine */
+/* phd auto-engine d41 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d40";
+  var AUTO_ENGINE_VERSION = "d41";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2259,11 +2259,12 @@
       if (w.hasStyleWeapon && this.d1SwapToMelee(host, w, stance)) return true;
       this.noteFoeApproach(w);
       const holdMine = this.d1HoldMineSwing(host, w);
-      const holdMineThroughLethal = holdMine && !this.d1MeleeFoeAdjacent(w);
-      if (!holdMineThroughLethal && this.evLethal(host, w, stance)) return true;
+      const holdCook = this.d1HoldCook(w, stance);
+      const holdThroughLethal = (holdMine || holdCook) && !this.d1MeleeFoeAdjacent(w);
+      if (!holdThroughLethal && this.evLethal(host, w, stance)) return true;
       const weakFirst = !(w.kitReady || w.hasMetalWeapon && w.hasArmour);
-      if (!holdMineThroughLethal && this.evMobSudden(host, w, stance, weakFirst)) return true;
-      if (!holdMineThroughLethal && this.evMobApproach(host, w, stance, weakFirst)) return true;
+      if (!holdThroughLethal && this.evMobSudden(host, w, stance, weakFirst)) return true;
+      if (!holdThroughLethal && this.evMobApproach(host, w, stance, weakFirst)) return true;
       if (w.unspentPoints > 0) host.spendPoints();
       if ((w.food > 0 || w.healReserve > 0) && w.hp < w.maxHp * 0.85) {
         if (!((_a = host.drinkOnce) == null ? void 0 : _a.call(host, "hurt"))) host.eat();
@@ -2633,6 +2634,16 @@
      * foe is already adjacent.
      * d40: evMobSudden/evMobApproach use that same melee-foe gate.
      */
+    /**
+     * d41: raw can become food this tick — logs in hand to light, or a fire
+     * already adjacent. Not a tree chop (host jobWake cancels those).
+     */
+    d1HoldCook(w, stance) {
+      if (w.rawFish <= 0) return false;
+      if (w.food >= D1_FOOD_KEEP || stance.healRich) return false;
+      if (!this.cookOwed(w, stance)) return false;
+      return w.hasFire || w.hasLogs;
+    }
     d1HoldMineSwing(host, w) {
       var _a, _b, _c;
       if (!host.hasTool("pickaxe")) return false;
