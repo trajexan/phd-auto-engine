@@ -1,4 +1,4 @@
-/* phd auto-engine d36 — pull via GET /api/auto-engine */
+/* phd auto-engine d37 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d36";
+  var AUTO_ENGINE_VERSION = "d37";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1004,6 +1004,7 @@
   var D1_EQUIP_BURST = 4;
   var D1_EQUIP_LATCH = 1200;
   var D1_MINE_STALL = 8;
+  var D1_FORGE_MINE_MAX = 400;
   var D1_REST_BELOW = 0.6;
   var D1_REST_UNTIL = 0.9;
   var D1_REST_FOE_CLEAR = 6;
@@ -1284,6 +1285,8 @@
       __publicField(this, "d1Floor", -1);
       __publicField(this, "d1ForgeDone", false);
       __publicField(this, "d1ForgeFailStreak", 0);
+      /** d37: rocks the host refused for Mining level on this floor ("x,y"). */
+      __publicField(this, "d1MineLevelGated", /* @__PURE__ */ new Set());
       /**
        * e25: stuck monitor — gear / food / exp / useful approach toward desire.
        * Raw tile thrash (door loop, anvil orbit) does NOT reset. Combat resets.
@@ -2235,6 +2238,7 @@
         this.d1Floor = w.depth;
         this.d1ForgeDone = false;
         this.d1ForgeFailStreak = 0;
+        this.d1MineLevelGated.clear();
         this.d1PondHuntDoneDepth = -1;
         this.d1PondHuntDepth = -1;
         this.d1PondHuntTiles.clear();
@@ -2556,6 +2560,10 @@
         return true;
       }
       this.d1ForgeFailStreak++;
+      if (w.oreCount < 2 && (this.d1MineLevelGated.size > 0 || this.d1ForgeFailStreak >= D1_FORGE_MINE_MAX)) {
+        this.d1ForgeDone = true;
+        return false;
+      }
       if (w.oreCount < 2 && this.d1MineOre(host, w, stance)) return true;
       if (w.coins < 25 && host.sellUnusedOnce()) {
         this.setStatus(host, w, stance, "d1 sell for forge");
@@ -2627,7 +2635,7 @@
       if (w.oreCount >= 2) return false;
       const seenRock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : null;
       const memRock = this.mem(w, "rock");
-      const usable = (t) => !!t && !this.isGatherTileBlocked(t.x, t.y);
+      const usable = (t) => !!t && !this.isGatherTileBlocked(t.x, t.y) && !this.d1MineLevelGated.has(`${t.x},${t.y}`);
       const rock = (_c = usable(seenRock) ? seenRock : null) != null ? _c : usable(memRock) ? memRock : null;
       if (!rock || !w.tile) return false;
       return Math.max(Math.abs(w.tile.x - rock.x), Math.abs(w.tile.y - rock.y)) <= 1;
@@ -2637,7 +2645,7 @@
       if (!host.hasTool("pickaxe")) return false;
       const seenRock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : null;
       const memRock = this.mem(w, "rock");
-      const usable = (t) => !!t && !this.isGatherTileBlocked(t.x, t.y);
+      const usable = (t) => !!t && !this.isGatherTileBlocked(t.x, t.y) && !this.d1MineLevelGated.has(`${t.x},${t.y}`);
       const rock = (_c = usable(seenRock) ? seenRock : null) != null ? _c : usable(memRock) ? memRock : null;
       if (rock) {
         const cheb2 = Math.max(
@@ -2701,6 +2709,10 @@
           dropNode(this.h1001.nodes, "rock", w.depth, rock.x, rock.y);
           this.d1MineNoGain = null;
           this.d1MineStall = null;
+          if (/Mining level of/i.test(attempt.reason || "")) {
+            this.d1MineLevelGated.add(`${rock.x},${rock.y}`);
+            return false;
+          }
           if (attempt.tool === "pickaxe" && host.acquireTool("pickaxe")) {
             this.setStatus(host, w, stance, "d1 get pickaxe");
             this.cool = 3;
