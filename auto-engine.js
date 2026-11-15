@@ -1,4 +1,4 @@
-/* phd auto-engine d35 — pull via GET /api/auto-engine */
+/* phd auto-engine d36 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d35";
+  var AUTO_ENGINE_VERSION = "d36";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2373,18 +2373,7 @@
         this.setStatus(host, w, stance, "d1 shop food buy");
         return true;
       }
-      if (w.hub && this.walkToTile(host, w.hub.x, w.hub.y, 2)) {
-        this.clearStairsStrive();
-        this.setStatus(host, w, stance, "d1 shop food find");
-        this.cool = 1;
-        return true;
-      }
-      if (w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
-        this.clearStairsStrive();
-        this.setStatus(host, w, stance, "d1 shop food find");
-        this.cool = 1;
-        return true;
-      }
+      this.d1ShopFoodCalls = D1_SHOP_FOOD_MAX;
       return false;
     }
     /** Nearest exhibited food pile — live groundLoot, foodLoot, or remembered tile. */
