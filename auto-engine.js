@@ -1,4 +1,4 @@
-/* phd auto-engine d34 — pull via GET /api/auto-engine */
+/* phd auto-engine d35 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d34";
+  var AUTO_ENGINE_VERSION = "d35";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1010,6 +1010,16 @@
   var D1_REST_FP_MAX = 900;
   var D1_REST_SAME_TILE_MAX = 150;
   var D1_KIT_FISH_MAX = 200;
+  var D1_THEME_BLOCK = 6;
+  var D1_SHOP_FOOD_MAX = 150;
+  var D1_SHOP_BUY_MISS_MAX = 6;
+  var D1_RATION_BASE = 12;
+  function d1ShopFoodFloor(depth) {
+    return depth >= D1_THEME_BLOCK && depth % D1_THEME_BLOCK === 0;
+  }
+  function d1RationPrice(depth) {
+    return D1_RATION_BASE * Math.max(1, Math.floor(depth));
+  }
   var D1_METALS = ["bronze", "iron", "steel", "mithril", "adamant", "rune"];
   function d1FloorAge(depth) {
     const i = Math.floor((Math.max(1, depth) - 1) / 30);
@@ -1375,6 +1385,10 @@
       __publicField(this, "d1RestAnchor", null);
       /** d31: depth and tickD1-call count of the kitted fish-before-descend budget. */
       __publicField(this, "d1KitFishDepth", -1);
+      /** d35: shop-floor food budget for the current floor visit. */
+      __publicField(this, "d1ShopFoodCalls", 0);
+      __publicField(this, "d1ShopBuyMiss", 0);
+      __publicField(this, "d1ShopBuyCoins", -1);
       __publicField(this, "d1KitFishCalls", 0);
       /** d27: last depth|xp|weapon|armour fingerprint and the tick it changed. */
       __publicField(this, "d1RestFp", "");
@@ -2231,6 +2245,9 @@
         this.d1MineStall = null;
         this.d1EquipLog = { weapon: [], armour: [] };
         this.d1EquipLatchUntil = { weapon: -1, armour: -1 };
+        this.d1ShopFoodCalls = 0;
+        this.d1ShopBuyMiss = 0;
+        this.d1ShopBuyCoins = -1;
       }
       this.d1AdvanceDryPondHuntClock(host, w, stance);
       this.maybeScan(host, w);
@@ -2260,6 +2277,7 @@
         if (foodLoot && this.tryWalkLoot(host, { ...w, loot: foodLoot }, stance, "d1 loot food")) return true;
       }
       if (w.loot && w.bagFree > 0 && this.tryWalkLoot(host, w, stance, "d1 loot")) return true;
+      if (this.d1ShopFloorFood(host, w, stance)) return true;
       if (foodShort) {
         if (this.tryCookBagCookables(host, w, stance, "d1 cook")) return true;
         if (this.d1GetHatchetForCook(host, w, stance)) return true;
@@ -2319,6 +2337,55 @@
       }
       this.setStatus(host, w, stance, "d1 idle");
       return true;
+    }
+    /**
+     * d35: theme-gate floors (6, 12, 18, ...) have a full shop that sells
+     * rations. With food 0, heal pool 0 and coins for a ration, walk to the
+     * shop (remembered, else the hub it sits by, else explore) and buy. The
+     * host buys one piece while the heal pool is empty; the eat step tops HP
+     * up and the next call buys again. Bounded per floor visit.
+     */
+    d1ShopFloorFood(host, w, stance) {
+      var _a, _b, _c;
+      if (!d1ShopFoodFloor(w.depth)) return false;
+      if (w.food > 0 || w.healReserve > 0) return false;
+      if (w.coins < d1RationPrice(w.depth)) return false;
+      if (w.inCombat) return false;
+      if (this.d1ShopFoodCalls >= D1_SHOP_FOOD_MAX) return false;
+      this.d1ShopFoodCalls += 1;
+      if (this.d1ShopBuyCoins >= 0 && w.coins < this.d1ShopBuyCoins) this.d1ShopBuyMiss = 0;
+      const shop = (_c = (_b = this.mem(w, "shop")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.shop) != null ? _c : null;
+      if (shop) {
+        this.clearStairsStrive();
+        if (this.walkToTile(host, shop.x, shop.y, 1)) {
+          this.setStatus(host, w, stance, "d1 shop food walk");
+          this.cool = 1;
+          return true;
+        }
+        if (this.d1ShopBuyMiss >= D1_SHOP_BUY_MISS_MAX) {
+          this.d1ShopFoodCalls = D1_SHOP_FOOD_MAX;
+          return false;
+        }
+        this.d1ShopBuyMiss += 1;
+        this.d1ShopBuyCoins = w.coins;
+        host.clearWalk();
+        host.buyFoodIfCritical();
+        this.setStatus(host, w, stance, "d1 shop food buy");
+        return true;
+      }
+      if (w.hub && this.walkToTile(host, w.hub.x, w.hub.y, 2)) {
+        this.clearStairsStrive();
+        this.setStatus(host, w, stance, "d1 shop food find");
+        this.cool = 1;
+        return true;
+      }
+      if (w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
+        this.clearStairsStrive();
+        this.setStatus(host, w, stance, "d1 shop food find");
+        this.cool = 1;
+        return true;
+      }
+      return false;
     }
     /** Nearest exhibited food pile — live groundLoot, foodLoot, or remembered tile. */
     d1FoodLoot(w) {
