@@ -1,4 +1,4 @@
-/* phd auto-engine d2 — pull via GET /api/auto-engine */
+/* phd auto-engine d24 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -944,7 +944,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d2";
+  var AUTO_ENGINE_VERSION = "d24";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -992,6 +992,10 @@
   var D1_AXE_ORE = 4;
   var D1_PLATE_ORE = 5;
   var D1_ORE_KEEP = 12;
+  var D1_FIND_POND_NO_NEW = 120;
+  var D1_FIND_POND_MAX = 80;
+  var D1_MINE_NO_GAIN = 8;
+  var D1_MINE_STALL = 8;
   var D1_METALS = ["bronze", "iron", "steel", "mithril", "adamant", "rune"];
   function d1FloorAge(depth) {
     const i = Math.floor((Math.max(1, depth) - 1) / 30);
@@ -1344,6 +1348,20 @@
        * Remembered across floors like lastFoodFarm; not cleared on every stuck rethink.
        */
       __publicField(this, "lastTree", null);
+      /** d7: same rod-fund tree walked without closing in — abandon and find another. */
+      __publicField(this, "d1RodTreeStall", null);
+      /** d21: adjacent mine ticks on one rock with no ore gain. */
+      __publicField(this, "d1MineNoGain", null);
+      /** d22/d23: no-progress approach ticks on one rock (walk or enroute, not watched). */
+      __publicField(this, "d1MineStall", null);
+      /** d11: depth whose dry-floor pond hunt is exhausted (reset on pond or floor change). */
+      __publicField(this, "d1PondHuntDoneDepth", -1);
+      __publicField(this, "d1PondHuntDepth", -1);
+      __publicField(this, "d1PondHuntTiles", /* @__PURE__ */ new Set());
+      __publicField(this, "d1PondHuntNoNew", 0);
+      __publicField(this, "d1PondHuntTicks", 0);
+      /** d14: tickD1 calls while the dry hunt is armed, including combat. */
+      __publicField(this, "d1PondHuntElapsed", 0);
       /** e35: consecutive failed pickaxe buys while melee-pressed. */
       __publicField(this, "shopFireFails", 0);
       /**
@@ -2175,7 +2193,16 @@
         this.d1Floor = w.depth;
         this.d1ForgeDone = false;
         this.d1ForgeFailStreak = 0;
+        this.d1PondHuntDoneDepth = -1;
+        this.d1PondHuntDepth = -1;
+        this.d1PondHuntTiles.clear();
+        this.d1PondHuntNoNew = 0;
+        this.d1PondHuntTicks = 0;
+        this.d1PondHuntElapsed = 0;
+        this.d1MineNoGain = null;
+        this.d1MineStall = null;
       }
+      this.d1AdvanceDryPondHuntClock(host, w, stance);
       this.maybeScan(host, w);
       if (this.drainAtTileLoot(host, w, stance)) return true;
       if (w.hasStyleWeapon && this.d1SwapToMelee(host, w, stance)) return true;
@@ -2203,6 +2230,7 @@
       if (w.loot && w.bagFree > 0 && this.tryWalkLoot(host, w, stance, "d1 loot")) return true;
       if (foodShort) {
         if (this.tryCookBagCookables(host, w, stance, "d1 cook")) return true;
+        if (this.d1GetHatchetForCook(host, w, stance)) return true;
         if (w.food <= 0 && w.coins > 0) host.buyFoodIfCritical();
         if (this.d1FishForHunger(host, w, stance)) return true;
       }
@@ -2218,8 +2246,8 @@
         return true;
       }
       if ((!kit.ready || !this.d1ForgeDone) && this.d1MineOre(host, w, stance)) return true;
-      if (kit.ready && this.d1ForgeDone && w.food >= D1_FOOD_KEEP && this.stairsUsable(w)) {
-        return this.walkStairsStrive(host, w, stance, "d1 descend");
+      if (kit.ready && this.d1ForgeDone && this.d1TryDescend(host, w, stance)) {
+        return true;
       }
       if (kit.ready && this.d1ForgeDone && this.d1PushBoss(host, w, stance)) return true;
       const anvil = (_d = (_c = this.mem(w, "anvil")) != null ? _c : (_b = w.seen) == null ? void 0 : _b.anvil) != null ? _d : null;
@@ -2440,23 +2468,69 @@
       return false;
     }
     d1MineOre(host, w, stance) {
-      var _a, _b, _c;
+      var _a, _b, _c, _d, _e, _f, _g;
       if (!host.hasTool("pickaxe")) return false;
       const rock = (_c = (_b = this.mem(w, "rock")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.rock) != null ? _c : null;
       if (rock && !this.isGatherTileBlocked(rock.x, rock.y)) {
+        const cheb2 = Math.max(
+          Math.abs(((_e = (_d = w.tile) == null ? void 0 : _d.x) != null ? _e : 0) - rock.x),
+          Math.abs(((_g = (_f = w.tile) == null ? void 0 : _f.y) != null ? _g : 0) - rock.y)
+        );
+        const stallSame = (st) => !!st && st.depth === w.depth && st.x === rock.x && st.y === rock.y;
+        const bumpStall = (progressCheb) => {
+          const st = this.d1MineStall;
+          if (stallSame(st) && progressCheb != null && st.cheb < progressCheb) {
+            st.n = 1;
+            st.cheb = progressCheb;
+            return false;
+          }
+          if (!stallSame(st) || progressCheb != null && st.cheb > progressCheb) {
+            this.d1MineStall = { depth: w.depth, x: rock.x, y: rock.y, n: 1, cheb: progressCheb != null ? progressCheb : cheb2 };
+            return false;
+          }
+          st.n += 1;
+          if (st.n >= D1_MINE_STALL) {
+            this.d1MineStall = null;
+            this.d1MineNoGain = null;
+            return true;
+          }
+          return false;
+        };
         if (this.walkToTile(host, rock.x, rock.y)) {
+          if (bumpStall(cheb2)) return false;
           this.setStatus(host, w, stance, "d1 mine");
           this.cool = 1;
           return true;
         }
+        this.d1MineStall = null;
         const attempt = host.gatherAt(rock.x, rock.y);
-        if (attempt.ok || /^enroute$/i.test(attempt.ok === false ? attempt.reason : "")) {
+        const enroute = !attempt.ok && /^enroute$/i.test(attempt.reason || "");
+        if (attempt.ok) {
+          const g2 = this.d1MineNoGain;
+          if (!g2 || g2.depth !== w.depth || g2.x !== rock.x || g2.y !== rock.y || w.oreCount > g2.ore) {
+            this.d1MineNoGain = { depth: w.depth, x: rock.x, y: rock.y, ore: w.oreCount, n: 1 };
+          } else {
+            g2.n += 1;
+            if (g2.n >= D1_MINE_NO_GAIN) {
+              this.noteGatherFail(rock.x, rock.y, attempt.tool);
+              this.d1MineNoGain = null;
+              return false;
+            }
+          }
           this.setStatus(host, w, stance, "d1 mine");
           this.cool = 2;
           return true;
         }
+        if (enroute) {
+          if (bumpStall(cheb2)) return false;
+          this.setStatus(host, w, stance, "d1 mine");
+          this.cool = 1;
+          return true;
+        }
         if (!attempt.ok) {
           this.noteGatherFail(rock.x, rock.y, attempt.tool);
+          this.d1MineNoGain = null;
+          this.d1MineStall = null;
           if (attempt.tool === "pickaxe" && host.acquireTool("pickaxe")) {
             this.setStatus(host, w, stance, "d1 get pickaxe");
             this.cool = 3;
@@ -2481,30 +2555,269 @@
           return true;
         }
       }
-      if (foodShort && w.rawFish > 0 && !w.hasFire && !w.hasLogs && !host.hasTool("hatchet")) {
-        if (host.acquireTool("hatchet")) {
-          this.setStatus(host, w, stance, "d1 get hatchet");
-          this.cool = 3;
-          return true;
-        }
-      }
+      if (foodShort && this.d1GetHatchetForCook(host, w, stance)) return true;
       if (foodShort && w.food <= 0 && w.rawFish <= 0 && !host.hasTool("rod")) {
-        if (host.acquireTool("rod")) {
+        if (this.canFundRodNow(w) && host.acquireTool("rod")) {
           this.setStatus(host, w, stance, "d1 get rod");
           this.cool = 3;
           return true;
         }
+        if (this.d1FundRodWithLog(host, w, stance)) return true;
       }
       void kit;
       return false;
     }
-    d1FishForHunger(host, w, stance) {
+    /**
+     * d4: get a hatchet so bag raw can be cooked. Host acquireTool('hatchet')
+     * returns false when a pickaxe is already owned, an anvil is known, and
+     * ore < 2 (it waits to smith and will not shop-buy). Mine those 2 ores,
+     * even after Battleaxe+Plate is done, then smith. Do not call this unless
+     * food is short and raw is already in the bag.
+     */
+    d1GetHatchetForCook(host, w, stance) {
       var _a, _b, _c;
+      if (w.rawFish <= 0) return false;
+      if (w.hasFire || w.hasLogs || host.hasTool("hatchet")) return false;
+      const anvil = (_c = (_b = this.mem(w, "anvil")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.anvil) != null ? _c : null;
+      if (this.canFundToolNow("hatchet", w, anvil) && host.acquireTool("hatchet")) {
+        this.setStatus(host, w, stance, "d1 get hatchet");
+        this.cool = 3;
+        return true;
+      }
+      if (w.oreCount < 2) {
+        if (this.d1MineOre(host, w, stance)) return true;
+        if (w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
+          this.setStatus(host, w, stance, "d1 find ore");
+          this.cool = 1;
+          return true;
+        }
+        this.setStatus(host, w, stance, "d1 find ore");
+        this.cool = 1;
+        return true;
+      }
+      if (host.acquireTool("hatchet")) {
+        this.setStatus(host, w, stance, "d1 get hatchet");
+        this.cool = 3;
+        return true;
+      }
+      if (anvil && this.walkToTile(host, anvil.x, anvil.y)) {
+        this.setStatus(host, w, stance, "d1 get hatchet");
+        this.cool = 1;
+        return true;
+      }
+      return false;
+    }
+    /**
+     * d6: fund a rod with a fletch log when the shop path is broke.
+     * canFundRodNow is coins>=30 OR logCount>=1. After the 30c pickaxe buy,
+     * R6 had 80/118 pickers never fund a rod (48 never found another coin;
+     * 74 starved on F1). d1GetHatchetForCook only runs when raw is already
+     * in the bag, but raw needs a rod — catch-22. 28 lives already held
+     * anvil+2 ore+tree and still never chopped a log. Mine 2 ore, smith the
+     * hatchet, chop one remembered/seen tree (not leftover w.gather), then
+     * the next tick canFundRodNow and acquireTool fletches. Do not call
+     * acquireTool('rod') until funded (d3 / t1612 shop walk).
+     */
+    /**
+     * Host jobWake aborts a fresh woodcut when a chasing / in-reach foe is
+     * nearby ("That tree is watched. You turn back."). Starting gatherAt
+     * anyway only restarts the task. Used by d8 rod-fund and cook-fuel chops.
+     */
+    d1GatherWatched(w) {
+      if (w.inCombat) return true;
+      return w.foes.some((f) => {
+        var _a;
+        if (!f.alive || !f.lit || f.gold) return false;
+        const steps = (_a = f.reach) != null ? _a : f.dist;
+        return steps >= 0 && steps <= 8;
+      });
+    }
+    d1FundRodWithLog(host, w, stance) {
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i;
+      if (this.canFundRodNow(w) || host.hasTool("rod")) return false;
+      if (!host.hasTool("hatchet")) {
+        const anvil = (_c = (_b = this.mem(w, "anvil")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.anvil) != null ? _c : null;
+        if (this.canFundToolNow("hatchet", w, anvil) && host.acquireTool("hatchet")) {
+          this.setStatus(host, w, stance, "d1 get hatchet");
+          this.cool = 3;
+          return true;
+        }
+        if (w.oreCount < 2) {
+          if (this.d1MineOre(host, w, stance)) return true;
+          if (w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
+            this.setStatus(host, w, stance, "d1 find ore");
+            this.cool = 1;
+            return true;
+          }
+          this.setStatus(host, w, stance, "d1 find ore");
+          this.cool = 1;
+          return true;
+        }
+        if (anvil && this.walkToTile(host, anvil.x, anvil.y)) {
+          this.setStatus(host, w, stance, "d1 get hatchet");
+          this.cool = 1;
+          return true;
+        }
+        if (!anvil && w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
+          this.setStatus(host, w, stance, "d1 find anvil");
+          this.cool = 1;
+          return true;
+        }
+        if (anvil) {
+          this.setStatus(host, w, stance, "d1 get hatchet");
+          this.cool = 0;
+          return true;
+        }
+        return false;
+      }
+      if (((_d = w.logCount) != null ? _d : 0) >= 1) {
+        this.d1RodTreeStall = null;
+        return false;
+      }
+      const tree = (_g = (_f = this.mem(w, "tree")) != null ? _f : (_e = w.seen) == null ? void 0 : _e.tree) != null ? _g : null;
+      if (tree && !this.isGatherTileBlocked(tree.x, tree.y)) {
+        const dist = cheb(w.tile.x, w.tile.y, tree.x, tree.y);
+        if (dist <= 1) {
+          this.d1RodTreeStall = { depth: w.depth, x: tree.x, y: tree.y, bestDist: dist, noClose: 0 };
+          if (this.d1GatherWatched(w)) {
+            if (this.evLethal(host, w, stance)) return true;
+            if (this.evMobSudden(host, w, stance)) return true;
+            if (this.evMobApproach(host, w, stance)) return true;
+            this.setStatus(host, w, stance, "d1 wait to chop");
+            this.cool = 0;
+            return true;
+          }
+          host.clearEngage();
+          const attempt = host.gatherAt(tree.x, tree.y);
+          if (attempt.ok || attempt.ok === false && /^enroute$/i.test(attempt.reason || "")) {
+            this.lastTree = { depth: w.depth, x: tree.x, y: tree.y };
+            this.setStatus(host, w, stance, "d1 chop for rod");
+            this.cool = 2;
+            return true;
+          }
+          if (!attempt.ok) this.noteGatherFail(tree.x, tree.y, attempt.tool);
+        } else {
+          const stall = this.d1RodTreeStall;
+          if (stall && stall.depth === w.depth && stall.x === tree.x && stall.y === tree.y) {
+            if (dist < stall.bestDist) {
+              stall.bestDist = dist;
+              stall.noClose = 0;
+            } else {
+              stall.noClose += 1;
+            }
+          } else {
+            this.d1RodTreeStall = { depth: w.depth, x: tree.x, y: tree.y, bestDist: dist, noClose: 0 };
+          }
+          const stuck = ((_i = (_h = this.d1RodTreeStall) == null ? void 0 : _h.noClose) != null ? _i : 0) >= 12;
+          if (!stuck && this.walkToTile(host, tree.x, tree.y)) {
+            this.setStatus(host, w, stance, "d1 chop for rod");
+            this.cool = 1;
+            return true;
+          }
+          if (!stuck) {
+            this.d1RodTreeStall = null;
+            host.clearEngage();
+            const attempt = host.gatherAt(tree.x, tree.y);
+            if (attempt.ok || attempt.ok === false && /^enroute$/i.test(attempt.reason || "")) {
+              this.lastTree = { depth: w.depth, x: tree.x, y: tree.y };
+              this.setStatus(host, w, stance, "d1 chop for rod");
+              this.cool = 2;
+              return true;
+            }
+            if (!attempt.ok) this.noteGatherFail(tree.x, tree.y, attempt.tool);
+          } else {
+            this.noteGatherFail(tree.x, tree.y);
+            this.d1RodTreeStall = null;
+          }
+        }
+      }
+      if (w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
+        this.setStatus(host, w, stance, "d1 find tree");
+        this.cool = 1;
+        return true;
+      }
+      return false;
+    }
+    /**
+     * d14: count tickD1 calls while a dry-floor pond hunt is armed, including
+     * ticks that return in the combat handler. Cool skips never enter tickD1,
+     * so they do not count (the 80 hunt-invocation cap is unchanged when
+     * there is no combat). Mark the hunt done once elapsed hits the cap so
+     * the next d1FishForHunger yields to mine/chest/kit.
+     */
+    d1AdvanceDryPondHuntClock(host, w, stance) {
+      var _a, _b, _c;
+      if (!host.hasTool("rod")) return;
+      if (w.food >= D1_FOOD_KEEP || stance.healRich) return;
+      const pond = (_c = (_b = this.mem(w, "pond")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.pond) != null ? _c : null;
+      if (pond || w.pondKnown) return;
+      if (this.d1PondHuntDoneDepth === w.depth) return;
+      if (this.d1PondHuntDepth !== w.depth) {
+        this.d1PondHuntDepth = w.depth;
+        this.d1PondHuntTiles.clear();
+        this.d1PondHuntNoNew = 0;
+        this.d1PondHuntTicks = 0;
+        this.d1PondHuntElapsed = 0;
+      }
+      this.d1PondHuntElapsed += 1;
+      if (this.d1PondHuntElapsed >= D1_FIND_POND_MAX) {
+        this.d1PondHuntDoneDepth = w.depth;
+      }
+    }
+    d1FishForHunger(host, w, stance) {
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
       if (w.food >= D1_FOOD_KEEP || stance.healRich) return false;
       if (this.tryCookBagCookables(host, w, stance, "d1 cook")) return true;
+      if (this.d1GetHatchetForCook(host, w, stance)) return true;
+      if (w.rawFish > 0 && !w.hasFire && !w.hasLogs) {
+        const tree = (_c = (_b = this.mem(w, "tree")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.tree) != null ? _c : null;
+        const canChop = !!(tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y));
+        if (!canChop) return false;
+      }
+      if (this.d1KitStatus(host, w).ready && w.stairs && w.stairsOpen) return false;
       if (!host.hasTool("rod")) return false;
-      const pond = (_c = (_b = this.mem(w, "pond")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.pond) != null ? _c : null;
-      if (!pond && !w.pondKnown) return false;
+      const pond = (_f = (_e = this.mem(w, "pond")) != null ? _e : (_d = w.seen) == null ? void 0 : _d.pond) != null ? _f : null;
+      if (pond || w.pondKnown) {
+        this.d1PondHuntDoneDepth = -1;
+        this.d1PondHuntDepth = -1;
+        this.d1PondHuntTiles.clear();
+        this.d1PondHuntNoNew = 0;
+        this.d1PondHuntTicks = 0;
+        this.d1PondHuntElapsed = 0;
+      }
+      if (!pond && !w.pondKnown) {
+        if (this.d1PondHuntDoneDepth === w.depth) return false;
+        if (this.d1PondHuntDepth !== w.depth) {
+          this.d1PondHuntDepth = w.depth;
+          this.d1PondHuntTiles.clear();
+          this.d1PondHuntNoNew = 0;
+          this.d1PondHuntTicks = 0;
+          this.d1PondHuntElapsed = 0;
+        }
+        const key = `${(_h = (_g = w.tile) == null ? void 0 : _g.x) != null ? _h : 0},${(_j = (_i = w.tile) == null ? void 0 : _i.y) != null ? _j : 0}`;
+        if (this.d1PondHuntTiles.has(key)) this.d1PondHuntNoNew += 1;
+        else {
+          this.d1PondHuntTiles.add(key);
+          this.d1PondHuntNoNew = 0;
+        }
+        this.d1PondHuntTicks += 1;
+        if (this.d1PondHuntNoNew >= D1_FIND_POND_NO_NEW || this.d1PondHuntTicks >= D1_FIND_POND_MAX || this.d1PondHuntElapsed >= D1_FIND_POND_MAX) {
+          this.d1PondHuntDoneDepth = w.depth;
+          return false;
+        }
+        if (w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
+          this.setStatus(host, w, stance, "d1 find pond");
+          this.cool = 1;
+          return true;
+        }
+        if (w.wander) {
+          host.walkTo(w.wander.x, w.wander.y);
+          this.setStatus(host, w, stance, "d1 find pond");
+          this.cool = 1;
+          return true;
+        }
+        return false;
+      }
       if (pond && this.walkToTile(host, pond.x, pond.y)) {
         this.setStatus(host, w, stance, "d1 find pond");
         this.cool = 1;
@@ -4225,13 +4538,26 @@
         const tree = (_c = (_b = this.mem(w, "tree")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.tree) != null ? _c : null;
         if (tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y)) {
           if (this.walkToTile(host, tree.x, tree.y)) {
-            this.setStatus1001(host, w, stance, statusLabel);
+            this.setStatus1001(host, w, stance, "chop for fire");
             return true;
           }
-          if (this.tryGather(host, w, stance, "chop for fire")) {
-            this.setStatus1001(host, w, stance, statusLabel);
+          if (this.d1GatherWatched(w)) {
+            if (this.evLethal(host, w, stance)) return true;
+            if (this.evMobSudden(host, w, stance)) return true;
+            if (this.evMobApproach(host, w, stance)) return true;
+            this.setStatus1001(host, w, stance, "chop for fire");
+            this.cool = 0;
             return true;
           }
+          host.clearEngage();
+          const attempt = host.gatherAt(tree.x, tree.y);
+          if (attempt.ok || attempt.ok === false && /^enroute$/i.test(attempt.reason || "")) {
+            this.lastTree = { depth: w.depth, x: tree.x, y: tree.y };
+            this.setStatus1001(host, w, stance, "chop for fire");
+            this.cool = 2;
+            return true;
+          }
+          if (!attempt.ok) this.noteGatherFail(tree.x, tree.y, attempt.tool);
           return false;
         }
         if (!host.hasTool("hatchet")) {
@@ -13567,6 +13893,23 @@
       this.setStatus(host, w, stance, "hungry deep-ban wander");
       return true;
     }
+    /**
+     * d15: open remembered down-stairs, including currently unlit tiles.
+     * Closed or soft-blocked stairs stay off-limits (3142 / e24).
+     */
+    d1StairsOpen(w) {
+      return !!w.stairs && w.stairsOpen && !this.isGatherTileBlocked(w.stairs.x, w.stairs.y);
+    }
+    /** Walk to open kit-ready stairs even if FOV has flickered unlit, or food is short. */
+    d1TryDescend(host, w, stance) {
+      if (!this.d1StairsOpen(w) || !w.stairs) return false;
+      this.markStairsStrive("d1 descend", w);
+      host.clearEngage();
+      host.walkTo(w.stairs.x, w.stairs.y);
+      this.setStatus(host, w, stance, "d1 descend");
+      this.cool = 1;
+      return true;
+    }
     /** Lit open down-stairs not soft-blocked (e24). */
     stairsUsable(w) {
       return !!w.stairs && w.stairsOpen && w.stairsLit && !this.isGatherTileBlocked(w.stairs.x, w.stairs.y);
@@ -13745,7 +14088,8 @@
         this.cool = 1;
         return true;
       }
-      if (w.tile.x === s.standX && w.tile.y === s.standY) s.standHits++;
+      const sameTile = w.tile.x === s.standX && w.tile.y === s.standY;
+      if (sameTile) s.standHits++;
       else {
         const dist = Math.max(Math.abs(w.tile.x - s.sx), Math.abs(w.tile.y - s.sy));
         const prev = Math.max(Math.abs(s.standX - s.sx), Math.abs(s.standY - s.sy));
@@ -13754,7 +14098,9 @@
         s.standY = w.tile.y;
       }
       const aged = this.runTicks - s.started;
-      if (s.standHits >= 12 || aged >= 100) {
+      const d1DescendStall = s.label === "d1 descend" && (sameTile && s.standHits >= 24);
+      const otherStall = s.label !== "d1 descend" && (s.standHits >= 12 || aged >= 100);
+      if (d1DescendStall || otherStall) {
         this.noteGatherFail(s.sx, s.sy);
         this.noteAction(`stairs soft-block (${s.label})`);
         host.log(`AUTO: stairs unreachable (${s.label}) \u2014 soft-block, explore`);
