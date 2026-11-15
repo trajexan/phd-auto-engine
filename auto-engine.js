@@ -1,4 +1,4 @@
-/* phd auto-engine d42 — pull via GET /api/auto-engine */
+/* phd auto-engine d43 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d42";
+  var AUTO_ENGINE_VERSION = "d43";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2164,7 +2164,8 @@
             this.cool = 2;
             return;
           }
-          if (w.food > 0) {
+          const spendFoodEarly = w.food > D1_FOOD_KEEP || w.hp < w.maxHp * 0.6;
+          if (w.food > 0 && spendFoodEarly) {
             host.eat();
             this.setStatus(host, w, stance, "eating");
             this.cool = 2;
@@ -12194,7 +12195,9 @@
       var _a;
       const id = opt.id;
       if ((id === "eat" || id.startsWith("eat_")) && (w.maxHp <= 0 || w.hp / w.maxHp < 0.95)) {
-        if (!((_a = host.drinkOnce) == null ? void 0 : _a.call(host, "hurt"))) host.eat();
+        if (!((_a = host.drinkOnce) == null ? void 0 : _a.call(host, "hurt"))) {
+          if (w.food > D1_FOOD_KEEP || w.hp < w.maxHp * 0.6) host.eat();
+        }
       }
       if (id === "chase" || id === "engage" || id === "eat_engage" || id === "eat_then_chase" || id === "fight_pack" || id === "enter" || id === "eat_enter" || id === "clear" || id === "eat_clear") {
         const foe = this.pickForEvent(w, ev, stance);
