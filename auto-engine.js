@@ -1,4 +1,4 @@
-/* phd auto-engine d38 — pull via GET /api/auto-engine */
+/* phd auto-engine d39 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d38";
+  var AUTO_ENGINE_VERSION = "d39";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2258,8 +2258,9 @@
       if (this.drainAtTileLoot(host, w, stance)) return true;
       if (w.hasStyleWeapon && this.d1SwapToMelee(host, w, stance)) return true;
       this.noteFoeApproach(w);
-      if (this.evLethal(host, w, stance)) return true;
       const holdMine = this.d1HoldMineSwing(host, w);
+      const holdMineThroughLethal = holdMine && !this.d1MeleeFoeAdjacent(w);
+      if (!holdMineThroughLethal && this.evLethal(host, w, stance)) return true;
       const weakFirst = !(w.kitReady || w.hasMetalWeapon && w.hasArmour);
       if (!holdMine && this.evMobSudden(host, w, stance, weakFirst)) return true;
       if (!holdMine && this.evMobApproach(host, w, stance, weakFirst)) return true;
@@ -2628,6 +2629,8 @@
     /**
      * d26: already in gather range of a live rock we still need (ore < 2).
      * Non-lethal approach/sudden engage would cancel the swing mid-channel.
+     * d39: tickD1 also skips evLethal under this hold unless a lit non-prey
+     * foe is already adjacent.
      */
     d1HoldMineSwing(host, w) {
       var _a, _b, _c;
@@ -2639,6 +2642,12 @@
       const rock = (_c = usable(seenRock) ? seenRock : null) != null ? _c : usable(memRock) ? memRock : null;
       if (!rock || !w.tile) return false;
       return Math.max(Math.abs(w.tile.x - rock.x), Math.abs(w.tile.y - rock.y)) <= 1;
+    }
+    /** Lit non-prey foe already in melee (Chebyshev <= 1). d39 evLethal hold. */
+    d1MeleeFoeAdjacent(w) {
+      return w.foes.some(
+        (f) => f.alive && f.lit && f.dist <= 1 && f.danger !== "prey"
+      );
     }
     d1MineOre(host, w, stance) {
       var _a, _b, _c, _d, _e, _f, _g;
