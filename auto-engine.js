@@ -1,4 +1,4 @@
-/* phd auto-engine d24 — pull via GET /api/auto-engine */
+/* phd auto-engine d26 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -414,6 +414,11 @@
     const exact = `${w.depth}:${kind}:${tile.x},${tile.y}`;
     map.set(exact, { kind, x: tile.x, y: tile.y, safe, depth: w.depth });
     map.set(`${w.depth}:${kind}`, { kind, x: tile.x, y: tile.y, safe, depth: w.depth });
+  }
+  function dropNode(map, kind, depth, x, y) {
+    map.delete(`${depth}:${kind}:${x},${y}`);
+    const soft = map.get(`${depth}:${kind}`);
+    if (soft && soft.x === x && soft.y === y) map.delete(`${depth}:${kind}`);
   }
   function registerSeenNodes(map, w, extra) {
     var _a;
@@ -944,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d24";
+  var AUTO_ENGINE_VERSION = "d26";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2208,8 +2213,9 @@
       if (w.hasStyleWeapon && this.d1SwapToMelee(host, w, stance)) return true;
       this.noteFoeApproach(w);
       if (this.evLethal(host, w, stance)) return true;
-      if (this.evMobSudden(host, w, stance)) return true;
-      if (this.evMobApproach(host, w, stance)) return true;
+      const holdMine = this.d1HoldMineSwing(host, w);
+      if (!holdMine && this.evMobSudden(host, w, stance)) return true;
+      if (!holdMine && this.evMobApproach(host, w, stance)) return true;
       if (w.unspentPoints > 0) host.spendPoints();
       if ((w.food > 0 || w.healReserve > 0) && w.hp < w.maxHp * 0.85) {
         if (!((_a = host.drinkOnce) == null ? void 0 : _a.call(host, "hurt"))) host.eat();
@@ -2467,11 +2473,29 @@
       }
       return false;
     }
+    /**
+     * d26: already in gather range of a live rock we still need (ore < 2).
+     * Non-lethal approach/sudden engage would cancel the swing mid-channel.
+     */
+    d1HoldMineSwing(host, w) {
+      var _a, _b, _c;
+      if (!host.hasTool("pickaxe")) return false;
+      if (w.oreCount >= 2) return false;
+      const seenRock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : null;
+      const memRock = this.mem(w, "rock");
+      const usable = (t) => !!t && !this.isGatherTileBlocked(t.x, t.y);
+      const rock = (_c = usable(seenRock) ? seenRock : null) != null ? _c : usable(memRock) ? memRock : null;
+      if (!rock || !w.tile) return false;
+      return Math.max(Math.abs(w.tile.x - rock.x), Math.abs(w.tile.y - rock.y)) <= 1;
+    }
     d1MineOre(host, w, stance) {
       var _a, _b, _c, _d, _e, _f, _g;
       if (!host.hasTool("pickaxe")) return false;
-      const rock = (_c = (_b = this.mem(w, "rock")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.rock) != null ? _c : null;
-      if (rock && !this.isGatherTileBlocked(rock.x, rock.y)) {
+      const seenRock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : null;
+      const memRock = this.mem(w, "rock");
+      const usable = (t) => !!t && !this.isGatherTileBlocked(t.x, t.y);
+      const rock = (_c = usable(seenRock) ? seenRock : null) != null ? _c : usable(memRock) ? memRock : null;
+      if (rock) {
         const cheb2 = Math.max(
           Math.abs(((_e = (_d = w.tile) == null ? void 0 : _d.x) != null ? _e : 0) - rock.x),
           Math.abs(((_g = (_f = w.tile) == null ? void 0 : _f.y) != null ? _g : 0) - rock.y)
@@ -2513,6 +2537,7 @@
             g2.n += 1;
             if (g2.n >= D1_MINE_NO_GAIN) {
               this.noteGatherFail(rock.x, rock.y, attempt.tool);
+              dropNode(this.h1001.nodes, "rock", w.depth, rock.x, rock.y);
               this.d1MineNoGain = null;
               return false;
             }
@@ -2529,6 +2554,7 @@
         }
         if (!attempt.ok) {
           this.noteGatherFail(rock.x, rock.y, attempt.tool);
+          dropNode(this.h1001.nodes, "rock", w.depth, rock.x, rock.y);
           this.d1MineNoGain = null;
           this.d1MineStall = null;
           if (attempt.tool === "pickaxe" && host.acquireTool("pickaxe")) {
