@@ -1,4 +1,4 @@
-/* phd auto-engine d33 — pull via GET /api/auto-engine */
+/* phd auto-engine d34 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d33";
+  var AUTO_ENGINE_VERSION = "d34";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1000,6 +1000,9 @@
   var D1_FIND_POND_NO_NEW = 120;
   var D1_FIND_POND_MAX = 80;
   var D1_MINE_NO_GAIN = 32;
+  var D1_EQUIP_WINDOW = 120;
+  var D1_EQUIP_BURST = 4;
+  var D1_EQUIP_LATCH = 1200;
   var D1_MINE_STALL = 8;
   var D1_REST_BELOW = 0.6;
   var D1_REST_UNTIL = 0.9;
@@ -1020,8 +1023,9 @@
   }
   function d1IsStyleOrOffClass(id, style) {
     if (style === "ranged" || style === "magic") return true;
-    return /(?:^|_)(?:longbow|shortbow|bow|crossbow|wand|staff|robe|leather)$/.test(id);
+    return D1_STYLE_ID_RE.test(id);
   }
+  var D1_STYLE_ID_RE = /(?:^|_)(?:longbow|shortbow|bow|crossbow|darkbow|slingbow|wand|staff|robe|leather|throwingknives|shuriken|ninjastar|toktzring|staffofthedead|ancientstaff|tidebinderstaff|frostlatticerod|wizardcrook)$/i;
   function d1IsParkedSlot(slot) {
     return slot === "accessory" || slot === "cape" || slot === "hat" || slot === "offhand";
   }
@@ -1844,6 +1848,9 @@
       /** Last hero tile seen in tick() — stamped onto journal rows. */
       __publicField(this, "lastTileX", 0);
       __publicField(this, "lastTileY", 0);
+      /** d34: equips per slot in the last D1_EQUIP_WINDOW ticks; latch after a flip burst. */
+      __publicField(this, "d1EquipLog", { weapon: [], armour: [] });
+      __publicField(this, "d1EquipLatchUntil", { weapon: -1, armour: -1 });
       this.traits = { ...AUTOPLAY_TRAITS_DEFAULT, ...traits };
       for (const k of Object.keys(this.traits)) this.traits[k] = clamp01(this.traits[k]);
       this.rnd = rnd;
@@ -2222,6 +2229,8 @@
         this.d1PondHuntElapsed = 0;
         this.d1MineNoGain = null;
         this.d1MineStall = null;
+        this.d1EquipLog = { weapon: [], armour: [] };
+        this.d1EquipLatchUntil = { weapon: -1, armour: -1 };
       }
       this.d1AdvanceDryPondHuntClock(host, w, stance);
       this.maybeScan(host, w);
@@ -2380,36 +2389,52 @@
     }
     /** Equip a bag melee piece when it is stronger now, or clearly stronger at typical max. */
     d1EquipMeleeUpgrades(host, w, stance, kit) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n;
       const bag = (_b = (_a = host.listBagCombatGear) == null ? void 0 : _a.call(host)) != null ? _b : [];
       if (!bag.length) return false;
-      const pick = (slot, worn, floorOff) => {
+      const pick = (slot, worn, floorOff, wornId) => {
         var _a2;
         let best = null;
         for (const b of bag) {
           if (b.slot !== slot) continue;
+          if (wornId && b.id === wornId) continue;
           const g2 = (_a2 = host.gearStats) == null ? void 0 : _a2.call(host, b.id);
           if (!this.d1MeleeCand(b.id, b.slot, g2 == null ? void 0 : g2.style)) continue;
           const winsNow = b.offense > worn;
-          const winsMax = b.offense >= floorOff && b.offense >= worn;
+          const winsMax = b.offense >= floorOff && b.offense >= worn && worn + 1e-4 < floorOff;
           if (!winsNow && !winsMax) continue;
           if (!best || b.offense > best.offense) best = { id: b.id, slotIndex: b.slotIndex, offense: b.offense };
         }
         return best;
       };
-      const wep = pick("weapon", (_d = (_c = host.wornOffense) == null ? void 0 : _c.call(host, "weapon")) != null ? _d : 0, kit.axeOff);
-      if (wep && (((_e = host.equipIfBetterOffense) == null ? void 0 : _e.call(host, wep.id)) || ((_f = host.equipBagItem) == null ? void 0 : _f.call(host, wep.slotIndex)))) {
+      const wep = this.d1EquipLatched("weapon") ? null : pick("weapon", (_d = (_c = host.wornOffense) == null ? void 0 : _c.call(host, "weapon")) != null ? _d : 0, kit.axeOff, (_f = (_e = w.wornWeapon) == null ? void 0 : _e.id) != null ? _f : "");
+      if (wep && (((_g = host.equipIfBetterOffense) == null ? void 0 : _g.call(host, wep.id)) || ((_h = host.equipBagItem) == null ? void 0 : _h.call(host, wep.slotIndex)))) {
+        this.d1NoteEquip("weapon");
         this.setStatus(host, w, stance, "d1 equip melee");
         this.cool = 1;
         return true;
       }
-      const arm = pick("armour", (_h = (_g = host.wornOffense) == null ? void 0 : _g.call(host, "armour")) != null ? _h : 0, kit.plateOff);
-      if (arm && (((_i = host.equipIfBetterOffense) == null ? void 0 : _i.call(host, arm.id)) || ((_j = host.equipBagItem) == null ? void 0 : _j.call(host, arm.slotIndex)))) {
+      const arm = this.d1EquipLatched("armour") ? null : pick("armour", (_j = (_i = host.wornOffense) == null ? void 0 : _i.call(host, "armour")) != null ? _j : 0, kit.plateOff, (_l = (_k = w.wornArmour) == null ? void 0 : _k.id) != null ? _l : "");
+      if (arm && (((_m = host.equipIfBetterOffense) == null ? void 0 : _m.call(host, arm.id)) || ((_n = host.equipBagItem) == null ? void 0 : _n.call(host, arm.slotIndex)))) {
+        this.d1NoteEquip("armour");
         this.setStatus(host, w, stance, "d1 equip plate");
         this.cool = 1;
         return true;
       }
       return false;
+    }
+    d1NoteEquip(slot) {
+      const t = this.runTicks;
+      const log = this.d1EquipLog[slot].filter((x) => t - x < D1_EQUIP_WINDOW);
+      log.push(t);
+      this.d1EquipLog[slot] = log;
+      if (log.length >= D1_EQUIP_BURST) {
+        this.d1EquipLatchUntil[slot] = t + D1_EQUIP_LATCH;
+        this.d1EquipLog[slot] = [];
+      }
+    }
+    d1EquipLatched(slot) {
+      return this.runTicks < this.d1EquipLatchUntil[slot];
     }
     d1MeleeCand(id, slot, style) {
       return d1IsMeleeSlotGear(id, slot, style);
