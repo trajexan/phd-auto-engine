@@ -1,4 +1,4 @@
-/* phd auto-engine d37 — pull via GET /api/auto-engine */
+/* phd auto-engine d38 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d37";
+  var AUTO_ENGINE_VERSION = "d38";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -3706,7 +3706,7 @@
       return true;
     }
     evLethal(host, w, stance) {
-      var _a, _b, _c;
+      var _a, _b, _c, _d;
       const hpPct = w.maxHp > 0 ? w.hp / w.maxHp : 1;
       const pressing = w.foes.some(
         (f) => f.alive && f.lit && (f.danger === "deadly" || f.danger === "threat" && f.dist <= 3 || f.dist <= 1 && f.danger !== "prey")
@@ -3755,10 +3755,14 @@
       }
       if (!w.hasStyleWeapon && (pressFoe == null ? void 0 : pressFoe.ranged)) {
         if (this.tryCoverBreakLos(host, w, stance, pressFoe, "lethal cover")) return true;
-        host.engage(pressFoe);
-        this.setStatus1001(host, w, stance, "lethal close");
-        this.cool = 1;
-        return true;
+        const o = (_d = host.fightOutlook) == null ? void 0 : _d.call(host, pressFoe);
+        const canWinClose = o ? !!o.win && o.winRate >= 0.5 && o.hpLossExpected < w.hp : pressFoe.danger === "prey";
+        if (canWinClose) {
+          host.engage(pressFoe);
+          this.setStatus1001(host, w, stance, "lethal close");
+          this.cool = 1;
+          return true;
+        }
       }
       this.setStatus1001(host, w, stance, "lethal kite");
       if (w.hub) host.walkTo(w.hub.x, w.hub.y);
