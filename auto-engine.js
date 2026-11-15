@@ -1,4 +1,4 @@
-/* phd auto-engine d29 — pull via GET /api/auto-engine */
+/* phd auto-engine d30 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d29";
+  var AUTO_ENGINE_VERSION = "d30";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1366,6 +1366,8 @@
       __publicField(this, "d1MineStall", null);
       /** d27: resting for out-of-battle regen (pre-kit, no food). */
       __publicField(this, "d1Resting", false);
+      /** d30: tile the rest started on; walk back to it if the host nudge steps off. */
+      __publicField(this, "d1RestAnchor", null);
       /** d27: last depth|xp|weapon|armour fingerprint and the tick it changed. */
       __publicField(this, "d1RestFp", "");
       __publicField(this, "d1RestFpTick", 0);
@@ -2501,6 +2503,7 @@
       }
       const stop = () => {
         this.d1Resting = false;
+        this.d1RestAnchor = null;
         return false;
       };
       if (w.food > 0 || w.healReserve > 0) return stop();
@@ -2517,10 +2520,16 @@
       if (!this.d1Resting) {
         this.d1Resting = true;
         host.clearEngage();
-        host.clearWalk();
+      }
+      host.clearWalk();
+      const a = this.d1RestAnchor;
+      if (!a || a.depth !== w.depth || cheb(w.tile.x, w.tile.y, a.x, a.y) > 1) {
+        this.d1RestAnchor = { depth: w.depth, x: w.tile.x, y: w.tile.y };
+      } else if (a.x !== w.tile.x || a.y !== w.tile.y) {
+        host.walkTo(a.x, a.y);
       }
       this.setStatus(host, w, stance, "d1 rest");
-      this.cool = 1;
+      this.cool = 0;
       return true;
     }
     /**
