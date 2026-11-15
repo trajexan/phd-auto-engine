@@ -1,4 +1,4 @@
-/* phd auto-engine d39 — pull via GET /api/auto-engine */
+/* phd auto-engine d40 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d39";
+  var AUTO_ENGINE_VERSION = "d40";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2262,8 +2262,8 @@
       const holdMineThroughLethal = holdMine && !this.d1MeleeFoeAdjacent(w);
       if (!holdMineThroughLethal && this.evLethal(host, w, stance)) return true;
       const weakFirst = !(w.kitReady || w.hasMetalWeapon && w.hasArmour);
-      if (!holdMine && this.evMobSudden(host, w, stance, weakFirst)) return true;
-      if (!holdMine && this.evMobApproach(host, w, stance, weakFirst)) return true;
+      if (!holdMineThroughLethal && this.evMobSudden(host, w, stance, weakFirst)) return true;
+      if (!holdMineThroughLethal && this.evMobApproach(host, w, stance, weakFirst)) return true;
       if (w.unspentPoints > 0) host.spendPoints();
       if ((w.food > 0 || w.healReserve > 0) && w.hp < w.maxHp * 0.85) {
         if (!((_a = host.drinkOnce) == null ? void 0 : _a.call(host, "hurt"))) host.eat();
@@ -2631,6 +2631,7 @@
      * Non-lethal approach/sudden engage would cancel the swing mid-channel.
      * d39: tickD1 also skips evLethal under this hold unless a lit non-prey
      * foe is already adjacent.
+     * d40: evMobSudden/evMobApproach use that same melee-foe gate.
      */
     d1HoldMineSwing(host, w) {
       var _a, _b, _c;
