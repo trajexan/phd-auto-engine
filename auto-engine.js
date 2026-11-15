@@ -1,4 +1,4 @@
-/* phd auto-engine d41 — pull via GET /api/auto-engine */
+/* phd auto-engine d42 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d41";
+  var AUTO_ENGINE_VERSION = "d42";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2266,10 +2266,17 @@
       if (!holdThroughLethal && this.evMobSudden(host, w, stance, weakFirst)) return true;
       if (!holdThroughLethal && this.evMobApproach(host, w, stance, weakFirst)) return true;
       if (w.unspentPoints > 0) host.spendPoints();
-      if ((w.food > 0 || w.healReserve > 0) && w.hp < w.maxHp * 0.85) {
-        if (!((_a = host.drinkOnce) == null ? void 0 : _a.call(host, "hurt"))) host.eat();
-        this.setStatus(host, w, stance, "d1 eat");
-        return true;
+      if (w.hp < w.maxHp * 0.85) {
+        const spendFood = w.food > D1_FOOD_KEEP || w.hp < w.maxHp * 0.6;
+        if (w.healReserve > 0 && ((_a = host.drinkOnce) == null ? void 0 : _a.call(host, "hurt"))) {
+          this.setStatus(host, w, stance, "d1 eat");
+          return true;
+        }
+        if (w.food > 0 && spendFood) {
+          host.eat();
+          this.setStatus(host, w, stance, "d1 eat");
+          return true;
+        }
       }
       if (w.bagFree > 0 && host.pickupLoot()) {
         this.setStatus(host, w, stance, "d1 looting");
@@ -2285,8 +2292,12 @@
       if (w.loot && w.bagFree > 0 && this.tryWalkLoot(host, w, stance, "d1 loot")) return true;
       if (this.d1ShopFloorFood(host, w, stance)) return true;
       if (foodShort) {
-        if (this.tryCookBagCookables(host, w, stance, "d1 cook")) return true;
-        if (this.d1GetHatchetForCook(host, w, stance)) return true;
+        const kitStairsOpen = this.d1KitStatus(host, w).ready && this.d1StairsOpen(w);
+        const readyCook = w.hasFire || w.hasLogs;
+        if (!kitStairsOpen || readyCook) {
+          if (this.tryCookBagCookables(host, w, stance, "d1 cook")) return true;
+          if (this.d1GetHatchetForCook(host, w, stance)) return true;
+        }
         if (w.food <= 0 && w.coins > 0) host.buyFoodIfCritical();
         if (this.d1FishForHunger(host, w, stance)) return true;
       }
@@ -2970,12 +2981,15 @@
     d1FishForHunger(host, w, stance) {
       var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
       if (w.food >= D1_FOOD_KEEP || stance.healRich) return false;
-      if (this.tryCookBagCookables(host, w, stance, "d1 cook")) return true;
-      if (this.d1GetHatchetForCook(host, w, stance)) return true;
+      const kitStairsOpen = this.d1KitStatus(host, w).ready && this.d1StairsOpen(w);
+      if (!kitStairsOpen || w.hasFire || w.hasLogs) {
+        if (this.tryCookBagCookables(host, w, stance, "d1 cook")) return true;
+        if (this.d1GetHatchetForCook(host, w, stance)) return true;
+      }
       if (w.rawFish > 0 && !w.hasFire && !w.hasLogs) {
         const tree = (_c = (_b = this.mem(w, "tree")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.tree) != null ? _c : null;
         const canChop = !!(tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y));
-        if (!canChop) return false;
+        if (!canChop || kitStairsOpen) return false;
       }
       const pond = (_f = (_e = this.mem(w, "pond")) != null ? _e : (_d = w.seen) == null ? void 0 : _d.pond) != null ? _f : null;
       if (this.d1KitStatus(host, w).ready && w.stairs && w.stairsOpen) {
