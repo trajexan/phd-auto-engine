@@ -1,4 +1,4 @@
-/* phd auto-engine d30 — pull via GET /api/auto-engine */
+/* phd auto-engine d31 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d30";
+  var AUTO_ENGINE_VERSION = "d31";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1006,6 +1006,7 @@
   var D1_REST_FOE_CLEAR = 6;
   var D1_REST_FP_MAX = 900;
   var D1_REST_SAME_TILE_MAX = 150;
+  var D1_KIT_FISH_MAX = 200;
   var D1_METALS = ["bronze", "iron", "steel", "mithril", "adamant", "rune"];
   function d1FloorAge(depth) {
     const i = Math.floor((Math.max(1, depth) - 1) / 30);
@@ -1368,6 +1369,9 @@
       __publicField(this, "d1Resting", false);
       /** d30: tile the rest started on; walk back to it if the host nudge steps off. */
       __publicField(this, "d1RestAnchor", null);
+      /** d31: depth and tickD1-call count of the kitted fish-before-descend budget. */
+      __publicField(this, "d1KitFishDepth", -1);
+      __publicField(this, "d1KitFishCalls", 0);
       /** d27: last depth|xp|weapon|armour fingerprint and the tick it changed. */
       __publicField(this, "d1RestFp", "");
       __publicField(this, "d1RestFpTick", 0);
@@ -2859,9 +2863,17 @@
         const canChop = !!(tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y));
         if (!canChop) return false;
       }
-      if (this.d1KitStatus(host, w).ready && w.stairs && w.stairsOpen) return false;
-      if (!host.hasTool("rod")) return false;
       const pond = (_f = (_e = this.mem(w, "pond")) != null ? _e : (_d = w.seen) == null ? void 0 : _d.pond) != null ? _f : null;
+      if (this.d1KitStatus(host, w).ready && w.stairs && w.stairsOpen) {
+        if (!pond || !host.hasTool("rod") || this.isGatherTileBlocked(pond.x, pond.y)) return false;
+        if (this.d1KitFishDepth !== w.depth) {
+          this.d1KitFishDepth = w.depth;
+          this.d1KitFishCalls = 0;
+        }
+        this.d1KitFishCalls += 1;
+        if (this.d1KitFishCalls > D1_KIT_FISH_MAX) return false;
+      }
+      if (!host.hasTool("rod")) return false;
       if (pond || w.pondKnown) {
         this.d1PondHuntDoneDepth = -1;
         this.d1PondHuntDepth = -1;
