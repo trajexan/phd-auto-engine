@@ -1,4 +1,4 @@
-/* phd auto-engine d26 — pull via GET /api/auto-engine */
+/* phd auto-engine d27 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d26";
+  var AUTO_ENGINE_VERSION = "d27";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1001,6 +1001,11 @@
   var D1_FIND_POND_MAX = 80;
   var D1_MINE_NO_GAIN = 8;
   var D1_MINE_STALL = 8;
+  var D1_REST_BELOW = 0.6;
+  var D1_REST_UNTIL = 0.9;
+  var D1_REST_FOE_CLEAR = 6;
+  var D1_REST_FP_MAX = 900;
+  var D1_REST_SAME_TILE_MAX = 150;
   var D1_METALS = ["bronze", "iron", "steel", "mithril", "adamant", "rune"];
   function d1FloorAge(depth) {
     const i = Math.floor((Math.max(1, depth) - 1) / 30);
@@ -1359,6 +1364,11 @@
       __publicField(this, "d1MineNoGain", null);
       /** d22/d23: no-progress approach ticks on one rock (walk or enroute, not watched). */
       __publicField(this, "d1MineStall", null);
+      /** d27: resting for out-of-battle regen (pre-kit, no food). */
+      __publicField(this, "d1Resting", false);
+      /** d27: last depth|xp|weapon|armour fingerprint and the tick it changed. */
+      __publicField(this, "d1RestFp", "");
+      __publicField(this, "d1RestFpTick", 0);
       /** d11: depth whose dry-floor pond hunt is exhausted (reset on pond or floor change). */
       __publicField(this, "d1PondHuntDoneDepth", -1);
       __publicField(this, "d1PondHuntDepth", -1);
@@ -2240,6 +2250,7 @@
         if (w.food <= 0 && w.coins > 0) host.buyFoodIfCritical();
         if (this.d1FishForHunger(host, w, stance)) return true;
       }
+      if (this.d1RestWhenHurt(host, w, stance)) return true;
       const kit = this.d1KitStatus(host, w);
       if (kit.ready && this.d1Runecraft(host, w, stance)) return true;
       if (this.d1BootstrapTools(host, w, stance, kit, foodShort)) return true;
@@ -2472,6 +2483,44 @@
         return false;
       }
       return false;
+    }
+    /**
+     * d27: no food, no Battleaxe+Plate, HP < 60%, no lit foe within 6, not
+     * in combat → stand still so host regenHp ticks (~1 HP / 90t at lv1)
+     * until HP >= 90%. Guarded against the farm 1200t no-progress watchdog:
+     * only rest while the depth|xp|weapon|armour fingerprint changed within
+     * the last D1_REST_FP_MAX ticks.
+     */
+    d1RestWhenHurt(host, w, stance) {
+      var _a, _b, _c, _d;
+      const fp = `${w.depth}|${w.xpFp}|${(_b = (_a = w.wornWeapon) == null ? void 0 : _a.id) != null ? _b : w.hasMetalWeapon ? "m" : "-"}|${(_d = (_c = w.wornArmour) == null ? void 0 : _c.id) != null ? _d : w.hasArmour ? "a" : "-"}`;
+      if (fp !== this.d1RestFp) {
+        this.d1RestFp = fp;
+        this.d1RestFpTick = this.runTicks;
+      }
+      const stop = () => {
+        this.d1Resting = false;
+        return false;
+      };
+      if (w.food > 0 || w.healReserve > 0) return stop();
+      if (w.kitReady || w.hasMetalWeapon && w.hasArmour) return stop();
+      if (w.maxHp <= 0) return stop();
+      const hpPct = w.hp / w.maxHp;
+      if (hpPct >= D1_REST_UNTIL) return stop();
+      if (!this.d1Resting && hpPct >= D1_REST_BELOW) return false;
+      if (w.inCombat || w.justHit) return stop();
+      const near = w.foes.some((f) => f.alive && f.lit && f.dist <= D1_REST_FOE_CLEAR);
+      if (near) return stop();
+      if (this.runTicks - this.d1RestFpTick >= D1_REST_FP_MAX) return stop();
+      if (this.hangTileTicks >= D1_REST_SAME_TILE_MAX) return stop();
+      if (!this.d1Resting) {
+        this.d1Resting = true;
+        host.clearEngage();
+        host.clearWalk();
+      }
+      this.setStatus(host, w, stance, "d1 rest");
+      this.cool = 1;
+      return true;
     }
     /**
      * d26: already in gather range of a live rock we still need (ore < 2).
