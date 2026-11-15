@@ -1,4 +1,4 @@
-/* phd auto-engine d27 — pull via GET /api/auto-engine */
+/* phd auto-engine d28 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d27";
+  var AUTO_ENGINE_VERSION = "d28";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2224,7 +2224,8 @@
       this.noteFoeApproach(w);
       if (this.evLethal(host, w, stance)) return true;
       const holdMine = this.d1HoldMineSwing(host, w);
-      if (!holdMine && this.evMobSudden(host, w, stance)) return true;
+      const weakFirst = !(w.kitReady || w.hasMetalWeapon && w.hasArmour);
+      if (!holdMine && this.evMobSudden(host, w, stance, weakFirst)) return true;
       if (!holdMine && this.evMobApproach(host, w, stance)) return true;
       if (w.unspentPoints > 0) host.spendPoints();
       if ((w.food > 0 || w.healReserve > 0) && w.hp < w.maxHp * 0.85) {
@@ -4066,8 +4067,9 @@
       }
       return this.runFoodSeek(host, w, stance, "food");
     }
-    evMobSudden(host, w, stance) {
-      const melee = w.foes.filter((f) => f.alive && f.lit && f.dist <= 1).sort((a, b) => a.dist - b.dist)[0];
+    evMobSudden(host, w, stance, weakFirst = false) {
+      const hpOf = (f) => typeof f.hp === "number" ? f.hp : 1e9;
+      const melee = w.foes.filter((f) => f.alive && f.lit && f.dist <= 1).sort((a, b) => a.dist - b.dist || (weakFirst ? hpOf(a) - hpOf(b) : 0))[0];
       if (!melee) return false;
       this.h1001.topEvent = "mob_sudden";
       const worn = w.hasMetalWeapon || w.hasStyleWeapon || w.hasArmour;
