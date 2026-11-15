@@ -1,4 +1,4 @@
-/* phd auto-engine d32 — pull via GET /api/auto-engine */
+/* phd auto-engine d33 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d32";
+  var AUTO_ENGINE_VERSION = "d33";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1007,7 +1007,6 @@
   var D1_REST_FP_MAX = 900;
   var D1_REST_SAME_TILE_MAX = 150;
   var D1_KIT_FISH_MAX = 200;
-  var D1_STARTER_ENGAGE_HP = 0.9;
   var D1_METALS = ["bronze", "iron", "steel", "mithril", "adamant", "rune"];
   function d1FloorAge(depth) {
     const i = Math.floor((Math.max(1, depth) - 1) / 30);
@@ -4098,7 +4097,7 @@
       const ok = this.outlookOk(host, w, melee, {
         allowThreat: worn,
         minWinRate: worn ? 0.4 : 0.5
-      }) && !(weakFirst && this.d1StarterFreshFoeBlock(w, melee));
+      });
       if (this.aleFwTheaterBanned()) {
         host.clearEngage();
         this.noteAleCombatBan(host, "evMobSudden");
@@ -4121,21 +4120,6 @@
       return true;
     }
     /**
-     * d32: d1 pre-kit with no metal/style weapon and no armour, hero below
-     * D1_STARTER_ENGAGE_HP of max HP: do not open a fight on a foe that is
-     * still at full HP (kite instead). R32: lv1 starter engages on a full
-     * foe while hurt won 5 of 61 and died in 29 (585 HP lost), vs 25 wins
-     * and 21 deaths in 152 at >=90% HP. F1 pre-ore2 deaths were 49/117
-     * (all lv1, xp 0, median 13 dmg dealt). A wounded foe may still be
-     * finished (d28), and evLethal runs first.
-     */
-    d1StarterFreshFoeBlock(w, foe) {
-      if (w.hasMetalWeapon || w.hasStyleWeapon || w.hasArmour) return false;
-      if (!(w.maxHp > 0) || w.hp >= w.maxHp * D1_STARTER_ENGAGE_HP) return false;
-      if (typeof foe.hp !== "number" || typeof foe.maxHp !== "number" || !(foe.maxHp > 0)) return false;
-      return foe.hp >= foe.maxHp;
-    }
-    /**
      * Eng 2027 / t1722: track nearest lit foe dist across ticks.
      * Closing (dist decreasing) arms early act — instinct before adj.
      */
@@ -4153,7 +4137,7 @@
      * Eng 2027 / t1722: foe closing at dist 2–3 (not yet adj) → engage or kite early.
      * evMobSudden still owns dist≤1. Snapshot watch===3 chase remains elsewhere.
      */
-    evMobApproach(host, w, stance, preKit = false) {
+    evMobApproach(host, w, stance, _preKit = false) {
       if (!this.nearFoeClosing) return false;
       const foe = w.foes.filter((f) => f.alive && f.lit && f.dist >= 2 && f.dist <= 3).sort((a, b) => a.dist - b.dist)[0];
       if (!foe) return false;
@@ -4164,7 +4148,7 @@
       const ok = this.outlookOk(host, w, foe, {
         allowThreat: worn,
         minWinRate: worn ? 0.4 : 0.5
-      }) && !(preKit && this.d1StarterFreshFoeBlock(w, foe));
+      });
       if (this.aleFwTheaterBanned()) {
         host.clearEngage();
         this.noteAleCombatBan(host, "evMobApproach");
