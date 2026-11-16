@@ -1,4 +1,4 @@
-/* phd auto-engine d43 — pull via GET /api/auto-engine */
+/* phd auto-engine d44 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d43";
+  var AUTO_ENGINE_VERSION = "d44";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1006,6 +1006,7 @@
   var D1_MINE_STALL = 8;
   var D1_FORGE_MINE_MAX = 400;
   var D1_REST_BELOW = 0.6;
+  var D1_STARTER_MIN_WIN = 0.75;
   var D1_REST_UNTIL = 0.9;
   var D1_REST_FOE_CLEAR = 6;
   var D1_REST_FP_MAX = 900;
@@ -4229,7 +4230,7 @@
       const worn = w.hasMetalWeapon || w.hasStyleWeapon || w.hasArmour;
       const ok = this.outlookOk(host, w, melee, {
         allowThreat: worn,
-        minWinRate: worn ? 0.4 : 0.5
+        minWinRate: worn ? 0.4 : D1_STARTER_MIN_WIN
       });
       if (this.aleFwTheaterBanned()) {
         host.clearEngage();
@@ -4280,7 +4281,7 @@
       const worn = w.hasMetalWeapon || w.hasStyleWeapon || w.hasArmour;
       const ok = this.outlookOk(host, w, foe, {
         allowThreat: worn,
-        minWinRate: worn ? 0.4 : 0.5
+        minWinRate: worn ? 0.4 : D1_STARTER_MIN_WIN
       });
       if (this.aleFwTheaterBanned()) {
         host.clearEngage();
