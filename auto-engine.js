@@ -1,4 +1,4 @@
-/* phd auto-engine d49 — pull via GET /api/auto-engine */
+/* phd auto-engine d50 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d49";
+  var AUTO_ENGINE_VERSION = "d50";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2749,19 +2749,26 @@
           }
           if (attempt.tool === "pickaxe" && host.acquireTool("pickaxe")) {
             this.setStatus(host, w, stance, "d1 get pickaxe");
-            this.cool = 3;
+            this.cool = host.hasTool("pickaxe") || !this.d1ShopNear(w) ? 3 : 0;
             return true;
           }
         }
       }
       return false;
     }
+    /** d50: hero within Chebyshev 2 of the remembered/seen shop (last steps to its stand tile). */
+    d1ShopNear(w) {
+      var _a, _b, _c;
+      const shop = (_c = (_b = this.mem(w, "shop")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.shop) != null ? _c : null;
+      if (!shop || !w.tile) return false;
+      return Math.max(Math.abs(w.tile.x - shop.x), Math.abs(w.tile.y - shop.y)) <= 2;
+    }
     d1BootstrapTools(host, w, stance, kit, foodShort) {
       var _a, _b, _c;
       if (!host.hasTool("pickaxe")) {
         if (host.acquireTool("pickaxe")) {
           this.setStatus(host, w, stance, "d1 get pickaxe");
-          this.cool = 3;
+          this.cool = host.hasTool("pickaxe") || !this.d1ShopNear(w) ? 3 : 0;
           return true;
         }
         const shop = (_c = (_b = this.mem(w, "shop")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.shop) != null ? _c : null;
