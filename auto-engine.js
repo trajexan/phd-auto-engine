@@ -1,4 +1,4 @@
-/* phd auto-engine d47 — pull via GET /api/auto-engine */
+/* phd auto-engine d48 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d47";
+  var AUTO_ENGINE_VERSION = "d48";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1003,7 +1003,7 @@
   var D1_EQUIP_WINDOW = 120;
   var D1_EQUIP_BURST = 4;
   var D1_EQUIP_LATCH = 1200;
-  var D1_MINE_UNREACHABLE = 24;
+  var D1_MINE_STALL = 8;
   var D1_FORGE_MINE_MAX = 400;
   var D1_REST_BELOW = 0.6;
   var D1_REST_UNTIL = 0.9;
@@ -1382,8 +1382,6 @@
       __publicField(this, "d1MineNoGain", null);
       /** d22/d23: no-progress approach ticks on one rock (walk or enroute, not watched). */
       __publicField(this, "d1MineStall", null);
-      /** d47: rocks given up this floor after D1_MINE_UNREACHABLE no-close approach ticks (not a 200-tick tile block). */
-      __publicField(this, "d1MineUnreachable", /* @__PURE__ */ new Set());
       /** d27: resting for out-of-battle regen (pre-kit, no food). */
       __publicField(this, "d1Resting", false);
       /** d30: tile the rest started on; walk back to it if the host nudge steps off. */
@@ -2236,7 +2234,7 @@
      * compares → only then descend. No personas, farm lanes, or class switch.
      */
     tickD1(host, w, stance) {
-      var _a, _b, _c, _d, _e, _f, _g;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
       if (w.depth !== this.d1Floor) {
         this.d1Floor = w.depth;
         this.d1ForgeDone = false;
@@ -2250,7 +2248,6 @@
         this.d1PondHuntElapsed = 0;
         this.d1MineNoGain = null;
         this.d1MineStall = null;
-        this.d1MineUnreachable.clear();
         this.d1EquipLog = { weapon: [], armour: [] };
         this.d1EquipLatchUntil = { weapon: -1, armour: -1 };
         this.d1ShopFoodCalls = 0;
@@ -2324,7 +2321,7 @@
       if (kit.ready && this.d1ForgeDone && this.d1PushBoss(host, w, stance)) return true;
       const anvil = (_d = (_c = this.mem(w, "anvil")) != null ? _c : (_b = w.seen) == null ? void 0 : _b.anvil) != null ? _d : null;
       const shop = (_g = (_f = this.mem(w, "shop")) != null ? _f : (_e = w.seen) == null ? void 0 : _e.shop) != null ? _g : null;
-      const rock = this.d1UsableRock(w);
+      const rock = (_j = (_i = this.mem(w, "rock")) != null ? _i : (_h = w.seen) == null ? void 0 : _h.rock) != null ? _j : null;
       if (!anvil && w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
         this.setStatus(host, w, stance, "d1 find anvil");
         this.cool = 1;
@@ -2659,21 +2656,14 @@
       if (!this.cookOwed(w, stance)) return false;
       return w.hasFire || w.hasLogs;
     }
-    /**
-     * d46/d47: seen or remembered rock that is not tile-blocked, Mining-level
-     * gated, or marked unapproachable this floor after a long no-close.
-     */
-    d1UsableRock(w) {
-      var _a, _b, _c, _d;
-      const seenRock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : null;
-      const memRock = this.mem(w, "rock");
-      const usable = (t) => !!t && !this.isGatherTileBlocked(t.x, t.y) && !this.d1MineLevelGated.has(`${t.x},${t.y}`) && !this.d1MineUnreachable.has(`${w.depth},${t.x},${t.y}`);
-      return (_d = (_c = usable(seenRock) ? seenRock : null) != null ? _c : usable(memRock) ? memRock : null) != null ? _d : null;
-    }
     d1HoldMineSwing(host, w) {
+      var _a, _b, _c;
       if (!host.hasTool("pickaxe")) return false;
       if (w.oreCount >= 2) return false;
-      const rock = this.d1UsableRock(w);
+      const seenRock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : null;
+      const memRock = this.mem(w, "rock");
+      const usable = (t) => !!t && !this.isGatherTileBlocked(t.x, t.y) && !this.d1MineLevelGated.has(`${t.x},${t.y}`);
+      const rock = (_c = usable(seenRock) ? seenRock : null) != null ? _c : usable(memRock) ? memRock : null;
       if (!rock || !w.tile) return false;
       return Math.max(Math.abs(w.tile.x - rock.x), Math.abs(w.tile.y - rock.y)) <= 1;
     }
@@ -2684,13 +2674,16 @@
       );
     }
     d1MineOre(host, w, stance) {
-      var _a, _b, _c, _d;
+      var _a, _b, _c, _d, _e, _f, _g;
       if (!host.hasTool("pickaxe")) return false;
-      const rock = this.d1UsableRock(w);
+      const seenRock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : null;
+      const memRock = this.mem(w, "rock");
+      const usable = (t) => !!t && !this.isGatherTileBlocked(t.x, t.y) && !this.d1MineLevelGated.has(`${t.x},${t.y}`);
+      const rock = (_c = usable(seenRock) ? seenRock : null) != null ? _c : usable(memRock) ? memRock : null;
       if (rock) {
         const cheb2 = Math.max(
-          Math.abs(((_b = (_a = w.tile) == null ? void 0 : _a.x) != null ? _b : 0) - rock.x),
-          Math.abs(((_d = (_c = w.tile) == null ? void 0 : _c.y) != null ? _d : 0) - rock.y)
+          Math.abs(((_e = (_d = w.tile) == null ? void 0 : _d.x) != null ? _e : 0) - rock.x),
+          Math.abs(((_g = (_f = w.tile) == null ? void 0 : _f.y) != null ? _g : 0) - rock.y)
         );
         const stallSame = (st) => !!st && st.depth === w.depth && st.x === rock.x && st.y === rock.y;
         const bumpStall = (progressCheb) => {
@@ -2705,17 +2698,14 @@
             return false;
           }
           st.n += 1;
-          if (st.n >= D1_MINE_UNREACHABLE) {
-            this.d1MineUnreachable.add(`${w.depth},${rock.x},${rock.y}`);
+          if (st.n >= D1_MINE_STALL) {
             this.d1MineStall = null;
             this.d1MineNoGain = null;
             return true;
           }
           return false;
         };
-        if (cheb2 <= 1) {
-          this.d1MineStall = null;
-        } else if (this.walkToTile(host, rock.x, rock.y)) {
+        if (this.walkToTile(host, rock.x, rock.y)) {
           if (bumpStall(cheb2)) return false;
           this.setStatus(host, w, stance, "d1 mine");
           this.cool = 1;
@@ -2811,7 +2801,7 @@
       }
       if (w.oreCount < 2) {
         if (this.d1MineOre(host, w, stance)) return true;
-        if (!this.d1UsableRock(w) && w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
+        if (w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
           this.setStatus(host, w, stance, "d1 find ore");
           this.cool = 1;
           return true;
@@ -2869,7 +2859,7 @@
         }
         if (w.oreCount < 2) {
           if (this.d1MineOre(host, w, stance)) return true;
-          if (!this.d1UsableRock(w) && w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
+          if (w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
             this.setStatus(host, w, stance, "d1 find ore");
             this.cool = 1;
             return true;
