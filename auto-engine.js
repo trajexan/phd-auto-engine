@@ -1,4 +1,4 @@
-/* phd auto-engine d53 — pull via GET /api/auto-engine */
+/* phd auto-engine d54 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d53";
+  var AUTO_ENGINE_VERSION = "d54";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -3004,6 +3004,7 @@
         if (this.d1KitFishCalls > D1_KIT_FISH_MAX) return false;
       }
       if (!host.hasTool("rod")) return false;
+      if (w.bagFree <= 0) return false;
       if (pond || w.pondKnown) {
         this.d1PondHuntDoneDepth = -1;
         this.d1PondHuntDepth = -1;
