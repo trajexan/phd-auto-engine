@@ -1,4 +1,4 @@
-/* phd auto-engine d48 — pull via GET /api/auto-engine */
+/* phd auto-engine d49 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d48";
+  var AUTO_ENGINE_VERSION = "d49";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2309,7 +2309,8 @@
       if (this.d1EquipMeleeUpgrades(host, w, stance, kit)) return true;
       if (!kit.ready && this.d1SmithFloorKit(host, w, stance, kit)) return true;
       if (kit.ready && !this.d1ForgeDone && this.d1ForgeKit(host, w, stance)) return true;
-      if (host.openChestOnce()) {
+      const d1KitStairsOpen = kit.ready && this.d1StairsOpen(w);
+      if (!d1KitStairsOpen && host.openChestOnce()) {
         this.setStatus(host, w, stance, "d1 chest");
         this.cool = 2;
         return true;
