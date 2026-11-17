@@ -1,4 +1,4 @@
-/* phd auto-engine d52 — pull via GET /api/auto-engine */
+/* phd auto-engine d53 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d52";
+  var AUTO_ENGINE_VERSION = "d53";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -14297,7 +14297,6 @@
      * True if an action was issued this tick.
      */
     resumeStairsStrive(host, w, stance) {
-      var _a, _b;
       const s = this.stairsStrive;
       if (!s) return false;
       if (!w.stairs || w.stairs.x !== s.sx || w.stairs.y !== s.sy || !w.stairsOpen) {
@@ -14324,7 +14323,6 @@
         return true;
       }
       const sameTile = w.tile.x === s.standX && w.tile.y === s.standY;
-      s.sameRun = sameTile ? ((_a = s.sameRun) != null ? _a : 0) + 1 : 0;
       if (sameTile) s.standHits++;
       else {
         const dist = Math.max(Math.abs(w.tile.x - s.sx), Math.abs(w.tile.y - s.sy));
@@ -14334,7 +14332,7 @@
         s.standY = w.tile.y;
       }
       const aged = this.runTicks - s.started;
-      const d1DescendStall = s.label === "d1 descend" && (sameTile && ((_b = s.sameRun) != null ? _b : 0) >= 24);
+      const d1DescendStall = s.label === "d1 descend" && (sameTile && s.standHits >= 24);
       const otherStall = s.label !== "d1 descend" && (s.standHits >= 12 || aged >= 100);
       if (d1DescendStall || otherStall) {
         this.noteGatherFail(s.sx, s.sy);
