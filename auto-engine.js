@@ -1,4 +1,4 @@
-/* phd auto-engine d54 — pull via GET /api/auto-engine */
+/* phd auto-engine d55 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d54";
+  var AUTO_ENGINE_VERSION = "d55";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1285,6 +1285,8 @@
       __publicField(this, "d1Floor", -1);
       __publicField(this, "d1ForgeDone", false);
       __publicField(this, "d1ForgeFailStreak", 0);
+      /** d55: fail-streak accumulated while ore-short; reset before at-cap checks. */
+      __publicField(this, "d1ForgeOreShort", false);
       /** d37: rocks the host refused for Mining level on this floor ("x,y"). */
       __publicField(this, "d1MineLevelGated", /* @__PURE__ */ new Set());
       /**
@@ -2239,6 +2241,7 @@
         this.d1Floor = w.depth;
         this.d1ForgeDone = false;
         this.d1ForgeFailStreak = 0;
+        this.d1ForgeOreShort = false;
         this.d1MineLevelGated.clear();
         this.d1PondHuntDoneDepth = -1;
         this.d1PondHuntDepth = -1;
@@ -2570,22 +2573,32 @@
     d1ForgeKit(host, w, stance) {
       if (host.forgeWieldedOnce()) {
         this.d1ForgeFailStreak = 0;
+        this.d1ForgeOreShort = false;
         this.setStatus(host, w, stance, "d1 forge kit");
         this.cool = 2;
         return true;
       }
-      this.d1ForgeFailStreak++;
-      if (w.oreCount < 2 && (this.d1MineLevelGated.size > 0 || this.d1ForgeFailStreak >= D1_FORGE_MINE_MAX)) {
-        this.d1ForgeDone = true;
+      if (w.oreCount < 2) {
+        this.d1ForgeOreShort = true;
+        this.d1ForgeFailStreak++;
+        if (this.d1MineLevelGated.size > 0 || this.d1ForgeFailStreak >= D1_FORGE_MINE_MAX) {
+          this.d1ForgeDone = true;
+          return false;
+        }
+        if (this.d1MineOre(host, w, stance)) return true;
         return false;
       }
-      if (w.oreCount < 2 && this.d1MineOre(host, w, stance)) return true;
+      if (this.d1ForgeOreShort) {
+        this.d1ForgeOreShort = false;
+        this.d1ForgeFailStreak = 0;
+      }
+      this.d1ForgeFailStreak++;
       if (w.coins < 25 && host.sellUnusedOnce()) {
         this.setStatus(host, w, stance, "d1 sell for forge");
         this.cool = 2;
         return true;
       }
-      if (this.d1ForgeFailStreak >= 3 && (w.oreCount >= 2 || w.coins >= 25)) {
+      if (this.d1ForgeFailStreak >= 3 && w.coins >= 25) {
         this.d1ForgeDone = true;
         return false;
       }
@@ -2722,7 +2735,7 @@
           } else {
             g2.n += 1;
             if (g2.n >= D1_MINE_NO_GAIN) {
-              this.noteGatherFail(rock.x, rock.y, attempt.tool);
+              this.noteGatherFail(rock.x, rock.y);
               dropNode(this.h1001.nodes, "rock", w.depth, rock.x, rock.y);
               this.d1MineNoGain = null;
               return false;
