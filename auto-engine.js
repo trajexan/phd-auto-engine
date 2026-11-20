@@ -1,4 +1,4 @@
-/* phd auto-engine d66 — pull via GET /api/auto-engine */
+/* phd auto-engine d67 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d66";
+  var AUTO_ENGINE_VERSION = "d67";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2469,14 +2469,20 @@
      * is already ready, a plate is already worn, stairs are open, and the
      * current-age plate has still not been completed after D1_FLOOR_KIT_GIVEUP
      * calls, give up this floor and let descend run.
+     * d67: also count when a Battleaxe is worn and a plate is worn, stairs
+     * are open, and the current-age kit (wep and/or plate) is still not
+     * ready — so a previous-age BA+plate can leave an iron floor instead
+     * of looping find-anvil until watchdog (R131 farm-w5-1795152216767).
      */
     d1NotePlateHunt(w, kit) {
-      var _a, _b;
+      var _a, _b, _c, _d;
       if (this.d1FloorKitGiveUp) return;
-      if (!kit.wepReady || kit.armReady) return;
+      if (kit.ready) return;
+      if (!this.d1StairsOpen(w)) return;
       const wornArmId = (_b = (_a = w.wornArmour) == null ? void 0 : _a.id) != null ? _b : "";
       if (!d1IsPlate(wornArmId)) return;
-      if (!this.d1StairsOpen(w)) return;
+      const wornWepId = (_d = (_c = w.wornWeapon) == null ? void 0 : _c.id) != null ? _d : "";
+      if (!kit.wepReady && !d1IsBattleaxe(wornWepId)) return;
       this.d1FloorKitHuntCalls++;
       if (this.d1FloorKitHuntCalls >= D1_FLOOR_KIT_GIVEUP) {
         this.d1FloorKitGiveUp = true;
