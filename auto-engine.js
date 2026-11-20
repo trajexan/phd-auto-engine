@@ -1,4 +1,4 @@
-/* phd auto-engine d67 — pull via GET /api/auto-engine */
+/* phd auto-engine d68 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d67";
+  var AUTO_ENGINE_VERSION = "d68";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1006,6 +1006,8 @@
   var D1_MINE_STALL = 8;
   var D1_FORGE_MINE_MAX = 400;
   var D1_FLOOR_KIT_GIVEUP = 400;
+  var D1_EXPLORE_COMMIT = 40;
+  var D1_EXPLORE_STALL = 8;
   var D1_REST_BELOW = 0.6;
   var D1_REST_UNTIL = 0.9;
   var D1_REST_FOE_CLEAR = 6;
@@ -1871,6 +1873,8 @@
       /** Last hero tile seen in tick() — stamped onto journal rows. */
       __publicField(this, "lastTileX", 0);
       __publicField(this, "lastTileY", 0);
+      /** d68: committed explore frontier target (see AUTO_ENGINE_VERSION note). */
+      __publicField(this, "d1ExploreCommit", null);
       /** d34: equips per slot in the last D1_EQUIP_WINDOW ticks; latch after a flip burst. */
       __publicField(this, "d1EquipLog", { weapon: [], armour: [] });
       __publicField(this, "d1EquipLatchUntil", { weapon: -1, armour: -1 });
@@ -1895,6 +1899,7 @@
         this.bagFullFails = 0;
       }
       this.trackProgress(w);
+      this.d1StickExplore(host, w);
       if (w.depth !== this.lastDepth) {
         const prev = this.lastDepth;
         this.fired.clear();
@@ -6443,6 +6448,41 @@
       return memNode(this.h1001.nodes, kind, w);
     }
     /** True if a walk was issued (not yet adjacent). */
+    /**
+     * d68: hold one explore frontier target instead of following the host's
+     * per-tile re-pick (2-tile ping-pong to watchdog). Mutates w.explore.
+     */
+    d1StickExplore(host, w) {
+      var _a;
+      const fresh = w.explore;
+      const c = this.d1ExploreCommit;
+      const t = w.tile;
+      const foeLit = ((_a = w.foes) != null ? _a : []).some((f) => f.alive && f.lit);
+      if (!fresh || !t || foeLit) {
+        this.d1ExploreCommit = null;
+        return;
+      }
+      const tileKey = `${t.x},${t.y}`;
+      if (c) {
+        if (tileKey !== c.tileKey) {
+          c.tileKey = tileKey;
+          c.tileSince = this.runTicks;
+        }
+        const keep = c.depth === w.depth && cheb(t.x, t.y, c.x, c.y) > 1 && this.runTicks - c.since < D1_EXPLORE_COMMIT && this.runTicks - c.tileSince < D1_EXPLORE_STALL && host.isWalkable(c.x, c.y);
+        if (keep) {
+          if (fresh.x !== c.x || fresh.y !== c.y) w.explore = { x: c.x, y: c.y };
+          return;
+        }
+      }
+      this.d1ExploreCommit = {
+        x: fresh.x,
+        y: fresh.y,
+        depth: w.depth,
+        since: this.runTicks,
+        tileKey,
+        tileSince: this.runTicks
+      };
+    }
     walkToTile(host, x, y, adj = 1) {
       const w = host.world();
       if (cheb(w.tile.x, w.tile.y, x, y) > adj) {
