@@ -1,4 +1,4 @@
-/* phd auto-engine d54 — pull via GET /api/auto-engine */
+/* phd auto-engine d64 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d54";
+  var AUTO_ENGINE_VERSION = "d64";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1005,6 +1005,7 @@
   var D1_EQUIP_LATCH = 1200;
   var D1_MINE_STALL = 8;
   var D1_FORGE_MINE_MAX = 400;
+  var D1_FLOOR_KIT_GIVEUP = 400;
   var D1_REST_BELOW = 0.6;
   var D1_REST_UNTIL = 0.9;
   var D1_REST_FOE_CLEAR = 6;
@@ -1284,7 +1285,12 @@
       /** d1 floor latch — reset kit/forge progress when the floor/age changes. */
       __publicField(this, "d1Floor", -1);
       __publicField(this, "d1ForgeDone", false);
+      /** d57: last lit boss/gateBoss/alpha tile on this floor (cleared on floor change). */
+      __publicField(this, "d1LastBoss", null);
       __publicField(this, "d1ForgeFailStreak", 0);
+      /** d62: current-age plate hunt given up on this floor (reset on floor change). */
+      __publicField(this, "d1FloorKitGiveUp", false);
+      __publicField(this, "d1FloorKitHuntCalls", 0);
       /** d37: rocks the host refused for Mining level on this floor ("x,y"). */
       __publicField(this, "d1MineLevelGated", /* @__PURE__ */ new Set());
       /**
@@ -1882,6 +1888,7 @@
       this.lastTileY = (_d = (_c = w.tile) == null ? void 0 : _c.y) != null ? _d : this.lastTileY;
       this.watchHang(host, w);
       if (this.hangReported) return;
+      this.d1RememberBoss(w);
       const stance = foodStance(w.healReserve, w.floorHealNeed, this.traits, w.food);
       if (w.bagFree >= 3 || w.bagFree > 0 && this.runTicks >= this.bagFullUntil) {
         this.bagFullUntil = 0;
@@ -2233,27 +2240,58 @@
      * tools bootstrap → current-age Battleaxe+Plate, forge to cap, melee-only
      * compares → only then descend. No personas, farm lanes, or class switch.
      */
+    /** d1: reset per-floor kit/forge/hunt state when depth changes. */
+    d1OnFloorChange(w) {
+      if (w.depth === this.d1Floor) return;
+      this.d1Floor = w.depth;
+      this.d1ForgeDone = false;
+      this.d1LastBoss = null;
+      this.d1ForgeFailStreak = 0;
+      this.d1FloorKitGiveUp = false;
+      this.d1FloorKitHuntCalls = 0;
+      this.d1MineLevelGated.clear();
+      this.d1PondHuntDoneDepth = -1;
+      this.d1PondHuntDepth = -1;
+      this.d1PondHuntTiles.clear();
+      this.d1PondHuntNoNew = 0;
+      this.d1PondHuntTicks = 0;
+      this.d1PondHuntElapsed = 0;
+      this.d1MineNoGain = null;
+      this.d1MineStall = null;
+      this.d1EquipLog = { weapon: [], armour: [] };
+      this.d1EquipLatchUntil = { weapon: -1, armour: -1 };
+      this.d1ShopFoodCalls = 0;
+      this.d1ShopBuyMiss = 0;
+      this.d1ShopBuyCoins = -1;
+    }
+    /**
+     * d57/d59: remember the last tile a lit boss was seen on this floor.
+     * d59 calls this from tick() so fork/cool ticks still record the tile.
+     */
+    d1RememberBoss(w) {
+      this.d1OnFloorChange(w);
+      const litBoss = w.foes.find(
+        (f) => f.alive && f.lit && (f.boss || f.gateBoss || f.alpha)
+      );
+      if (litBoss) this.d1LastBoss = { x: litBoss.x, y: litBoss.y };
+    }
+    /**
+     * d59: kitted, stairs sealed, a boss still lives on the floor, and none
+     * is in vision — hunt that boss (seek if the last tile is known, else
+     * explore) instead of find-pond / find-anvil.
+     */
+    d1ShouldHuntSealedBoss(w) {
+      if (w.stairsOpen) return false;
+      if (!w.bossFloor) return false;
+      if (w.inCombat) return false;
+      if (w.foes.some((f) => f.alive && f.lit && (f.boss || f.gateBoss || f.alpha))) {
+        return false;
+      }
+      return true;
+    }
     tickD1(host, w, stance) {
       var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
-      if (w.depth !== this.d1Floor) {
-        this.d1Floor = w.depth;
-        this.d1ForgeDone = false;
-        this.d1ForgeFailStreak = 0;
-        this.d1MineLevelGated.clear();
-        this.d1PondHuntDoneDepth = -1;
-        this.d1PondHuntDepth = -1;
-        this.d1PondHuntTiles.clear();
-        this.d1PondHuntNoNew = 0;
-        this.d1PondHuntTicks = 0;
-        this.d1PondHuntElapsed = 0;
-        this.d1MineNoGain = null;
-        this.d1MineStall = null;
-        this.d1EquipLog = { weapon: [], armour: [] };
-        this.d1EquipLatchUntil = { weapon: -1, armour: -1 };
-        this.d1ShopFoodCalls = 0;
-        this.d1ShopBuyMiss = 0;
-        this.d1ShopBuyCoins = -1;
-      }
+      this.d1RememberBoss(w);
       this.d1AdvanceDryPondHuntClock(host, w, stance);
       this.maybeScan(host, w);
       if (this.drainAtTileLoot(host, w, stance)) return true;
@@ -2293,21 +2331,24 @@
       if (w.loot && w.bagFree > 0 && this.tryWalkLoot(host, w, stance, "d1 loot")) return true;
       if (this.d1ShopFloorFood(host, w, stance)) return true;
       if (foodShort) {
-        const kitStairsOpen = this.d1KitStatus(host, w).ready && this.d1StairsOpen(w);
+        const kitReadyNow = this.d1KitStatus(host, w).ready;
+        const kitStairsOpen = kitReadyNow && this.d1StairsOpen(w);
+        const deferFoodJobForBoss = kitReadyNow && this.d1ShouldHuntSealedBoss(w);
         const readyCook = w.hasFire || w.hasLogs;
-        if (!kitStairsOpen || readyCook) {
+        if (!kitStairsOpen && !deferFoodJobForBoss || readyCook) {
           if (this.tryCookBagCookables(host, w, stance, "d1 cook")) return true;
-          if (this.d1GetHatchetForCook(host, w, stance)) return true;
+          if (!deferFoodJobForBoss && this.d1GetHatchetForCook(host, w, stance)) return true;
         }
         if (w.food <= 0 && w.coins > 0) host.buyFoodIfCritical();
-        if (this.d1FishForHunger(host, w, stance)) return true;
+        if (!deferFoodJobForBoss && this.d1FishForHunger(host, w, stance)) return true;
       }
       if (this.d1RestWhenHurt(host, w, stance)) return true;
       const kit = this.d1KitStatus(host, w);
+      this.d1NotePlateHunt(w, kit);
       if (kit.ready && this.d1Runecraft(host, w, stance)) return true;
       if (this.d1BootstrapTools(host, w, stance, kit, foodShort)) return true;
       if (this.d1EquipMeleeUpgrades(host, w, stance, kit)) return true;
-      if (!kit.ready && this.d1SmithFloorKit(host, w, stance, kit)) return true;
+      if (!kit.ready && !this.d1FloorKitGiveUp && this.d1SmithFloorKit(host, w, stance, kit)) return true;
       if (kit.ready && !this.d1ForgeDone && this.d1ForgeKit(host, w, stance)) return true;
       const d1KitStairsOpen = kit.ready && this.d1StairsOpen(w);
       if (!d1KitStairsOpen && host.openChestOnce()) {
@@ -2315,15 +2356,18 @@
         this.cool = 2;
         return true;
       }
-      if ((!kit.ready || !this.d1ForgeDone) && this.d1MineOre(host, w, stance)) return true;
-      if (kit.ready && this.d1ForgeDone && this.d1TryDescend(host, w, stance)) {
+      if ((!kit.ready || !this.d1ForgeDone) && !this.d1FloorKitGiveUp && this.d1MineOre(host, w, stance)) return true;
+      if ((kit.ready && this.d1ForgeDone || this.d1FloorKitGiveUp) && this.d1TryDescend(host, w, stance)) {
         return true;
       }
       if (kit.ready && this.d1ForgeDone && this.d1PushBoss(host, w, stance)) return true;
+      if (kit.ready && this.d1ForgeDone && this.d1SeekUnseenBoss(host, w, stance)) {
+        return true;
+      }
       const anvil = (_d = (_c = this.mem(w, "anvil")) != null ? _c : (_b = w.seen) == null ? void 0 : _b.anvil) != null ? _d : null;
       const shop = (_g = (_f = this.mem(w, "shop")) != null ? _f : (_e = w.seen) == null ? void 0 : _e.shop) != null ? _g : null;
       const rock = (_j = (_i = this.mem(w, "rock")) != null ? _i : (_h = w.seen) == null ? void 0 : _h.rock) != null ? _j : null;
-      if (!anvil && w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
+      if (!anvil && w.explore && !this.d1FloorKitGiveUp && !(kit.ready && this.d1ShouldHuntSealedBoss(w)) && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
         this.setStatus(host, w, stance, "d1 find anvil");
         this.cool = 1;
         return true;
@@ -2333,7 +2377,7 @@
         this.cool = 1;
         return true;
       }
-      if (!rock && host.hasTool("pickaxe") && (!kit.ready || !this.d1ForgeDone) && w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
+      if (!rock && host.hasTool("pickaxe") && (!kit.ready || !this.d1ForgeDone) && !this.d1FloorKitGiveUp && w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
         this.setStatus(host, w, stance, "d1 find ore");
         this.cool = 1;
         return true;
@@ -2416,6 +2460,24 @@
       const mem = (_c = (_b = w.seen) == null ? void 0 : _b.food) != null ? _c : null;
       if (mem) return { x: mem.x, y: mem.y, id: "food", name: "food", kind: "food", count: 1 };
       return null;
+    }
+    /**
+     * d62: count plate-hunt ticks on this floor. When a current-age Battleaxe
+     * is already ready, a plate is already worn, stairs are open, and the
+     * current-age plate has still not been completed after D1_FLOOR_KIT_GIVEUP
+     * calls, give up this floor and let descend run.
+     */
+    d1NotePlateHunt(w, kit) {
+      var _a, _b;
+      if (this.d1FloorKitGiveUp) return;
+      if (!kit.wepReady || kit.armReady) return;
+      const wornArmId = (_b = (_a = w.wornArmour) == null ? void 0 : _a.id) != null ? _b : "";
+      if (!d1IsPlate(wornArmId)) return;
+      if (!this.d1StairsOpen(w)) return;
+      this.d1FloorKitHuntCalls++;
+      if (this.d1FloorKitHuntCalls >= D1_FLOOR_KIT_GIVEUP) {
+        this.d1FloorKitGiveUp = true;
+      }
     }
     d1KitStatus(host, w) {
       var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p;
@@ -3101,6 +3163,31 @@
       }
       host.engage(boss);
       this.setStatus(host, w, stance, "d1 boss");
+      this.cool = 1;
+      return true;
+    }
+    /**
+     * d57: walk back to the last lit boss tile when stairs are still sealed
+     * and no boss is in vision. The door cannot open while the king lives
+     * (R121: walk-to-stairs left lives parked, including 1257 same-tile
+     * ticks on "stairs are sealed while the King lives"). If we are already
+     * next to that tile and still see no boss, return false so explore can
+     * search — do not stand there until watchdog.
+     */
+    d1SeekUnseenBoss(host, w, stance) {
+      if (w.stairsOpen) return false;
+      if (!w.bossFloor) return false;
+      if (w.inCombat) return false;
+      if (w.foes.some((f) => f.alive && f.lit && (f.boss || f.gateBoss || f.alpha))) {
+        return false;
+      }
+      const last = this.d1LastBoss;
+      if (!last) return false;
+      const cheb2 = Math.max(Math.abs(w.tile.x - last.x), Math.abs(w.tile.y - last.y));
+      if (cheb2 <= 1) return false;
+      host.clearEngage();
+      host.walkTo(last.x, last.y);
+      this.setStatus(host, w, stance, "d1 seek boss");
       this.cool = 1;
       return true;
     }
@@ -14298,6 +14385,7 @@
      * True if an action was issued this tick.
      */
     resumeStairsStrive(host, w, stance) {
+      var _a, _b;
       const s = this.stairsStrive;
       if (!s) return false;
       if (!w.stairs || w.stairs.x !== s.sx || w.stairs.y !== s.sy || !w.stairsOpen) {
@@ -14324,6 +14412,12 @@
         return true;
       }
       const sameTile = w.tile.x === s.standX && w.tile.y === s.standY;
+      const d1FightPause = s.label === "d1 descend" && (!!w.inCombat || this.d1MeleeFoeAdjacent(w));
+      if (!d1FightPause) {
+        s.sameRun = sameTile ? ((_a = s.sameRun) != null ? _a : 0) + 1 : 0;
+      } else if (!sameTile) {
+        s.sameRun = 0;
+      }
       if (sameTile) s.standHits++;
       else {
         const dist = Math.max(Math.abs(w.tile.x - s.sx), Math.abs(w.tile.y - s.sy));
@@ -14333,7 +14427,7 @@
         s.standY = w.tile.y;
       }
       const aged = this.runTicks - s.started;
-      const d1DescendStall = s.label === "d1 descend" && (sameTile && s.standHits >= 24);
+      const d1DescendStall = s.label === "d1 descend" && !d1FightPause && (sameTile && ((_b = s.sameRun) != null ? _b : 0) >= 24);
       const otherStall = s.label !== "d1 descend" && (s.standHits >= 12 || aged >= 100);
       if (d1DescendStall || otherStall) {
         this.noteGatherFail(s.sx, s.sy);
