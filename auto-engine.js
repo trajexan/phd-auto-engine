@@ -1,4 +1,4 @@
-/* phd auto-engine d64 — pull via GET /api/auto-engine */
+/* phd auto-engine d65 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d64";
+  var AUTO_ENGINE_VERSION = "d65";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -14397,6 +14397,11 @@
         return false;
       }
       if (w.tile.x === s.sx && w.tile.y === s.sy) {
+        if (s.standX !== s.sx || s.standY !== s.sy) {
+          s.standHits = 0;
+          s.standX = s.sx;
+          s.standY = s.sy;
+        }
         s.standHits++;
         if (s.standHits >= 10) {
           this.noteGatherFail(s.sx, s.sy);
