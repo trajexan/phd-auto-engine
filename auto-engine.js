@@ -1,4 +1,4 @@
-/* phd auto-engine d65 — pull via GET /api/auto-engine */
+/* phd auto-engine d66 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d65";
+  var AUTO_ENGINE_VERSION = "d66";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2346,6 +2346,9 @@
       const kit = this.d1KitStatus(host, w);
       this.d1NotePlateHunt(w, kit);
       if (kit.ready && this.d1Runecraft(host, w, stance)) return true;
+      if ((kit.ready || this.d1FloorKitGiveUp) && this.d1TryDescend(host, w, stance)) {
+        return true;
+      }
       if (this.d1BootstrapTools(host, w, stance, kit, foodShort)) return true;
       if (this.d1EquipMeleeUpgrades(host, w, stance, kit)) return true;
       if (!kit.ready && !this.d1FloorKitGiveUp && this.d1SmithFloorKit(host, w, stance, kit)) return true;
