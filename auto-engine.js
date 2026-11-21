@@ -1,4 +1,4 @@
-/* phd auto-engine d68 — pull via GET /api/auto-engine */
+/* phd auto-engine d69 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d68";
+  var AUTO_ENGINE_VERSION = "d69";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2185,6 +2185,7 @@
           }
         }
       }
+      if (this.d1CloseRangedBoss(host, w, stance)) return;
       {
         const noFood = w.food <= 0 && w.healReserve <= 0;
         if (!noFood && this.tryFunnel1v1(host, w, stance)) return;
@@ -3164,6 +3165,27 @@
         return true;
       }
       return false;
+    }
+    /**
+     * d69: when a kitted life is on a sealed-stairs boss floor and a
+     * ranged boss / gateBoss / alpha is already in vision, close
+     * (engage + walkTo) instead of chopping, mining, funneling, or
+     * hub-kiting in front of it. Adjacent: engage only. Does not run
+     * on F1 or with stairs open, so a still-safe room can still be
+     * worked. Does not require d1ForgeDone — that reset after a
+     * descent was why chop/mine beat d1PushBoss.
+     */
+    d1CloseRangedBoss(host, w, stance) {
+      if (w.stairsOpen) return false;
+      if (!w.bossFloor) return false;
+      if (!this.d1KitStatus(host, w).ready) return false;
+      const boss = w.foes.filter((f) => f.alive && f.lit && !!f.ranged && (f.boss || f.gateBoss || f.alpha)).sort((a, b) => a.dist - b.dist)[0];
+      if (!boss) return false;
+      host.engage(boss);
+      if (boss.dist > 1) host.walkTo(boss.x, boss.y);
+      this.setStatus(host, w, stance, "d1 boss close");
+      this.cool = 1;
+      return true;
     }
     d1PushBoss(host, w, stance) {
       if (w.stairsOpen) return false;
