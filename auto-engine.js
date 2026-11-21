@@ -1,4 +1,4 @@
-/* phd auto-engine d69 — pull via GET /api/auto-engine */
+/* phd auto-engine d70 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d69";
+  var AUTO_ENGINE_VERSION = "d70";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2310,6 +2310,9 @@
       const weakFirst = !(w.kitReady || w.hasMetalWeapon && w.hasArmour);
       if (!holdThroughLethal && this.evMobSudden(host, w, stance, weakFirst)) return true;
       if (!holdThroughLethal && this.evMobApproach(host, w, stance, weakFirst)) return true;
+      if (!holdThroughLethal && this.d1KitStatus(host, w).ready && this.d1PushBoss(host, w, stance)) {
+        return true;
+      }
       if (w.unspentPoints > 0) host.spendPoints();
       if (w.hp < w.maxHp * 0.85) {
         const spendFood = w.food > D1_FOOD_KEEP || w.hp < w.maxHp * 0.6;
@@ -3187,11 +3190,37 @@
       this.cool = 1;
       return true;
     }
+    /**
+     * d70: fight-or-back-off when a kitted life is already in the
+     * evLethal HP band, has no food/heal, and a lit boss is in vision
+     * on a sealed floor. Walk to up-stairs instead of chopping or
+     * hub-kiting in front of it. Returns false when the gate does not
+     * apply so the caller can fall through to its existing kite.
+     */
+    d1LethalEscape(host, w, stance, status) {
+      if (!w.upStairs) return false;
+      if (w.stairsOpen) return false;
+      if (!w.bossFloor) return false;
+      if (!this.d1KitStatus(host, w).ready) return false;
+      const hpPct = w.maxHp > 0 ? w.hp / w.maxHp : 1;
+      if (hpPct > 0.35) return false;
+      if (w.food > 0 || w.healReserve > 0) return false;
+      const litBoss = w.foes.some(
+        (f) => f.alive && f.lit && (f.boss || f.gateBoss || f.alpha)
+      );
+      if (!litBoss) return false;
+      host.clearEngage();
+      host.walkTo(w.upStairs.x, w.upStairs.y);
+      this.setStatus(host, w, stance, status);
+      this.cool = 1;
+      return true;
+    }
     d1PushBoss(host, w, stance) {
       if (w.stairsOpen) return false;
       const boss = w.foes.filter((f) => f.alive && f.lit && (f.boss || f.gateBoss || f.alpha)).sort((a, b) => a.dist - b.dist)[0];
       if (!boss) return false;
       if (!this.outlookOk(host, w, boss, { allowThreat: true, minWinRate: 0.35 })) {
+        if (this.d1LethalEscape(host, w, stance, "d1 lethal escape")) return true;
         if (w.hub) host.walkTo(w.hub.x, w.hub.y);
         this.setStatus(host, w, stance, "d1 boss kite");
         this.cool = 1;
@@ -3925,6 +3954,7 @@
           return true;
         }
       }
+      if (this.d1LethalEscape(host, w, stance, "d1 lethal escape")) return true;
       this.setStatus1001(host, w, stance, "lethal kite");
       if (w.hub) host.walkTo(w.hub.x, w.hub.y);
       else if (w.explore) host.walkTo(w.explore.x, w.explore.y);
