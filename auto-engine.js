@@ -1,4 +1,4 @@
-/* phd auto-engine d70 — pull via GET /api/auto-engine */
+/* phd auto-engine d72 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d70";
+  var AUTO_ENGINE_VERSION = "d72";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2623,10 +2623,15 @@
           this.cool = 2;
           return true;
         }
-        if (w.oreCount >= kit.axeCost && anvil && this.walkToTile(host, anvil.x, anvil.y)) {
-          this.setStatus(host, w, stance, "d1 anvil battleaxe");
-          this.cool = 1;
-          return true;
+        if (w.oreCount >= kit.axeCost && anvil) {
+          if (this.walkToTile(host, anvil.x, anvil.y)) {
+            this.setStatus(host, w, stance, "d1 anvil battleaxe");
+            this.cool = 1;
+            return true;
+          }
+          if (!kit.canMakeAxe && !w.anvilNearby) {
+            dropNode(this.h1001.nodes, "anvil", w.depth, anvil.x, anvil.y);
+          }
         }
         if (w.oreCount < kit.axeCost && this.d1MineOre(host, w, stance)) return true;
       }
@@ -2638,10 +2643,15 @@
           this.cool = 2;
           return true;
         }
-        if (w.oreCount >= kit.plateCost && anvil && this.walkToTile(host, anvil.x, anvil.y)) {
-          this.setStatus(host, w, stance, "d1 anvil plate");
-          this.cool = 1;
-          return true;
+        if (w.oreCount >= kit.plateCost && anvil) {
+          if (this.walkToTile(host, anvil.x, anvil.y)) {
+            this.setStatus(host, w, stance, "d1 anvil plate");
+            this.cool = 1;
+            return true;
+          }
+          if (!kit.canMakePlate && !w.anvilNearby) {
+            dropNode(this.h1001.nodes, "anvil", w.depth, anvil.x, anvil.y);
+          }
         }
         if (w.oreCount < kit.plateCost && this.d1MineOre(host, w, stance)) return true;
       }
