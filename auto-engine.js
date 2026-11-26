@@ -1,4 +1,4 @@
-/* phd auto-engine d76 — pull via GET /api/auto-engine */
+/* phd auto-engine d77 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d76";
+  var AUTO_ENGINE_VERSION = "d77";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1392,6 +1392,8 @@
       __publicField(this, "d1MineStall", null);
       /** d76: pond we already started walking toward on this depth. */
       __publicField(this, "d1FishPondKeep", null);
+      /** d77: fire-chop tree we already started walking toward on this depth. */
+      __publicField(this, "d1FireTreeKeep", null);
       /** d27: resting for out-of-battle regen (pre-kit, no food). */
       __publicField(this, "d1Resting", false);
       /** d30: tile the rest started on; walk back to it if the host nudge steps off. */
@@ -2267,6 +2269,7 @@
       this.d1MineNoGain = null;
       this.d1MineStall = null;
       this.d1FishPondKeep = null;
+      this.d1FireTreeKeep = null;
       this.d1EquipLog = { weapon: [], armour: [] };
       this.d1EquipLatchUntil = { weapon: -1, armour: -1 };
       this.d1ShopFoodCalls = 0;
@@ -4959,15 +4962,21 @@
      * hatchet, return false so fish/explore/fund farm can run.
      */
     tryCookBagCookables(host, w, stance, statusLabel) {
-      var _a, _b, _c;
+      var _a, _b, _c, _d;
       if (!this.hasBagCookables(w)) return false;
       if (!this.cookOwed(w, stance)) return false;
       if (!w.hasFire && w.hasLogs) {
         host.lightFireOnce();
       } else if (!w.hasFire && !w.hasLogs) {
-        const tree = (_c = (_b = this.mem(w, "tree")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.tree) != null ? _c : null;
+        const seenOrMem = (_c = (_b = this.mem(w, "tree")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.tree) != null ? _c : null;
+        const kept = this.d1FireTreeKeep;
+        const keepLive = !!(kept && kept.depth === w.depth && !this.isGatherTileBlocked(kept.x, kept.y));
+        if (kept && kept.depth === w.depth && !keepLive) this.d1FireTreeKeep = null;
+        const tree = (_d = keepLive ? { x: kept.x, y: kept.y } : null) != null ? _d : seenOrMem;
         if (tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y)) {
           if (this.walkToTile(host, tree.x, tree.y)) {
+            this.d1FireTreeKeep = { depth: w.depth, x: tree.x, y: tree.y };
+            this.lastTree = { depth: w.depth, x: tree.x, y: tree.y };
             this.setStatus1001(host, w, stance, "chop for fire");
             return true;
           }
@@ -4982,6 +4991,7 @@
           host.clearEngage();
           const attempt = host.gatherAt(tree.x, tree.y);
           if (attempt.ok || attempt.ok === false && /^enroute$/i.test(attempt.reason || "")) {
+            this.d1FireTreeKeep = { depth: w.depth, x: tree.x, y: tree.y };
             this.lastTree = { depth: w.depth, x: tree.x, y: tree.y };
             this.setStatus1001(host, w, stance, "chop for fire");
             this.cool = 2;
