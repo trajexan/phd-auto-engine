@@ -1,4 +1,4 @@
-/* phd auto-engine d74 — pull via GET /api/auto-engine */
+/* phd auto-engine d75 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d74";
+  var AUTO_ENGINE_VERSION = "d75";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2765,16 +2765,18 @@
       );
     }
     d1MineOre(host, w, stance) {
-      var _a, _b, _c, _d, _e, _f, _g;
+      var _a, _b, _c, _d, _e, _f, _g, _h;
       if (!host.hasTool("pickaxe")) return false;
       const seenRock = (_b = (_a = w.seen) == null ? void 0 : _a.rock) != null ? _b : null;
       const memRock = this.mem(w, "rock");
       const usable = (t) => !!t && !this.isGatherTileBlocked(t.x, t.y) && !this.d1MineLevelGated.has(`${t.x},${t.y}`);
-      const rock = (_c = usable(seenRock) ? seenRock : null) != null ? _c : usable(memRock) ? memRock : null;
+      const stalled = this.d1MineStall;
+      const stallRock = stalled && stalled.depth === w.depth ? { x: stalled.x, y: stalled.y } : null;
+      const rock = (_d = (_c = usable(stallRock) ? stallRock : null) != null ? _c : usable(seenRock) ? seenRock : null) != null ? _d : usable(memRock) ? memRock : null;
       if (rock) {
         const cheb2 = Math.max(
-          Math.abs(((_e = (_d = w.tile) == null ? void 0 : _d.x) != null ? _e : 0) - rock.x),
-          Math.abs(((_g = (_f = w.tile) == null ? void 0 : _f.y) != null ? _g : 0) - rock.y)
+          Math.abs(((_f = (_e = w.tile) == null ? void 0 : _e.x) != null ? _f : 0) - rock.x),
+          Math.abs(((_h = (_g = w.tile) == null ? void 0 : _g.y) != null ? _h : 0) - rock.y)
         );
         const stallSame = (st) => !!st && st.depth === w.depth && st.x === rock.x && st.y === rock.y;
         const bumpStall = (progressCheb) => {
