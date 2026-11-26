@@ -1,4 +1,4 @@
-/* phd auto-engine d73 — pull via GET /api/auto-engine */
+/* phd auto-engine d74 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d73";
+  var AUTO_ENGINE_VERSION = "d74";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -2939,7 +2939,7 @@
       });
     }
     d1FundRodWithLog(host, w, stance) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
       if (this.canFundRodNow(w) || host.hasTool("rod")) return false;
       if (!host.hasTool("hatchet")) {
         const anvil = (_c = (_b = this.mem(w, "anvil")) != null ? _b : (_a = w.seen) == null ? void 0 : _a.anvil) != null ? _c : null;
@@ -2980,7 +2980,10 @@
         this.d1RodTreeStall = null;
         return false;
       }
-      const tree = (_g = (_f = this.mem(w, "tree")) != null ? _f : (_e = w.seen) == null ? void 0 : _e.tree) != null ? _g : null;
+      const seenOrMem = (_g = (_f = this.mem(w, "tree")) != null ? _f : (_e = w.seen) == null ? void 0 : _e.tree) != null ? _g : null;
+      const committed = this.d1RodTreeStall;
+      const commitLive = !!(committed && committed.depth === w.depth && !this.isGatherTileBlocked(committed.x, committed.y));
+      const tree = (_h = commitLive ? { x: committed.x, y: committed.y } : null) != null ? _h : seenOrMem;
       if (tree && !this.isGatherTileBlocked(tree.x, tree.y)) {
         const dist = cheb(w.tile.x, w.tile.y, tree.x, tree.y);
         if (dist <= 1) {
@@ -3014,7 +3017,7 @@
           } else {
             this.d1RodTreeStall = { depth: w.depth, x: tree.x, y: tree.y, bestDist: dist, noClose: 0 };
           }
-          const stuck = ((_i = (_h = this.d1RodTreeStall) == null ? void 0 : _h.noClose) != null ? _i : 0) >= 12;
+          const stuck = ((_j = (_i = this.d1RodTreeStall) == null ? void 0 : _i.noClose) != null ? _j : 0) >= 12;
           if (!stuck && this.walkToTile(host, tree.x, tree.y)) {
             this.setStatus(host, w, stance, "d1 chop for rod");
             this.cool = 1;
