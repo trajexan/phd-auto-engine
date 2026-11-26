@@ -1,4 +1,4 @@
-/* phd auto-engine d75 — pull via GET /api/auto-engine */
+/* phd auto-engine d76 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d75";
+  var AUTO_ENGINE_VERSION = "d76";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1390,6 +1390,8 @@
       __publicField(this, "d1MineNoGain", null);
       /** d22/d23: no-progress approach ticks on one rock (walk or enroute, not watched). */
       __publicField(this, "d1MineStall", null);
+      /** d76: pond we already started walking toward on this depth. */
+      __publicField(this, "d1FishPondKeep", null);
       /** d27: resting for out-of-battle regen (pre-kit, no food). */
       __publicField(this, "d1Resting", false);
       /** d30: tile the rest started on; walk back to it if the host nudge steps off. */
@@ -2264,6 +2266,7 @@
       this.d1PondHuntElapsed = 0;
       this.d1MineNoGain = null;
       this.d1MineStall = null;
+      this.d1FishPondKeep = null;
       this.d1EquipLog = { weapon: [], armour: [] };
       this.d1EquipLatchUntil = { weapon: -1, armour: -1 };
       this.d1ShopFoodCalls = 0;
@@ -3076,7 +3079,7 @@
       }
     }
     d1FishForHunger(host, w, stance) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
       if (w.food >= D1_FOOD_KEEP || stance.healRich) return false;
       const kitStairsOpen = this.d1KitStatus(host, w).ready && this.d1StairsOpen(w);
       if (!kitStairsOpen || w.hasFire || w.hasLogs) {
@@ -3088,7 +3091,13 @@
         const canChop = !!(tree && host.hasTool("hatchet") && !this.isGatherTileBlocked(tree.x, tree.y));
         if (!canChop || kitStairsOpen) return false;
       }
-      const pond = (_f = (_e = this.mem(w, "pond")) != null ? _e : (_d = w.seen) == null ? void 0 : _d.pond) != null ? _f : null;
+      const seenPond = (_e = (_d = w.seen) == null ? void 0 : _d.pond) != null ? _e : null;
+      const memPond = (_f = this.mem(w, "pond")) != null ? _f : seenPond;
+      const usablePond = (t) => !!t && !this.isGatherTileBlocked(t.x, t.y);
+      const kept = this.d1FishPondKeep;
+      const keepPond = kept && kept.depth === w.depth ? { x: kept.x, y: kept.y } : null;
+      if (keepPond && !usablePond(keepPond)) this.d1FishPondKeep = null;
+      const pond = (_g = usablePond(keepPond) ? keepPond : null) != null ? _g : memPond;
       if (this.d1KitStatus(host, w).ready && w.stairs && w.stairsOpen) {
         if (!pond || !host.hasTool("rod") || this.isGatherTileBlocked(pond.x, pond.y)) return false;
         if (this.d1KitFishDepth !== w.depth) {
@@ -3117,7 +3126,7 @@
           this.d1PondHuntTicks = 0;
           this.d1PondHuntElapsed = 0;
         }
-        const key = `${(_h = (_g = w.tile) == null ? void 0 : _g.x) != null ? _h : 0},${(_j = (_i = w.tile) == null ? void 0 : _i.y) != null ? _j : 0}`;
+        const key = `${(_i = (_h = w.tile) == null ? void 0 : _h.x) != null ? _i : 0},${(_k = (_j = w.tile) == null ? void 0 : _j.y) != null ? _k : 0}`;
         if (this.d1PondHuntTiles.has(key)) this.d1PondHuntNoNew += 1;
         else {
           this.d1PondHuntTiles.add(key);
@@ -3142,6 +3151,7 @@
         return false;
       }
       if (pond && this.walkToTile(host, pond.x, pond.y)) {
+        this.d1FishPondKeep = { depth: w.depth, x: pond.x, y: pond.y };
         this.setStatus(host, w, stance, "d1 find pond");
         this.cool = 1;
         return true;
@@ -3149,6 +3159,7 @@
       if (pond && !this.isGatherTileBlocked(pond.x, pond.y)) {
         const attempt = host.gatherAt(pond.x, pond.y);
         if (attempt.ok || attempt.ok === false && /^enroute$/i.test(attempt.reason)) {
+          this.d1FishPondKeep = { depth: w.depth, x: pond.x, y: pond.y };
           this.setStatus(host, w, stance, "d1 fish");
           this.cool = 2;
           return true;
