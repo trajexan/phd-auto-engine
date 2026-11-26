@@ -1,4 +1,4 @@
-/* phd auto-engine d72 — pull via GET /api/auto-engine */
+/* phd auto-engine d73 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d72";
+  var AUTO_ENGINE_VERSION = "d73";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -3231,7 +3231,25 @@
       if (!boss) return false;
       if (!this.outlookOk(host, w, boss, { allowThreat: true, minWinRate: 0.35 })) {
         if (this.d1LethalEscape(host, w, stance, "d1 lethal escape")) return true;
-        if (w.hub) host.walkTo(w.hub.x, w.hub.y);
+        const up = w.upStairs;
+        const hubIsExit = !!w.hub && !!up && w.hub.x === up.x && w.hub.y === up.y;
+        if (hubIsExit) {
+          const onExit = !!up && w.tile.x === up.x && w.tile.y === up.y;
+          if (onExit) {
+            const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+            for (const [dx, dy] of dirs) {
+              const x = w.tile.x + dx;
+              const y = w.tile.y + dy;
+              if (up && x === up.x && y === up.y) continue;
+              if (w.stairs && x === w.stairs.x && y === w.stairs.y) continue;
+              if (!host.isWalkable(x, y)) continue;
+              host.walkTo(x, y);
+              break;
+            }
+          }
+        } else if (w.hub) {
+          host.walkTo(w.hub.x, w.hub.y);
+        }
         this.setStatus(host, w, stance, "d1 boss kite");
         this.cool = 1;
         return true;
