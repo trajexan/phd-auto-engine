@@ -1,4 +1,4 @@
-/* phd auto-engine d78 — pull via GET /api/auto-engine */
+/* phd auto-engine d79 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d78";
+  var AUTO_ENGINE_VERSION = "d79";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1039,7 +1039,7 @@
     if (style === "ranged" || style === "magic") return true;
     return D1_STYLE_ID_RE.test(id);
   }
-  var D1_STYLE_ID_RE = /(?:^|_)(?:longbow|shortbow|bow|crossbow|darkbow|slingbow|wand|staff|robe|leather|throwingknives|shuriken|ninjastar|toktzring|staffofthedead|ancientstaff|tidebinderstaff|frostlatticerod|wizardcrook)$/i;
+  var D1_STYLE_ID_RE = /(?:^|_)(?:longbow|shortbow|bow|crossbow|darkbow|slingbow|wand|staff|robe|leather_body|dhide_body|splitbark_body|leather|throwingknives|shuriken|ninjastar|toktzring|staffofthedead|ancientstaff|tidebinderstaff|frostlatticerod|wizardcrook)$/i;
   function d1IsParkedSlot(slot) {
     return slot === "accessory" || slot === "cape" || slot === "hat" || slot === "offhand";
   }
