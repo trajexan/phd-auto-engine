@@ -1,4 +1,4 @@
-/* phd auto-engine d79 — pull via GET /api/auto-engine */
+/* phd auto-engine d81 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d79";
+  var AUTO_ENGINE_VERSION = "d81";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -1008,6 +1008,10 @@
   var D1_FLOOR_KIT_GIVEUP = 400;
   var D1_EXPLORE_COMMIT = 40;
   var D1_EXPLORE_STALL = 8;
+  var D1_COVER_HOLD_TICKS = 16;
+  var D1_COVER_HOLD_FRESH = 8;
+  var D1_COVER_HOLD_MAX_ARMS = 2;
+  var D1_COVER_HOLD_NEAR = 6;
   var D1_REST_BELOW = 0.6;
   var D1_REST_UNTIL = 0.9;
   var D1_REST_FOE_CLEAR = 6;
@@ -1289,6 +1293,13 @@
       __publicField(this, "d1ForgeDone", false);
       /** d57: last lit boss/gateBoss/alpha tile on this floor (cleared on floor change). */
       __publicField(this, "d1LastBoss", null);
+      /** d81: last foe evLethal actually acted on (for a post-LOS cover hold). */
+      __publicField(this, "d1LethalPress", null);
+      /** d81: in-progress cover hold after an evLethal LOS break on the find-pond walk. */
+      __publicField(this, "d1CoverHold", null);
+      /** d81: completed/armed holds at d1CoverHoldArmKey this floor. */
+      __publicField(this, "d1CoverHoldArmKey", "");
+      __publicField(this, "d1CoverHoldArmCount", 0);
       __publicField(this, "d1ForgeFailStreak", 0);
       /** d62: current-age plate hunt given up on this floor (reset on floor change). */
       __publicField(this, "d1FloorKitGiveUp", false);
@@ -2256,6 +2267,7 @@
       this.d1Floor = w.depth;
       this.d1ForgeDone = false;
       this.d1LastBoss = null;
+      this.d1ResetCoverHold();
       this.d1ForgeFailStreak = 0;
       this.d1FloorKitGiveUp = false;
       this.d1FloorKitHuntCalls = 0;
@@ -3120,6 +3132,7 @@
         this.d1PondHuntTicks = 0;
         this.d1PondHuntElapsed = 0;
       }
+      if (this.d1CoverHold && this.d1HoldCoverAfterLethal(host, w, stance)) return true;
       if (!pond && !w.pondKnown) {
         if (this.d1PondHuntDoneDepth === w.depth) return false;
         if (this.d1PondHuntDepth !== w.depth) {
@@ -3140,6 +3153,7 @@
           this.d1PondHuntDoneDepth = w.depth;
           return false;
         }
+        if ((w.explore || w.wander) && this.d1HoldCoverAfterLethal(host, w, stance)) return true;
         if (w.explore && this.walkToTile(host, w.explore.x, w.explore.y, 0)) {
           this.setStatus(host, w, stance, "d1 find pond");
           this.cool = 1;
@@ -3152,6 +3166,10 @@
           return true;
         }
         return false;
+      }
+      if (pond) {
+        const pondCheb = Math.max(Math.abs(w.tile.x - pond.x), Math.abs(w.tile.y - pond.y));
+        if (pondCheb > 1 && this.d1HoldCoverAfterLethal(host, w, stance)) return true;
       }
       if (pond && this.walkToTile(host, pond.x, pond.y)) {
         this.d1FishPondKeep = { depth: w.depth, x: pond.x, y: pond.y };
@@ -3942,6 +3960,108 @@
       this.setStatus1001(host, w, stance, `enroute ${stop.kind}`);
       return true;
     }
+    /** d81: drop a pending / in-progress lethal cover hold (floor change or release). */
+    d1ResetCoverHold() {
+      this.d1LethalPress = null;
+      this.d1CoverHold = null;
+      this.d1CoverHoldArmKey = "";
+      this.d1CoverHoldArmCount = 0;
+    }
+    /** d81: remember the foe evLethal is about to kite / cover / escape from. */
+    d1NoteLethalPress(w, foe) {
+      this.d1LethalPress = {
+        x: foe.x,
+        y: foe.y,
+        dist: foe.dist,
+        tick: this.runTicks,
+        depth: w.depth
+      };
+    }
+    /** Lit pressing foe — same predicate evLethal uses to stay in the lethal lane. */
+    d1LethalPressingFoe(w) {
+      return w.foes.filter(
+        (f) => f.alive && f.lit && (f.danger === "deadly" || f.danger === "threat" && f.dist <= 3 || f.dist <= 1 && f.danger !== "prey")
+      ).sort((a, b) => a.dist - b.dist)[0];
+    }
+    /**
+     * d81: true when the hero's current tile is cover vs the last press tile
+     * (LOS broken). Without hasLos, require a door/alcove/corner choke.
+     */
+    d1CoverLosBroken(host, hx, hy, foeX, foeY) {
+      if (typeof host.hasLos === "function") return !host.hasLos(hx, hy, foeX, foeY);
+      return this.chokeScore(host, hx, hy) >= 2;
+    }
+    /** d81: stay on the cover tile; cancel a pending find-pond walk. */
+    d1StayInCover(host, w, stance) {
+      const h = this.d1CoverHold;
+      if (!h) return false;
+      host.clearEngage();
+      host.clearWalk();
+      if (w.tile.x !== h.x || w.tile.y !== h.y) {
+        if (host.isWalkable(h.x, h.y)) host.walkTo(h.x, h.y);
+      }
+      this.setStatus(host, w, stance, "d1 cover hold");
+      this.stuckTicks = 0;
+      this.cool = 0;
+      return true;
+    }
+    /**
+     * d81: after evLethal has just acted and the hero is in cover vs that
+     * foe (LOS broken at a door/alcove), hold still instead of walking a
+     * d1 find pond path back into them. Only called from d1FishForHunger
+     * when that path would walk (or is already holding on that path).
+     * A lit pressing foe yields to evLethal (evLethal runs first in tickD1).
+     * Caps under the near-stuck window so the wait cannot hang or watchdog.
+     */
+    d1HoldCoverAfterLethal(host, w, stance) {
+      if (this.d1LethalPressingFoe(w)) {
+        this.d1CoverHold = null;
+        return false;
+      }
+      if (this.d1CoverHold) {
+        if (w.depth !== this.d1CoverHold.depth) {
+          this.d1ResetCoverHold();
+          return false;
+        }
+        if (this.runTicks - this.d1CoverHold.startTick >= D1_COVER_HOLD_TICKS) {
+          this.d1LethalPress = null;
+          this.d1CoverHold = null;
+          return false;
+        }
+        return this.d1StayInCover(host, w, stance);
+      }
+      const press = this.d1LethalPress;
+      if (!press) return false;
+      if (w.depth !== press.depth) {
+        this.d1LethalPress = null;
+        return false;
+      }
+      if (this.runTicks - press.tick > D1_COVER_HOLD_FRESH) return false;
+      const hpPct = w.maxHp > 0 ? w.hp / w.maxHp : 1;
+      if (hpPct > 0.35) return false;
+      const hx = w.tile.x;
+      const hy = w.tile.y;
+      const near = Math.max(Math.abs(hx - press.x), Math.abs(hy - press.y));
+      if (near > D1_COVER_HOLD_NEAR) return false;
+      if (!this.d1CoverLosBroken(host, hx, hy, press.x, press.y)) return false;
+      const key = `${w.depth}:${hx},${hy}`;
+      if (key !== this.d1CoverHoldArmKey) {
+        this.d1CoverHoldArmKey = key;
+        this.d1CoverHoldArmCount = 0;
+      }
+      if (this.d1CoverHoldArmCount >= D1_COVER_HOLD_MAX_ARMS) return false;
+      this.d1CoverHoldArmCount += 1;
+      this.d1CoverHold = {
+        x: hx,
+        y: hy,
+        foeX: press.x,
+        foeY: press.y,
+        foeDist: press.dist,
+        startTick: this.runTicks,
+        depth: w.depth
+      };
+      return this.d1StayInCover(host, w, stance);
+    }
     evLethal(host, w, stance) {
       var _a, _b, _c, _d;
       const hpPct = w.maxHp > 0 ? w.hp / w.maxHp : 1;
@@ -3975,6 +4095,7 @@
         }
       }
       if (hpPct > 0.35 && !(hpPct < 0.55 && w.food > 0)) return false;
+      if (pressFoe) this.d1NoteLethalPress(w, pressFoe);
       this.h1001.topEvent = "lethal";
       host.clearEngage();
       if (w.food > 0 || w.healReserve > 0) {
