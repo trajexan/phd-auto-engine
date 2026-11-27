@@ -1,4 +1,4 @@
-/* phd auto-engine d77 — pull via GET /api/auto-engine */
+/* phd auto-engine d78 — pull via GET /api/auto-engine */
 "use strict";
 (() => {
   var __defProp = Object.defineProperty;
@@ -949,7 +949,7 @@
   }
 
   // src/systems/AutoplayDriver.ts
-  var AUTO_ENGINE_VERSION = "d77";
+  var AUTO_ENGINE_VERSION = "d78";
   function clamp01(n) {
     return Math.max(0, Math.min(1, n));
   }
@@ -14378,9 +14378,86 @@
       return !!w.stairs && w.stairsOpen && !this.isGatherTileBlocked(w.stairs.x, w.stairs.y);
     }
     /** Walk to open kit-ready stairs even if FOV has flickered unlit, or food is short. */
+    /**
+     * 4-dir walk tiles from the hero to a goal (excluding the start),
+     * matching host walkTo / findPath orthogonal steps via isWalkable.
+     * Used to see whether a foe already stands on a d1-descend stairs walk.
+     */
+    d1WalkPathTiles(host, sx, sy, tx, ty) {
+      var _a;
+      if (sx === tx && sy === ty) return [];
+      const minX = Math.min(sx, tx) - 48;
+      const maxX = Math.max(sx, tx) + 48;
+      const minY = Math.min(sy, ty) - 48;
+      const maxY = Math.max(sy, ty) + 48;
+      const dirs = [
+        [0, -1],
+        [1, 0],
+        [0, 1],
+        [-1, 0]
+      ];
+      const key = (x, y) => `${x},${y}`;
+      const prev = /* @__PURE__ */ new Map();
+      prev.set(key(sx, sy), null);
+      const queue = [{ x: sx, y: sy }];
+      for (let head = 0; head < queue.length && prev.size <= 4096; head++) {
+        const cur = queue[head];
+        for (const [dx, dy] of dirs) {
+          const nx = cur.x + dx;
+          const ny = cur.y + dy;
+          if (nx < minX || ny < minY || nx > maxX || ny > maxY) continue;
+          const nk = key(nx, ny);
+          if (prev.has(nk)) continue;
+          const isGoal = nx === tx && ny === ty;
+          if (!isGoal && !host.isWalkable(nx, ny)) continue;
+          prev.set(nk, key(cur.x, cur.y));
+          if (isGoal) {
+            const path = [{ x: nx, y: ny }];
+            let pk = key(cur.x, cur.y);
+            while (pk && pk !== key(sx, sy)) {
+              const [px, py] = pk.split(",").map(Number);
+              path.push({ x: px, y: py });
+              pk = (_a = prev.get(pk)) != null ? _a : null;
+            }
+            path.reverse();
+            return path;
+          }
+          queue.push({ x: nx, y: ny });
+        }
+      }
+      return null;
+    }
+    /**
+     * d78: a lit non-prey foe already standing on the current stairs walk
+     * (path tiles / next step). Not "any lit foe in vision" and not a
+     * foe that is merely closer to the stairs.
+     */
+    d1LitNonPreyFoeOnWalk(host, w, tx, ty) {
+      const path = this.d1WalkPathTiles(host, w.tile.x, w.tile.y, tx, ty);
+      if (!path || !path.length) return null;
+      const on = new Set(path.map((p) => `${p.x},${p.y}`));
+      let best = null;
+      for (const f of w.foes) {
+        if (!f.alive || !f.lit || f.danger === "prey") continue;
+        if (!on.has(`${f.x},${f.y}`)) continue;
+        if (!best || f.dist < best.dist) best = f;
+      }
+      return best;
+    }
+    /** d78: pin a foe already on the in-progress d1-descend stairs walk. */
+    d1EngageFoeOnDescendWalk(host, w, stance) {
+      if (!w.stairs) return false;
+      const foe = this.d1LitNonPreyFoeOnWalk(host, w, w.stairs.x, w.stairs.y);
+      if (!foe) return false;
+      host.engage(foe);
+      this.setStatus(host, w, stance, "d1 descend engage");
+      this.cool = 1;
+      return true;
+    }
     d1TryDescend(host, w, stance) {
       if (!this.d1StairsOpen(w) || !w.stairs) return false;
       this.markStairsStrive("d1 descend", w);
+      if (this.d1EngageFoeOnDescendWalk(host, w, stance)) return true;
       host.clearEngage();
       host.walkTo(w.stairs.x, w.stairs.y);
       this.setStatus(host, w, stance, "d1 descend");
@@ -14598,6 +14675,9 @@
         this.setStatus(host, w, stance, "stairs soft-block");
         this.cool = 1;
         return false;
+      }
+      if (s.label === "d1 descend" && this.d1EngageFoeOnDescendWalk(host, w, stance)) {
+        return true;
       }
       host.clearEngage();
       host.walkTo(s.sx, s.sy);
